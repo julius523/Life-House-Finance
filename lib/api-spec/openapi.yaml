@@ -3,20 +3,38 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Life House Reentry Finance Portal API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: dashboard
+    description: Dashboard and summary operations
+  - name: expenses
+    description: Expense claims and reimbursements
+  - name: vendors
+    description: Vendor management
+  - name: bills
+    description: Vendor bills and payables
+  - name: receipts
+    description: Receipt tracking and document management
+  - name: transactions
+    description: Bank transactions and reconciliation
+  - name: programs
+    description: Programs, grants, funds, and sites
+  - name: approvals
+    description: Approval workflows
+  - name: monthEnd
+    description: Month-end close checklists
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +42,825 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get overall financial dashboard summary
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/recent-activity:
+    get:
+      operationId: getRecentActivity
+      tags: [dashboard]
+      summary: Recent financial activity feed
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+
+  /dashboard/spending-by-program:
+    get:
+      operationId: getSpendingByProgram
+      tags: [dashboard]
+      summary: Spending breakdown by program/grant/fund/site
+      responses:
+        "200":
+          description: Spending by program
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SpendingByDimension"
+
+  /dashboard/pending-approvals-count:
+    get:
+      operationId: getPendingApprovalsCount
+      tags: [dashboard]
+      summary: Count of items pending approval
+      responses:
+        "200":
+          description: Pending approvals count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingApprovalsCount"
+
+  /expenses:
+    get:
+      operationId: listExpenses
+      tags: [expenses]
+      summary: List expense claims
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, submitted, approved, rejected, reimbursed]
+        - name: programId
+          in: query
+          schema:
+            type: integer
+        - name: submittedBy
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: List of expense claims
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseListResponse"
+    post:
+      operationId: createExpense
+      tags: [expenses]
+      summary: Create a new expense claim
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExpenseBody"
+      responses:
+        "201":
+          description: Created expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
+  /expenses/{id}:
+    get:
+      operationId: getExpense
+      tags: [expenses]
+      summary: Get expense by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Expense detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+    put:
+      operationId: updateExpense
+      tags: [expenses]
+      summary: Update an expense claim
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateExpenseBody"
+      responses:
+        "200":
+          description: Updated expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+    delete:
+      operationId: deleteExpense
+      tags: [expenses]
+      summary: Delete an expense claim (draft only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /expenses/{id}/approve:
+    post:
+      operationId: approveExpense
+      tags: [expenses]
+      summary: Approve an expense claim
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalActionBody"
+      responses:
+        "200":
+          description: Updated expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
+  /expenses/{id}/reject:
+    post:
+      operationId: rejectExpense
+      tags: [expenses]
+      summary: Reject an expense claim
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectionBody"
+      responses:
+        "200":
+          description: Updated expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
+  /vendors:
+    get:
+      operationId: listVendors
+      tags: [vendors]
+      summary: List vendors
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of vendors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Vendor"
+    post:
+      operationId: createVendor
+      tags: [vendors]
+      summary: Create a new vendor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVendorBody"
+      responses:
+        "201":
+          description: Created vendor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+
+  /vendors/{id}:
+    get:
+      operationId: getVendor
+      tags: [vendors]
+      summary: Get vendor by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Vendor detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+    put:
+      operationId: updateVendor
+      tags: [vendors]
+      summary: Update a vendor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVendorBody"
+      responses:
+        "200":
+          description: Updated vendor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+
+  /bills:
+    get:
+      operationId: listBills
+      tags: [bills]
+      summary: List vendor bills
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, submitted, approved, paid, overdue]
+        - name: vendorId
+          in: query
+          schema:
+            type: integer
+        - name: programId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of bills
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Bill"
+    post:
+      operationId: createBill
+      tags: [bills]
+      summary: Create a vendor bill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBillBody"
+      responses:
+        "201":
+          description: Created bill
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bill"
+
+  /bills/{id}:
+    get:
+      operationId: getBill
+      tags: [bills]
+      summary: Get bill by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Bill detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bill"
+    put:
+      operationId: updateBill
+      tags: [bills]
+      summary: Update a bill
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBillBody"
+      responses:
+        "200":
+          description: Updated bill
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bill"
+
+  /bills/{id}/approve:
+    post:
+      operationId: approveBill
+      tags: [bills]
+      summary: Approve a bill
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalActionBody"
+      responses:
+        "200":
+          description: Updated bill
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bill"
+
+  /receipts:
+    get:
+      operationId: listReceipts
+      tags: [receipts]
+      summary: List receipts and documents
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: vendorId
+          in: query
+          schema:
+            type: integer
+        - name: linked
+          in: query
+          description: Filter by whether the receipt is linked to an expense/bill
+          schema:
+            type: boolean
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        "200":
+          description: List of receipts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiptListResponse"
+    post:
+      operationId: createReceipt
+      tags: [receipts]
+      summary: Upload and create a receipt record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReceiptBody"
+      responses:
+        "201":
+          description: Created receipt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+
+  /receipts/{id}:
+    get:
+      operationId: getReceipt
+      tags: [receipts]
+      summary: Get receipt by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Receipt detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+    delete:
+      operationId: deleteReceipt
+      tags: [receipts]
+      summary: Delete a receipt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /receipts/missing-report:
+    get:
+      operationId: getMissingReceiptsReport
+      tags: [receipts]
+      summary: Get expenses missing receipts
+      responses:
+        "200":
+          description: Missing receipts report
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MissingReceiptItem"
+
+  /transactions:
+    get:
+      operationId: listTransactions
+      tags: [transactions]
+      summary: List bank transactions
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [unmatched, matched, reconciled]
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        "200":
+          description: List of transactions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionListResponse"
+    post:
+      operationId: createTransaction
+      tags: [transactions]
+      summary: Manually create or import a transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTransactionBody"
+      responses:
+        "201":
+          description: Created transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
+
+  /transactions/{id}:
+    get:
+      operationId: getTransaction
+      tags: [transactions]
+      summary: Get transaction by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Transaction detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
+    put:
+      operationId: updateTransaction
+      tags: [transactions]
+      summary: Update transaction (match, reconcile)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTransactionBody"
+      responses:
+        "200":
+          description: Updated transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
+
+  /transactions/reconciliation-summary:
+    get:
+      operationId: getReconciliationSummary
+      tags: [transactions]
+      summary: Monthly reconciliation summary
+      parameters:
+        - name: month
+          in: query
+          required: true
+          schema:
+            type: string
+            description: YYYY-MM format
+      responses:
+        "200":
+          description: Reconciliation summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationSummary"
+
+  /programs:
+    get:
+      operationId: listPrograms
+      tags: [programs]
+      summary: List programs, grants, funds, sites
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [program, grant, fund, site, department]
+      responses:
+        "200":
+          description: List of programs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Program"
+    post:
+      operationId: createProgram
+      tags: [programs]
+      summary: Create a program/grant/fund/site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProgramBody"
+      responses:
+        "201":
+          description: Created program
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+
+  /programs/{id}:
+    get:
+      operationId: getProgram
+      tags: [programs]
+      summary: Get program by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Program detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+    put:
+      operationId: updateProgram
+      tags: [programs]
+      summary: Update a program
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProgramBody"
+      responses:
+        "200":
+          description: Updated program
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+
+  /programs/{id}/spending:
+    get:
+      operationId: getProgramSpending
+      tags: [programs]
+      summary: Spending report for a specific program
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: fiscalYear
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Program spending report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgramSpendingReport"
+
+  /approvals:
+    get:
+      operationId: listApprovals
+      tags: [approvals]
+      summary: List pending approvals
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [expense, bill]
+        - name: approver
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of approval queue items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApprovalQueueItem"
+
+  /month-end:
+    get:
+      operationId: listMonthEndChecklists
+      tags: [monthEnd]
+      summary: List month-end close checklists
+      responses:
+        "200":
+          description: Month-end checklists
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MonthEndChecklist"
+    post:
+      operationId: createMonthEndChecklist
+      tags: [monthEnd]
+      summary: Create a new month-end checklist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMonthEndChecklistBody"
+      responses:
+        "201":
+          description: Created checklist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonthEndChecklist"
+
+  /month-end/{id}:
+    get:
+      operationId: getMonthEndChecklist
+      tags: [monthEnd]
+      summary: Get month-end checklist by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Checklist detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonthEndChecklist"
+    put:
+      operationId: updateMonthEndChecklist
+      tags: [monthEnd]
+      summary: Update month-end checklist (mark items complete)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMonthEndChecklistBody"
+      responses:
+        "200":
+          description: Updated checklist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonthEndChecklist"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +871,851 @@ components:
       required:
         - status
 
+    DashboardSummary:
+      type: object
+      properties:
+        totalExpensesPending:
+          type: number
+        totalExpensesThisMonth:
+          type: number
+        totalBillsOverdue:
+          type: number
+        totalBillsDueThisMonth:
+          type: number
+        unmatchedTransactions:
+          type: integer
+        pendingApprovalsCount:
+          type: integer
+        totalVendors:
+          type: integer
+        totalPrograms:
+          type: integer
+        cashBalance:
+          type: number
+        monthlyBurnRate:
+          type: number
+      required:
+        - totalExpensesPending
+        - totalExpensesThisMonth
+        - totalBillsOverdue
+        - totalBillsDueThisMonth
+        - unmatchedTransactions
+        - pendingApprovalsCount
+        - totalVendors
+        - totalPrograms
+        - cashBalance
+        - monthlyBurnRate
+
+    ActivityItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [expense_submitted, expense_approved, expense_rejected, bill_created, bill_paid, receipt_uploaded, transaction_imported, reconciliation_completed]
+        description:
+          type: string
+        actor:
+          type: string
+        amount:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+        referenceId:
+          type: integer
+        referenceType:
+          type: string
+      required:
+        - id
+        - type
+        - description
+        - actor
+        - createdAt
+
+    SpendingByDimension:
+      type: object
+      properties:
+        programId:
+          type: integer
+        programName:
+          type: string
+        programType:
+          type: string
+        totalAmount:
+          type: number
+        budgetAmount:
+          type: number
+        percentUsed:
+          type: number
+      required:
+        - programId
+        - programName
+        - programType
+        - totalAmount
+
+    PendingApprovalsCount:
+      type: object
+      properties:
+        expenses:
+          type: integer
+        bills:
+          type: integer
+        total:
+          type: integer
+      required:
+        - expenses
+        - bills
+        - total
+
+    Expense:
+      type: object
+      properties:
+        id:
+          type: integer
+        submittedBy:
+          type: string
+        submittedByEmail:
+          type: string
+        expenseDate:
+          type: string
+          format: date
+        merchant:
+          type: string
+        description:
+          type: string
+        amount:
+          type: number
+        paymentMethod:
+          type: string
+          enum: [cash, check, credit_card, debit_card, bank_transfer, other]
+        programId:
+          type: integer
+        programName:
+          type: string
+        status:
+          type: string
+          enum: [draft, submitted, approved, rejected, reimbursed]
+        managerApprovedBy:
+          type: string
+        financeApprovedBy:
+          type: string
+        rejectionReason:
+          type: string
+        reimbursedDate:
+          type: string
+          format: date
+        receiptIds:
+          type: array
+          items:
+            type: integer
+        accountingEntryRef:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - submittedBy
+        - expenseDate
+        - merchant
+        - description
+        - amount
+        - paymentMethod
+        - status
+        - createdAt
+
+    ExpenseListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Expense"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+      required:
+        - items
+        - total
+        - page
+        - pageSize
+
+    CreateExpenseBody:
+      type: object
+      properties:
+        submittedBy:
+          type: string
+        submittedByEmail:
+          type: string
+        expenseDate:
+          type: string
+          format: date
+        merchant:
+          type: string
+        description:
+          type: string
+        amount:
+          type: number
+        paymentMethod:
+          type: string
+          enum: [cash, check, credit_card, debit_card, bank_transfer, other]
+        programId:
+          type: integer
+        receiptIds:
+          type: array
+          items:
+            type: integer
+      required:
+        - submittedBy
+        - expenseDate
+        - merchant
+        - description
+        - amount
+        - paymentMethod
+
+    UpdateExpenseBody:
+      type: object
+      properties:
+        merchant:
+          type: string
+        description:
+          type: string
+        amount:
+          type: number
+        expenseDate:
+          type: string
+          format: date
+        paymentMethod:
+          type: string
+          enum: [cash, check, credit_card, debit_card, bank_transfer, other]
+        programId:
+          type: integer
+        receiptIds:
+          type: array
+          items:
+            type: integer
+        status:
+          type: string
+          enum: [draft, submitted, approved, rejected, reimbursed]
+
+    ApprovalActionBody:
+      type: object
+      properties:
+        approvedBy:
+          type: string
+        notes:
+          type: string
+      required:
+        - approvedBy
+
+    RejectionBody:
+      type: object
+      properties:
+        rejectedBy:
+          type: string
+        reason:
+          type: string
+      required:
+        - rejectedBy
+        - reason
+
+    Vendor:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        contactName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        category:
+          type: string
+        taxId:
+          type: string
+        paymentTerms:
+          type: string
+        isActive:
+          type: boolean
+        totalSpend:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - isActive
+        - createdAt
+
+    CreateVendorBody:
+      type: object
+      properties:
+        name:
+          type: string
+        contactName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        category:
+          type: string
+        taxId:
+          type: string
+        paymentTerms:
+          type: string
+      required:
+        - name
+
+    Bill:
+      type: object
+      properties:
+        id:
+          type: integer
+        vendorId:
+          type: integer
+        vendorName:
+          type: string
+        invoiceNumber:
+          type: string
+        invoiceDate:
+          type: string
+          format: date
+        dueDate:
+          type: string
+          format: date
+        amount:
+          type: number
+        description:
+          type: string
+        programId:
+          type: integer
+        programName:
+          type: string
+        status:
+          type: string
+          enum: [draft, submitted, approved, paid, overdue]
+        approvedBy:
+          type: string
+        paidDate:
+          type: string
+          format: date
+        receiptIds:
+          type: array
+          items:
+            type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - vendorId
+        - vendorName
+        - dueDate
+        - amount
+        - status
+        - createdAt
+
+    CreateBillBody:
+      type: object
+      properties:
+        vendorId:
+          type: integer
+        invoiceNumber:
+          type: string
+        invoiceDate:
+          type: string
+          format: date
+        dueDate:
+          type: string
+          format: date
+        amount:
+          type: number
+        description:
+          type: string
+        programId:
+          type: integer
+        receiptIds:
+          type: array
+          items:
+            type: integer
+      required:
+        - vendorId
+        - dueDate
+        - amount
+
+    Receipt:
+      type: object
+      properties:
+        id:
+          type: integer
+        fileName:
+          type: string
+        fileType:
+          type: string
+        fileUrl:
+          type: string
+        ocrText:
+          type: string
+        vendorId:
+          type: integer
+        vendorName:
+          type: string
+        amount:
+          type: number
+        receiptDate:
+          type: string
+          format: date
+        tags:
+          type: array
+          items:
+            type: string
+        linkedExpenseId:
+          type: integer
+        linkedBillId:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - fileName
+        - createdAt
+
+    ReceiptListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Receipt"
+        total:
+          type: integer
+        page:
+          type: integer
+      required:
+        - items
+        - total
+        - page
+
+    CreateReceiptBody:
+      type: object
+      properties:
+        fileName:
+          type: string
+        fileType:
+          type: string
+        fileUrl:
+          type: string
+        ocrText:
+          type: string
+        vendorId:
+          type: integer
+        amount:
+          type: number
+        receiptDate:
+          type: string
+          format: date
+        tags:
+          type: array
+          items:
+            type: string
+      required:
+        - fileName
+
+    MissingReceiptItem:
+      type: object
+      properties:
+        expenseId:
+          type: integer
+        submittedBy:
+          type: string
+        merchant:
+          type: string
+        amount:
+          type: number
+        expenseDate:
+          type: string
+          format: date
+        daysSinceSubmission:
+          type: integer
+      required:
+        - expenseId
+        - submittedBy
+        - merchant
+        - amount
+        - expenseDate
+        - daysSinceSubmission
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: integer
+        externalId:
+          type: string
+        bankAccountId:
+          type: integer
+        bankAccountName:
+          type: string
+        transactionDate:
+          type: string
+          format: date
+        description:
+          type: string
+        amount:
+          type: number
+        type:
+          type: string
+          enum: [debit, credit]
+        status:
+          type: string
+          enum: [unmatched, matched, reconciled]
+        matchedExpenseId:
+          type: integer
+        matchedBillId:
+          type: integer
+        notes:
+          type: string
+        importedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - transactionDate
+        - description
+        - amount
+        - type
+        - status
+        - importedAt
+
+    TransactionListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        total:
+          type: integer
+        page:
+          type: integer
+      required:
+        - items
+        - total
+        - page
+
+    CreateTransactionBody:
+      type: object
+      properties:
+        externalId:
+          type: string
+        bankAccountId:
+          type: integer
+        transactionDate:
+          type: string
+          format: date
+        description:
+          type: string
+        amount:
+          type: number
+        type:
+          type: string
+          enum: [debit, credit]
+        notes:
+          type: string
+      required:
+        - transactionDate
+        - description
+        - amount
+        - type
+
+    UpdateTransactionBody:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [unmatched, matched, reconciled]
+        matchedExpenseId:
+          type: integer
+        matchedBillId:
+          type: integer
+        notes:
+          type: string
+
+    ReconciliationSummary:
+      type: object
+      properties:
+        month:
+          type: string
+        totalTransactions:
+          type: integer
+        reconciled:
+          type: integer
+        matched:
+          type: integer
+        unmatched:
+          type: integer
+        totalDebits:
+          type: number
+        totalCredits:
+          type: number
+        netCashFlow:
+          type: number
+      required:
+        - month
+        - totalTransactions
+        - reconciled
+        - matched
+        - unmatched
+        - totalDebits
+        - totalCredits
+        - netCashFlow
+
+    Program:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        type:
+          type: string
+          enum: [program, grant, fund, site, department]
+        description:
+          type: string
+        code:
+          type: string
+        budgetAmount:
+          type: number
+        fiscalYear:
+          type: string
+        isActive:
+          type: boolean
+        totalSpend:
+          type: number
+        percentUsed:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - type
+        - isActive
+        - createdAt
+
+    CreateProgramBody:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [program, grant, fund, site, department]
+        description:
+          type: string
+        code:
+          type: string
+        budgetAmount:
+          type: number
+        fiscalYear:
+          type: string
+      required:
+        - name
+        - type
+
+    ProgramSpendingReport:
+      type: object
+      properties:
+        programId:
+          type: integer
+        programName:
+          type: string
+        fiscalYear:
+          type: string
+        budgetAmount:
+          type: number
+        totalSpend:
+          type: number
+        percentUsed:
+          type: number
+        expenseCount:
+          type: integer
+        billCount:
+          type: integer
+        spendByMonth:
+          type: array
+          items:
+            type: object
+            properties:
+              month:
+                type: string
+              amount:
+                type: number
+            required:
+              - month
+              - amount
+      required:
+        - programId
+        - programName
+        - fiscalYear
+        - totalSpend
+        - expenseCount
+        - billCount
+        - spendByMonth
+
+    ApprovalQueueItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [expense, bill]
+        referenceId:
+          type: integer
+        submittedBy:
+          type: string
+        description:
+          type: string
+        amount:
+          type: number
+        programName:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+        daysWaiting:
+          type: integer
+        urgency:
+          type: string
+          enum: [low, medium, high]
+      required:
+        - id
+        - type
+        - referenceId
+        - submittedBy
+        - description
+        - amount
+        - submittedAt
+        - daysWaiting
+        - urgency
+
+    MonthEndChecklist:
+      type: object
+      properties:
+        id:
+          type: integer
+        month:
+          type: string
+        fiscalYear:
+          type: string
+        status:
+          type: string
+          enum: [open, in_progress, completed]
+        owner:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChecklistItem"
+        completedCount:
+          type: integer
+        totalCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - month
+        - fiscalYear
+        - status
+        - items
+        - completedCount
+        - totalCount
+        - createdAt
+
+    ChecklistItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        category:
+          type: string
+        isCompleted:
+          type: boolean
+        completedBy:
+          type: string
+        completedAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+      required:
+        - id
+        - label
+        - category
+        - isCompleted
+
+    CreateMonthEndChecklistBody:
+      type: object
+      properties:
+        month:
+          type: string
+          description: YYYY-MM format
+        fiscalYear:
+          type: string
+        owner:
+          type: string
+      required:
+        - month
+        - fiscalYear
+
+    UpdateMonthEndChecklistBody:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [open, in_progress, completed]
+        owner:
+          type: string
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              isCompleted:
+                type: boolean
+              completedBy:
+                type: string
+              notes:
+                type: string
+            required:
+              - id
+              - isCompleted

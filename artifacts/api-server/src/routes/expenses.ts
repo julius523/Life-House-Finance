@@ -1,0 +1,268 @@
+import { Router, type IRouter } from "express";
+import { db } from "@workspace/db";
+import { expensesTable, programsTable, activityLogTable } from "@workspace/db";
+import { eq, and, desc, count, sql } from "drizzle-orm";
+import {
+  ListExpensesQueryParams,
+  ListExpensesResponse,
+  CreateExpenseBody,
+  GetExpenseParams,
+  GetExpenseResponse,
+  UpdateExpenseParams,
+  UpdateExpenseBody,
+  UpdateExpenseResponse,
+  DeleteExpenseParams,
+  ApproveExpenseParams,
+  ApproveExpenseBody,
+  ApproveExpenseResponse,
+  RejectExpenseParams,
+  RejectExpenseBody,
+  RejectExpenseResponse,
+} from "@workspace/api-zod";
+
+const router: IRouter = Router();
+
+async function getProgramName(programId: number | null | undefined): Promise<string | undefined> {
+  if (!programId) return undefined;
+  const [prog] = await db.select({ name: programsTable.name }).from(programsTable).where(eq(programsTable.id, programId));
+  return prog?.name;
+}
+
+function formatExpense(e: typeof expensesTable.$inferSelect, programName?: string) {
+  return {
+    id: e.id,
+    submittedBy: e.submittedBy,
+    submittedByEmail: e.submittedByEmail ?? undefined,
+    expenseDate: e.expenseDate,
+    merchant: e.merchant,
+    description: e.description,
+    amount: parseFloat(e.amount),
+    paymentMethod: e.paymentMethod as "cash" | "check" | "credit_card" | "debit_card" | "bank_transfer" | "other",
+    programId: e.programId ?? undefined,
+    programName,
+    status: e.status as "draft" | "submitted" | "approved" | "rejected" | "reimbursed",
+    managerApprovedBy: e.managerApprovedBy ?? undefined,
+    financeApprovedBy: e.financeApprovedBy ?? undefined,
+    rejectionReason: e.rejectionReason ?? undefined,
+    reimbursedDate: e.reimbursedDate ?? undefined,
+    receiptIds: e.receiptIds ?? undefined,
+    accountingEntryRef: e.accountingEntryRef ?? undefined,
+    createdAt: e.createdAt.toISOString(),
+    updatedAt: e.updatedAt.toISOString(),
+  };
+}
+
+router.get("/expenses", async (req, res): Promise<void> => {
+  const parsed = ListExpensesQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid query params" });
+    return;
+  }
+  const { status, programId, submittedBy, page = 1, pageSize = 20 } = parsed.data;
+
+  const conditions = [];
+  if (status) conditions.push(eq(expensesTable.status, status));
+  if (programId) conditions.push(eq(expensesTable.programId, programId));
+  if (submittedBy) conditions.push(eq(expensesTable.submittedBy, submittedBy));
+
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  const offset = (page - 1) * pageSize;
+
+  const [expenses, totalResult] = await Promise.all([
+    db.select().from(expensesTable).where(where).orderBy(desc(expensesTable.createdAt)).limit(pageSize).offset(offset),
+    db.select({ cnt: count() }).from(expensesTable).where(where),
+  ]);
+
+  const items = await Promise.all(
+    expenses.map(async (e) => {
+      const programName = await getProgramName(e.programId);
+      return formatExpense(e, programName);
+    })
+  );
+
+  res.json(ListExpensesResponse.parse({ items, total: totalResult[0]?.cnt ?? 0, page, pageSize }));
+});
+
+router.post("/expenses", async (req, res): Promise<void> => {
+  const parsed = CreateExpenseBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid body" });
+    return;
+  }
+  const data = parsed.data;
+
+  const [expense] = await db
+    .insert(expensesTable)
+    .values({
+      submittedBy: data.submittedBy,
+      submittedByEmail: data.submittedByEmail,
+      expenseDate: data.expenseDate,
+      merchant: data.merchant,
+      description: data.description,
+      amount: String(data.amount),
+      paymentMethod: data.paymentMethod,
+      programId: data.programId,
+      receiptIds: data.receiptIds,
+      status: "submitted",
+    })
+    .returning();
+
+  if (!expense) {
+    res.status(500).json({ error: "Failed to create expense" });
+    return;
+  }
+
+  await db.insert(activityLogTable).values({
+    type: "expense_submitted",
+    description: `Expense submitted by ${expense.submittedBy} at ${expense.merchant}`,
+    actor: expense.submittedBy,
+    amount: String(expense.amount),
+    referenceId: expense.id,
+    referenceType: "expense",
+  });
+
+  const programName = await getProgramName(expense.programId);
+  res.status(201).json(GetExpenseResponse.parse(formatExpense(expense, programName)));
+});
+
+router.get("/expenses/:id", async (req, res): Promise<void> => {
+  const parsed = GetExpenseParams.safeParse({ id: Number(req.params["id"]) });
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [expense] = await db.select().from(expensesTable).where(eq(expensesTable.id, parsed.data.id));
+  if (!expense) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const programName = await getProgramName(expense.programId);
+  res.json(GetExpenseResponse.parse(formatExpense(expense, programName)));
+});
+
+router.put("/expenses/:id", async (req, res): Promise<void> => {
+  const idParsed = UpdateExpenseParams.safeParse({ id: Number(req.params["id"]) });
+  if (!idParsed.success) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const bodyParsed = UpdateExpenseBody.safeParse(req.body);
+  if (!bodyParsed.success) {
+    res.status(400).json({ error: "Invalid body" });
+    return;
+  }
+  const data = bodyParsed.data;
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
+  if (data.merchant !== undefined) updates["merchant"] = data.merchant;
+  if (data.description !== undefined) updates["description"] = data.description;
+  if (data.amount !== undefined) updates["amount"] = String(data.amount);
+  if (data.expenseDate !== undefined) updates["expenseDate"] = data.expenseDate;
+  if (data.paymentMethod !== undefined) updates["paymentMethod"] = data.paymentMethod;
+  if (data.programId !== undefined) updates["programId"] = data.programId;
+  if (data.receiptIds !== undefined) updates["receiptIds"] = data.receiptIds;
+  if (data.status !== undefined) updates["status"] = data.status;
+
+  const [expense] = await db
+    .update(expensesTable)
+    .set(updates as Parameters<typeof db.update>[0] extends unknown ? never : unknown)
+    .where(eq(expensesTable.id, idParsed.data.id))
+    .returning();
+
+  if (!expense) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const programName = await getProgramName(expense.programId);
+  res.json(UpdateExpenseResponse.parse(formatExpense(expense, programName)));
+});
+
+router.delete("/expenses/:id", async (req, res): Promise<void> => {
+  const parsed = DeleteExpenseParams.safeParse({ id: Number(req.params["id"]) });
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  await db.delete(expensesTable).where(eq(expensesTable.id, parsed.data.id));
+  res.status(204).send();
+});
+
+router.post("/expenses/:id/approve", async (req, res): Promise<void> => {
+  const idParsed = ApproveExpenseParams.safeParse({ id: Number(req.params["id"]) });
+  if (!idParsed.success) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const bodyParsed = ApproveExpenseBody.safeParse(req.body);
+  if (!bodyParsed.success) {
+    res.status(400).json({ error: "Invalid body" });
+    return;
+  }
+
+  const [expense] = await db
+    .update(expensesTable)
+    .set({
+      status: "approved",
+      financeApprovedBy: bodyParsed.data.approvedBy,
+      updatedAt: new Date(),
+    })
+    .where(eq(expensesTable.id, idParsed.data.id))
+    .returning();
+
+  if (!expense) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  await db.insert(activityLogTable).values({
+    type: "expense_approved",
+    description: `Expense approved by ${bodyParsed.data.approvedBy}`,
+    actor: bodyParsed.data.approvedBy,
+    amount: String(expense.amount),
+    referenceId: expense.id,
+    referenceType: "expense",
+  });
+
+  const programName = await getProgramName(expense.programId);
+  res.json(ApproveExpenseResponse.parse(formatExpense(expense, programName)));
+});
+
+router.post("/expenses/:id/reject", async (req, res): Promise<void> => {
+  const idParsed = RejectExpenseParams.safeParse({ id: Number(req.params["id"]) });
+  if (!idParsed.success) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const bodyParsed = RejectExpenseBody.safeParse(req.body);
+  if (!bodyParsed.success) {
+    res.status(400).json({ error: "Invalid body" });
+    return;
+  }
+
+  const [expense] = await db
+    .update(expensesTable)
+    .set({
+      status: "rejected",
+      rejectionReason: bodyParsed.data.reason,
+      updatedAt: new Date(),
+    })
+    .where(eq(expensesTable.id, idParsed.data.id))
+    .returning();
+
+  if (!expense) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  await db.insert(activityLogTable).values({
+    type: "expense_rejected",
+    description: `Expense rejected: ${bodyParsed.data.reason}`,
+    actor: bodyParsed.data.rejectedBy,
+    referenceId: expense.id,
+    referenceType: "expense",
+  });
+
+  const programName = await getProgramName(expense.programId);
+  res.json(RejectExpenseResponse.parse(formatExpense(expense, programName)));
+});
+
+export default router;

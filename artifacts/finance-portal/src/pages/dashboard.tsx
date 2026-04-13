@@ -1,0 +1,189 @@
+import { useGetDashboardSummary, useGetSpendingByProgram, useGetRecentActivity } from "@workspace/api-client-react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { 
+  PieChart, 
+  Pie, 
+  Cell, 
+  ResponsiveContainer, 
+  Tooltip, 
+  Legend 
+} from "recharts";
+import { format } from "date-fns";
+import { DollarSign, Clock, AlertCircle, CheckSquare, Receipt, FileText } from "lucide-react";
+
+export default function Dashboard() {
+  const { data: summary, isLoading: loadingSummary } = useGetDashboardSummary();
+  const { data: spending, isLoading: loadingSpending } = useGetSpendingByProgram();
+  const { data: activities, isLoading: loadingActivities } = useGetRecentActivity({ limit: 5 });
+
+  const COLORS = ['#24b556', '#4175f4', '#9649e2', '#1800ad', '#eab308'];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        <p className="text-muted-foreground mt-1">
+          Welcome back. Here's what's happening today.
+        </p>
+      </div>
+
+      {loadingSummary ? (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Card key={i}>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <Skeleton className="h-4 w-[100px]" />
+                <Skeleton className="h-4 w-4" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-8 w-[120px]" />
+                <Skeleton className="h-3 w-[80px] mt-2" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : summary ? (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Pending Approvals</CardTitle>
+              <CheckSquare className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{summary.pendingApprovalsCount}</div>
+              <p className="text-xs text-muted-foreground">
+                Items waiting for review
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Expenses Pending</CardTitle>
+              <Receipt className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{summary.totalExpensesPending}</div>
+              <p className="text-xs text-muted-foreground">
+                ${summary.totalExpensesThisMonth.toLocaleString()} submitted this month
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Overdue Bills</CardTitle>
+              <AlertCircle className="h-4 w-4 text-destructive" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-destructive">{summary.totalBillsOverdue}</div>
+              <p className="text-xs text-muted-foreground">
+                {summary.totalBillsDueThisMonth} total due this month
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Unmatched Transactions</CardTitle>
+              <FileText className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{summary.unmatchedTransactions}</div>
+              <p className="text-xs text-muted-foreground">
+                Require reconciliation
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+        <Card className="col-span-4">
+          <CardHeader>
+            <CardTitle>Spending by Program</CardTitle>
+            <CardDescription>Current fiscal year spending distribution</CardDescription>
+          </CardHeader>
+          <CardContent className="h-[300px]">
+            {loadingSpending ? (
+              <div className="h-full flex items-center justify-center">
+                <Skeleton className="h-[250px] w-[250px] rounded-full" />
+              </div>
+            ) : spending && spending.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={spending}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={100}
+                    paddingAngle={2}
+                    dataKey="totalAmount"
+                    nameKey="programName"
+                  >
+                    {spending.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    formatter={(value: number) => [`$${value.toLocaleString()}`, 'Amount']}
+                  />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-muted-foreground">
+                No spending data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        
+        <Card className="col-span-3">
+          <CardHeader>
+            <CardTitle>Recent Activity</CardTitle>
+            <CardDescription>Latest actions in the portal</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loadingActivities ? (
+              <div className="space-y-4">
+                {[1, 2, 3, 4, 5].map(i => (
+                  <div key={i} className="flex items-center space-x-4">
+                    <Skeleton className="h-8 w-8 rounded-full" />
+                    <div className="space-y-2">
+                      <Skeleton className="h-4 w-[200px]" />
+                      <Skeleton className="h-3 w-[150px]" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : activities && activities.length > 0 ? (
+              <div className="space-y-6">
+                {activities.map((activity) => (
+                  <div key={activity.id} className="flex items-start gap-4">
+                    <div className="rounded-full bg-muted p-2 mt-0.5">
+                      <Clock className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium leading-none">
+                        {activity.description}
+                      </p>
+                      <div className="flex items-center mt-1 text-xs text-muted-foreground space-x-2">
+                        <span>{activity.actor}</span>
+                        <span>•</span>
+                        <span>{format(new Date(activity.createdAt), 'MMM d, h:mm a')}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center text-muted-foreground py-8">
+                No recent activity
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
