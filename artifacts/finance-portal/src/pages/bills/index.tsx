@@ -63,7 +63,7 @@ export default function BillsList() {
                 </SelectContent>
               </Select>
             </div>
-            {billsList && <div className="text-sm text-muted-foreground">{billsList.total} total bills</div>}
+            {billsList && <div className="text-sm text-muted-foreground">{(Array.isArray(billsList) ? billsList.length : (billsList as any)?.total ?? 0)} total bills</div>}
           </div>
         </CardHeader>
         <CardContent className="p-0">

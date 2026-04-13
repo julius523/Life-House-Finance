@@ -21,7 +21,7 @@ const formSchema = z.object({
   description: z.string().min(2, "Description is required"),
   amount: z.coerce.number().positive("Amount must be greater than 0"),
   paymentMethod: z.enum(["cash", "check", "credit_card", "debit_card", "bank_transfer", "other"]),
-  programId: z.coerce.number().optional().or(z.literal("")),
+  programId: z.string().optional(),
 });
 
 export default function ExpenseNew() {
@@ -47,7 +47,7 @@ export default function ExpenseNew() {
     try {
       const expenseData = {
         ...values,
-        programId: values.programId ? Number(values.programId) : undefined
+        programId: values.programId && values.programId !== "none" ? Number(values.programId) : undefined
       };
       
       const result = await createExpense.mutateAsync({ data: expenseData });
@@ -157,15 +157,15 @@ export default function ExpenseNew() {
                   render={({ field }) => (
                     <FormItem className="col-span-1 md:col-span-2">
                       <FormLabel>Program / Grant Allocation</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value?.toString() || ""}>
+                      <Select onValueChange={field.onChange} value={field.value?.toString() || "none"}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select program to bill against (optional)" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="">General Fund (Unallocated)</SelectItem>
-                          {!programsLoading && programs?.items.map(p => (
+                          <SelectItem value="none">General Fund (Unallocated)</SelectItem>
+                          {!programsLoading && (Array.isArray(programs) ? programs : (programs as any)?.items ?? []).map((p: any) => (
                             <SelectItem key={p.id} value={p.id.toString()}>{p.name}</SelectItem>
                           ))}
                         </SelectContent>

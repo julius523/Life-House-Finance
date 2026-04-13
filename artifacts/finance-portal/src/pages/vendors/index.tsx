@@ -223,7 +223,7 @@ export default function VendorsList() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            {vendorsList && <div className="text-sm text-muted-foreground">{vendorsList.total} total vendors</div>}
+            {vendorsList && <div className="text-sm text-muted-foreground">{(Array.isArray(vendorsList) ? vendorsList.length : (vendorsList as any)?.total ?? 0)} total vendors</div>}
           </div>
         </CardHeader>
         <CardContent className="p-0">

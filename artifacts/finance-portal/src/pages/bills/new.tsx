@@ -18,7 +18,7 @@ const formSchema = z.object({
   dueDate: z.string().min(1, "Due date is required"),
   amount: z.coerce.number().positive("Amount must be greater than 0"),
   description: z.string().optional(),
-  programId: z.coerce.number().optional().or(z.literal("")),
+  programId: z.string().optional(),
 });
 
 export default function BillNew() {
@@ -45,7 +45,7 @@ export default function BillNew() {
     try {
       const billData = {
         ...values,
-        programId: values.programId ? Number(values.programId) : undefined
+        programId: values.programId && values.programId !== "none" ? Number(values.programId) : undefined
       };
       
       const result = await createBill.mutateAsync({ data: billData });
@@ -94,7 +94,7 @@ export default function BillNew() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {!vendorsLoading && vendors?.items.map(v => (
+                          {!vendorsLoading && (Array.isArray(vendors) ? vendors : (vendors as any)?.items ?? []).map((v: any) => (
                             <SelectItem key={v.id} value={v.id.toString()}>{v.name}</SelectItem>
                           ))}
                         </SelectContent>
@@ -166,15 +166,15 @@ export default function BillNew() {
                   render={({ field }) => (
                     <FormItem className="col-span-1 md:col-span-2">
                       <FormLabel>Program / Grant Allocation</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value?.toString() || ""}>
+                      <Select onValueChange={field.onChange} value={field.value?.toString() || "none"}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select program to bill against (optional)" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="">General Fund (Unallocated)</SelectItem>
-                          {!programsLoading && programs?.items.map(p => (
+                          <SelectItem value="none">General Fund (Unallocated)</SelectItem>
+                          {!programsLoading && (Array.isArray(programs) ? programs : (programs as any)?.items ?? []).map((p: any) => (
                             <SelectItem key={p.id} value={p.id.toString()}>{p.name}</SelectItem>
                           ))}
                         </SelectContent>
