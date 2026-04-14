@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
-import { Upload, Search, FileBox, AlertTriangle, Link as LinkIcon } from "lucide-react";
+import { Upload, Search, FileBox, AlertTriangle, Link as LinkIcon, CheckSquare } from "lucide-react";
 import { Empty } from "@/components/ui/empty";
 import { Badge } from "@/components/ui/badge";
 
