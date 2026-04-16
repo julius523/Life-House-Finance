@@ -11,6 +11,7 @@ import Approvals from "@/pages/approvals";
 import ExpensesList from "@/pages/expenses/index";
 import ExpenseNew from "@/pages/expenses/new";
 import ExpenseDetail from "@/pages/expenses/detail";
+import ExpenseEdit from "@/pages/expenses/edit";
 import BillsList from "@/pages/bills/index";
 import BillNew from "@/pages/bills/new";
 import BillDetail from "@/pages/bills/detail";
@@ -33,6 +34,7 @@ function Router() {
         
         <Route path="/expenses" component={ExpensesList} />
         <Route path="/expenses/new" component={ExpenseNew} />
+        <Route path="/expenses/:id/edit" component={ExpenseEdit} />
         <Route path="/expenses/:id" component={ExpenseDetail} />
         
         <Route path="/bills" component={BillsList} />

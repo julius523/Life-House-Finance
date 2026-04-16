@@ -28,6 +28,8 @@ import {
   FileText,
   User,
   RotateCcw,
+  Pencil,
+  Send,
 } from "lucide-react";
 import { format } from "date-fns";
 import { RejectDialog } from "@/components/reject-dialog";
@@ -157,6 +159,20 @@ export default function ExpenseDetail() {
 
   const isNeedsCorrection = expense.status === "needs_correction";
   const isSubmitted = expense.status === "submitted";
+  const isDraft = expense.status === "draft";
+
+  const handleSubmitDraft = async () => {
+    try {
+      await updateExpense.mutateAsync({
+        id: expense.id,
+        data: { status: "submitted" },
+      });
+      toast({ title: "Expense submitted for approval" });
+      refetch();
+    } catch {
+      toast({ title: "Failed to submit expense", variant: "destructive" });
+    }
+  };
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -182,23 +198,40 @@ export default function ExpenseDetail() {
           </div>
         </div>
 
-        {isSubmitted && (
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              className="text-destructive border-destructive hover:bg-destructive/10"
-              onClick={() => setRejectOpen(true)}
-            >
-              <X className="mr-2 h-4 w-4" /> Reject
+        <div className="flex items-center gap-2 flex-wrap">
+          <Link href={`/expenses/${expense.id}/edit`}>
+            <Button variant="outline">
+              <Pencil className="mr-2 h-4 w-4" /> Edit
             </Button>
+          </Link>
+          {isDraft && (
             <Button
               className="bg-primary hover:bg-primary/90 text-primary-foreground"
-              onClick={handleApprove}
+              onClick={handleSubmitDraft}
+              disabled={updateExpense.isPending}
             >
-              <Check className="mr-2 h-4 w-4" /> Approve
+              <Send className="mr-2 h-4 w-4" />
+              {updateExpense.isPending ? "Submitting…" : "Submit for Approval"}
             </Button>
-          </div>
-        )}
+          )}
+          {isSubmitted && (
+            <>
+              <Button
+                variant="outline"
+                className="text-destructive border-destructive hover:bg-destructive/10"
+                onClick={() => setRejectOpen(true)}
+              >
+                <X className="mr-2 h-4 w-4" /> Reject
+              </Button>
+              <Button
+                className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                onClick={handleApprove}
+              >
+                <Check className="mr-2 h-4 w-4" /> Approve
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
