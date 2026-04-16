@@ -8,7 +8,7 @@ import {
   programsTable,
   vendorsTable,
 } from "@workspace/db";
-import { eq, and, desc, count, sql } from "drizzle-orm";
+import { eq, and, desc, count, sql, isNull, isNotNull } from "drizzle-orm";
 import { requireRole } from "../lib/auth";
 import {
   ListTransactionsQueryParams,
@@ -169,6 +169,99 @@ router.get("/transactions/reconciliation-summary", async (req, res): Promise<voi
       netCashFlow: totalCredits - totalDebits,
     })
   );
+});
+
+// --- Auto-match -------------------------------------------------------------
+
+router.post("/transactions/auto-match", async (req, res): Promise<void> => {
+  // Pull every unmatched debit and try to pair it with an existing expense
+  // (any status, including drafts). A match requires same date and same
+  // amount; merchant text is used only as a tiebreaker when several
+  // expenses on the same day are for the same amount.
+  const unmatched = await db
+    .select()
+    .from(transactionsTable)
+    .where(
+      and(
+        eq(transactionsTable.status, "unmatched"),
+        eq(transactionsTable.type, "debit"),
+        isNull(transactionsTable.matchedExpenseId)
+      )
+    );
+
+  // Expenses that are already linked to some transaction shouldn't be
+  // double-matched.
+  const alreadyLinkedRows = await db
+    .select({ id: transactionsTable.matchedExpenseId })
+    .from(transactionsTable)
+    .where(isNotNull(transactionsTable.matchedExpenseId));
+  const alreadyLinked = new Set<number>(
+    alreadyLinkedRows
+      .map((r) => r.id)
+      .filter((x): x is number => typeof x === "number")
+  );
+
+  const linked: Array<{ transactionId: number; expenseId: number }> = [];
+  const ambiguous: number[] = [];
+
+  for (const tx of unmatched) {
+    const candidates = await db
+      .select()
+      .from(expensesTable)
+      .where(
+        and(
+          eq(expensesTable.expenseDate, tx.transactionDate),
+          eq(expensesTable.amount, tx.amount)
+        )
+      );
+
+    const available = candidates.filter((e) => !alreadyLinked.has(e.id));
+    if (available.length === 0) continue;
+
+    let pick = available[0];
+    if (available.length > 1) {
+      const desc = tx.description.toLowerCase();
+      const byMerchant = available.filter((e) => {
+        const m = e.merchant.toLowerCase().trim();
+        if (!m) return false;
+        const token = m.split(/\s+/)[0] ?? "";
+        return token.length >= 3 && desc.includes(token);
+      });
+      if (byMerchant.length === 1) {
+        pick = byMerchant[0];
+      } else {
+        ambiguous.push(tx.id);
+        continue;
+      }
+    }
+    if (!pick) continue;
+
+    await db
+      .update(transactionsTable)
+      .set({ matchedExpenseId: pick.id, status: "matched" })
+      .where(eq(transactionsTable.id, tx.id));
+
+    await db.insert(activityLogTable).values({
+      type: "transaction_imported",
+      description: `Auto-matched transaction #${tx.id} to expense #${pick.id}`,
+      actor: req.authUser
+        ? `${req.authUser.firstName} ${req.authUser.lastName}`
+        : "System",
+      amount: tx.amount,
+      referenceId: tx.id,
+      referenceType: "transaction",
+    });
+
+    alreadyLinked.add(pick.id);
+    linked.push({ transactionId: tx.id, expenseId: pick.id });
+  }
+
+  res.json({
+    scanned: unmatched.length,
+    linked: linked.length,
+    ambiguous: ambiguous.length,
+    matches: linked,
+  });
 });
 
 // --- Conversion endpoints ---------------------------------------------------

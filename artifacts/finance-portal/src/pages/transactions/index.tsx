@@ -126,7 +126,42 @@ export default function TransactionsList() {
             Every imported debit and credit, with one-click conversion to expenses, bills, or program income.
           </p>
         </div>
-        <BankStatementImport />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={async () => {
+              try {
+                const res = await fetch("/api/transactions/auto-match", {
+                  method: "POST",
+                  credentials: "include",
+                });
+                if (!res.ok) throw new Error(await res.text());
+                const data = (await res.json()) as {
+                  scanned: number;
+                  linked: number;
+                  ambiguous: number;
+                };
+                toast({
+                  title:
+                    data.linked > 0
+                      ? `Linked ${data.linked} transaction${data.linked === 1 ? "" : "s"}`
+                      : "No new matches found",
+                  description: `Scanned ${data.scanned} unmatched debit${data.scanned === 1 ? "" : "s"}${data.ambiguous > 0 ? ` · ${data.ambiguous} need${data.ambiguous === 1 ? "s" : ""} a manual pick` : ""}.`,
+                });
+                invalidate();
+              } catch (e) {
+                toast({
+                  title: "Auto-match failed",
+                  description: extractErrorMessage(e),
+                  variant: "destructive",
+                });
+              }
+            }}
+          >
+            <CheckCircle2 className="mr-2 h-4 w-4" /> Auto-match
+          </Button>
+          <BankStatementImport />
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
