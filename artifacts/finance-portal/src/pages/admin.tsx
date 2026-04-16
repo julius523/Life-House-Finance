@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, UserPlus, KeyRound, AlertTriangle } from "lucide-react";
+import { Shield, UserPlus, KeyRound, AlertTriangle, History } from "lucide-react";
 
 const ROLE_LABEL: Record<UserRole, string> = {
   admin: "Admin",
@@ -42,6 +42,7 @@ export default function AdminPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [passwordFor, setPasswordFor] = useState<AuthUser | null>(null);
   const [wipeOpen, setWipeOpen] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
 
   const refresh = async () => {
     try {
@@ -140,6 +141,38 @@ export default function AdminPage() {
         />
       )}
 
+      <Card className="border-amber-500/40">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-amber-600">
+            <History className="h-5 w-5" />
+            Restore to start of day
+          </CardTitle>
+          <CardDescription>
+            Revert every expense, bill, vendor, program, receipt, transaction,
+            credit, contact, month-end checklist, and activity log entry back
+            to the state they were in at the beginning of today. User accounts
+            are preserved. Requires the master password.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            variant="outline"
+            className="border-amber-500/60 text-amber-700 hover:bg-amber-50"
+            onClick={() => setRestoreOpen(true)}
+          >
+            <History className="mr-2 h-4 w-4" />
+            Restore to start of day
+          </Button>
+        </CardContent>
+      </Card>
+
+      {restoreOpen && (
+        <RestoreDayDialog
+          onClose={() => setRestoreOpen(false)}
+          onRestored={() => setRestoreOpen(false)}
+        />
+      )}
+
       <Card className="border-destructive/40">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-destructive">
@@ -168,6 +201,121 @@ export default function AdminPage() {
         />
       )}
     </div>
+  );
+}
+
+function RestoreDayDialog({
+  onClose,
+  onRestored,
+}: {
+  onClose: () => void;
+  onRestored: () => void;
+}) {
+  const { toast } = useToast();
+  const [masterPassword, setMasterPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [info, setInfo] = useState<{
+    date: string;
+    exists: boolean;
+    createdAt: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/admin/daily-snapshot", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => setInfo(j))
+      .catch(() => setInfo(null));
+  }, []);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/restore-day", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ masterPassword }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Restore failed (${res.status})`);
+      }
+      toast({
+        title: "Restored to start of day",
+        description: "All data has been reverted to this morning's snapshot.",
+      });
+      onRestored();
+      // Refresh so cached queries reload.
+      setTimeout(() => window.location.reload(), 600);
+    } catch (e) {
+      toast({
+        title: "Could not restore",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-amber-700">
+            <History className="h-5 w-5" />
+            Restore to start of day
+          </DialogTitle>
+          <DialogDescription>
+            This reverts every expense, bill, vendor, program, receipt,
+            transaction, credit, contact, month-end checklist, and activity log
+            entry back to the snapshot captured at the beginning of today. Any
+            changes made since this morning will be lost. User accounts stay
+            intact.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          {info && (
+            <div className="text-sm bg-muted/50 rounded-md p-3">
+              {info.exists && info.createdAt ? (
+                <>
+                  Snapshot for{" "}
+                  <span className="font-semibold">{info.date}</span> was
+                  captured at{" "}
+                  <span className="font-semibold">
+                    {new Date(info.createdAt).toLocaleString()}
+                  </span>
+                  .
+                </>
+              ) : (
+                <>No snapshot exists yet for today.</>
+              )}
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label>Master password</Label>
+            <Input
+              type="password"
+              value={masterPassword}
+              onChange={(e) => setMasterPassword(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            onClick={submit}
+            disabled={busy || !masterPassword || !info?.exists}
+            className="bg-amber-600 text-white hover:bg-amber-700"
+          >
+            {busy ? "Restoring…" : "Restore"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

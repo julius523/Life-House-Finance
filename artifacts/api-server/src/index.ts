@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { seedUsers } from "./lib/seedUsers";
+import { ensureTodaySnapshot } from "./lib/dailySnapshot";
 
 const rawPort = process.env["PORT"];
 
@@ -16,9 +17,14 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-seedUsers().catch((err) => {
-  logger.error({ err }, "Failed to seed users");
-});
+seedUsers()
+  .catch((err) => {
+    logger.error({ err }, "Failed to seed users");
+  })
+  .then(() => ensureTodaySnapshot())
+  .catch((err) => {
+    logger.error({ err }, "Failed to capture daily snapshot at boot");
+  });
 
 app.listen(port, (err) => {
   if (err) {

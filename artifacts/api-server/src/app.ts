@@ -5,6 +5,7 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { requireAuth } from "./lib/auth";
+import { ensureTodaySnapshot } from "./lib/dailySnapshot";
 
 const app: Express = express();
 
@@ -46,6 +47,28 @@ app.use("/api", (req, res, next) => {
     return;
   }
   requireAuth(req, res, next);
+});
+
+// Ensure today's snapshot exists before any mutating request runs, so a restore
+// can always revert to the state at the start of the day.
+app.use("/api", (req, _res, next) => {
+  const method = req.method.toUpperCase();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+    next();
+    return;
+  }
+  const url = req.url.split("?")[0] ?? "";
+  if (
+    url.startsWith("/auth/") ||
+    url === "/admin/restore-day" ||
+    url === "/admin/wipe-data"
+  ) {
+    next();
+    return;
+  }
+  ensureTodaySnapshot()
+    .catch(() => undefined)
+    .finally(() => next());
 });
 
 app.use("/api", router);

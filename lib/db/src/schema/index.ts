@@ -10,3 +10,4 @@ export * from "./transactions";
 export * from "./month_end_checklists";
 export * from "./activity_log";
 export * from "./credits";
+export * from "./daily_snapshots";
