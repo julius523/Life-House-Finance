@@ -7,22 +7,29 @@ import {
   ParseBankStatementResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { z } from "zod";
 
 const router: IRouter = Router();
+
+// Strict schema for the AI response. Anything that doesn't match this exact
+// shape is rejected before we touch the database.
+const ParsedLineItemSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
+  description: z.string().min(1).max(2000),
+  amount: z.number().finite().positive(),
+  type: z.enum(["debit", "credit"]),
+  merchant: z.string().min(1).max(200).optional(),
+});
+const AiResponseSchema = z.object({
+  items: z.array(z.unknown()).default([]),
+});
+type ParsedLineItem = z.infer<typeof ParsedLineItemSchema>;
 
 const baseURL = process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
 const apiKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
 
 const openai = baseURL && apiKey ? new OpenAI({ baseURL, apiKey }) : null;
 const objectStorage = new ObjectStorageService();
-
-interface ParsedLineItem {
-  date: string;
-  description: string;
-  amount: number;
-  type: "debit" | "credit";
-  merchant?: string;
-}
 
 const SYSTEM_PROMPT = `You are a meticulous bookkeeping assistant. You will be given the contents of a bank or credit card statement (as text or as an image). Extract every line item that represents a debit (money going out / expense). Ignore credits (deposits, refunds, payments to the card), running balances, fees that are interest charges, and headers/footers.
 
@@ -103,17 +110,16 @@ router.post("/ai/parse-bank-statement", async (req, res): Promise<void> => {
       ],
     });
     const raw = completion.choices[0]?.message?.content ?? "{}";
-    const json = JSON.parse(raw);
-    if (Array.isArray(json.items)) {
-      parsedItems = json.items.filter(
-        (it: ParsedLineItem) =>
-          it &&
-          typeof it.description === "string" &&
-          typeof it.amount === "number" &&
-          it.amount > 0 &&
-          typeof it.date === "string"
-      );
+    const envelope = AiResponseSchema.safeParse(JSON.parse(raw));
+    if (!envelope.success) {
+      throw new Error("AI response did not match expected shape");
     }
+    // Validate each item independently so a single bad row doesn't sink the
+    // whole import — invalid rows are dropped and surfaced via skippedCount.
+    parsedItems = envelope.data.items.flatMap((candidate) => {
+      const r = ParsedLineItemSchema.safeParse(candidate);
+      return r.success ? [r.data] : [];
+    });
   } catch (err) {
     req.log.error({ err }, "OpenAI bank statement parse failed");
     res
