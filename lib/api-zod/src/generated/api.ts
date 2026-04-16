@@ -609,6 +609,7 @@ export const ListBillsResponseItem = zod.object({
   approvedBy: zod.string().optional(),
   paidDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
+  submittedBy: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
 export const ListBillsResponse = zod.array(ListBillsResponseItem);
@@ -625,6 +626,7 @@ export const CreateBillBody = zod.object({
   description: zod.string().optional(),
   programId: zod.number().optional(),
   receiptIds: zod.array(zod.number()).optional(),
+  submittedBy: zod.string().optional(),
 });
 
 /**
@@ -649,6 +651,7 @@ export const GetBillResponse = zod.object({
   approvedBy: zod.string().optional(),
   paidDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
+  submittedBy: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
 
@@ -668,6 +671,7 @@ export const UpdateBillBody = zod.object({
   description: zod.string().optional(),
   programId: zod.number().optional(),
   receiptIds: zod.array(zod.number()).optional(),
+  submittedBy: zod.string().optional(),
 });
 
 export const UpdateBillResponse = zod.object({
@@ -685,6 +689,7 @@ export const UpdateBillResponse = zod.object({
   approvedBy: zod.string().optional(),
   paidDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
+  submittedBy: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
 
@@ -715,6 +720,7 @@ export const ApproveBillResponse = zod.object({
   approvedBy: zod.string().optional(),
   paidDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
+  submittedBy: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
 
@@ -832,6 +838,8 @@ export const listTransactionsQueryPageDefault = 1;
 export const ListTransactionsQueryParams = zod.object({
   status: zod.enum(["unmatched", "matched", "reconciled"]).optional(),
   accountId: zod.coerce.number().optional(),
+  matchedExpenseId: zod.coerce.number().optional(),
+  matchedBillId: zod.coerce.number().optional(),
   page: zod.coerce.number().default(listTransactionsQueryPageDefault),
 });
 
@@ -986,6 +994,7 @@ export const ConvertTransactionToBillResponse = zod.object({
     approvedBy: zod.string().optional(),
     paidDate: zod.coerce.date().optional(),
     receiptIds: zod.array(zod.number()).optional(),
+    submittedBy: zod.string().optional(),
     createdAt: zod.coerce.date(),
   }),
   transaction: zod.object({
@@ -1005,6 +1014,64 @@ export const ConvertTransactionToBillResponse = zod.object({
     notes: zod.string().optional(),
     importedAt: zod.coerce.date(),
   }),
+});
+
+/**
+ * @summary Link an already-submitted expense to a bank transaction.
+ */
+export const LinkTransactionToExpenseParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const LinkTransactionToExpenseBody = zod.object({
+  expenseId: zod.number(),
+});
+
+export const LinkTransactionToExpenseResponse = zod.object({
+  id: zod.number(),
+  externalId: zod.string().optional(),
+  bankAccountId: zod.number().optional(),
+  bankAccountName: zod.string().optional(),
+  transactionDate: zod.coerce.date(),
+  description: zod.string(),
+  amount: zod.number(),
+  type: zod.enum(["debit", "credit"]),
+  status: zod.enum(["unmatched", "matched", "reconciled"]),
+  matchedExpenseId: zod.number().optional(),
+  matchedBillId: zod.number().optional(),
+  matchedProgramId: zod.number().optional(),
+  matchedProgramName: zod.string().optional(),
+  notes: zod.string().optional(),
+  importedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Link an already-created bill to a bank transaction.
+ */
+export const LinkTransactionToBillParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const LinkTransactionToBillBody = zod.object({
+  billId: zod.number(),
+});
+
+export const LinkTransactionToBillResponse = zod.object({
+  id: zod.number(),
+  externalId: zod.string().optional(),
+  bankAccountId: zod.number().optional(),
+  bankAccountName: zod.string().optional(),
+  transactionDate: zod.coerce.date(),
+  description: zod.string(),
+  amount: zod.number(),
+  type: zod.enum(["debit", "credit"]),
+  status: zod.enum(["unmatched", "matched", "reconciled"]),
+  matchedExpenseId: zod.number().optional(),
+  matchedBillId: zod.number().optional(),
+  matchedProgramId: zod.number().optional(),
+  matchedProgramName: zod.string().optional(),
+  notes: zod.string().optional(),
+  importedAt: zod.coerce.date(),
 });
 
 /**

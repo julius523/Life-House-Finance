@@ -251,6 +251,7 @@ export interface Bill {
   approvedBy?: string;
   paidDate?: string;
   receiptIds?: number[];
+  submittedBy?: string;
   createdAt: string;
 }
 
@@ -263,6 +264,7 @@ export interface CreateBillBody {
   description?: string;
   programId?: number;
   receiptIds?: number[];
+  submittedBy?: string;
 }
 
 export interface Receipt {
@@ -750,6 +752,8 @@ export type ListReceiptsParams = {
 export type ListTransactionsParams = {
   status?: ListTransactionsStatus;
   accountId?: number;
+  matchedExpenseId?: number;
+  matchedBillId?: number;
   page?: number;
 };
 
@@ -794,6 +798,14 @@ export type ConvertTransactionToBillBody = {
 export type ConvertTransactionToBill200 = {
   bill: Bill;
   transaction: Transaction;
+};
+
+export type LinkTransactionToExpenseBody = {
+  expenseId: number;
+};
+
+export type LinkTransactionToBillBody = {
+  billId: number;
 };
 
 export type LinkTransactionToProgramBody = {

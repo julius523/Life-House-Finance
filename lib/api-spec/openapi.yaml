@@ -596,6 +596,14 @@ paths:
           in: query
           schema:
             type: integer
+        - name: matchedExpenseId
+          in: query
+          schema:
+            type: integer
+        - name: matchedBillId
+          in: query
+          schema:
+            type: integer
         - name: page
           in: query
           schema:
@@ -704,6 +712,64 @@ paths:
                   transaction:
                     $ref: "#/components/schemas/Transaction"
                 required: [bill, transaction]
+
+  /transactions/{id}/link-expense:
+    post:
+      operationId: linkTransactionToExpense
+      tags: [transactions]
+      summary: Link an already-submitted expense to a bank transaction.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expenseId:
+                  type: integer
+              required: [expenseId]
+      responses:
+        "200":
+          description: Updated transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
+
+  /transactions/{id}/link-bill:
+    post:
+      operationId: linkTransactionToBill
+      tags: [transactions]
+      summary: Link an already-created bill to a bank transaction.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                billId:
+                  type: integer
+              required: [billId]
+      responses:
+        "200":
+          description: Updated transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
 
   /transactions/{id}/link-program:
     post:
@@ -1432,6 +1498,8 @@ components:
           type: array
           items:
             type: integer
+        submittedBy:
+          type: string
         createdAt:
           type: string
           format: date-time
@@ -1467,6 +1535,8 @@ components:
           type: array
           items:
             type: integer
+        submittedBy:
+          type: string
       required:
         - vendorId
         - dueDate

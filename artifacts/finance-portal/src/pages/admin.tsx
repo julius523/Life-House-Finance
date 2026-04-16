@@ -1,0 +1,314 @@
+import { useEffect, useState } from "react";
+import {
+  listUsers,
+  createUser,
+  changeUserPassword,
+  type AuthUser,
+  type UserRole,
+} from "@/lib/auth";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
+import { Shield, UserPlus, KeyRound } from "lucide-react";
+
+const ROLE_LABEL: Record<UserRole, string> = {
+  admin: "Admin",
+  approver: "Approver",
+  submitter: "Submitter",
+};
+
+export default function AdminPage() {
+  const { toast } = useToast();
+  const [users, setUsers] = useState<AuthUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [addOpen, setAddOpen] = useState(false);
+  const [passwordFor, setPasswordFor] = useState<AuthUser | null>(null);
+
+  const refresh = async () => {
+    try {
+      setLoading(true);
+      const list = await listUsers();
+      setUsers(list);
+    } catch (e) {
+      toast({
+        title: "Could not load users",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <Shield className="h-7 w-7 text-primary" />
+            Admin — User Management
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Add staff accounts and change passwords.
+          </p>
+        </div>
+        <Button onClick={() => setAddOpen(true)}>
+          <UserPlus className="mr-2 h-4 w-4" />
+          Add user
+        </Button>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Users</CardTitle>
+          <CardDescription>
+            Admins can manage every account; approvers can approve;
+            submitters only submit expenses and bills.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="p-6 text-muted-foreground">Loading…</div>
+          ) : (
+            <div className="divide-y">
+              {users.map((u) => (
+                <div
+                  key={u.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 hover:bg-muted/30"
+                >
+                  <div>
+                    <div className="font-semibold">
+                      {u.firstName} {u.lastName}
+                    </div>
+                    <div className="text-sm text-muted-foreground">{u.email}</div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Badge variant="secondary">{ROLE_LABEL[u.role]}</Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPasswordFor(u)}
+                    >
+                      <KeyRound className="mr-2 h-3 w-3" />
+                      Change password
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {addOpen && (
+        <AddUserDialog
+          onClose={() => setAddOpen(false)}
+          onCreated={() => {
+            setAddOpen(false);
+            refresh();
+          }}
+        />
+      )}
+      {passwordFor && (
+        <ChangePasswordDialog
+          user={passwordFor}
+          onClose={() => setPasswordFor(null)}
+          onSaved={() => setPasswordFor(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AddUserDialog({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const { toast } = useToast();
+  const [email, setEmail] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [role, setRole] = useState<UserRole>("submitter");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!email || !firstName || !lastName || !password) {
+      toast({ title: "Please complete every field", variant: "destructive" });
+      return;
+    }
+    setBusy(true);
+    try {
+      await createUser({ email, firstName, lastName, role, password });
+      toast({ title: "User created" });
+      onCreated();
+    } catch (e) {
+      toast({
+        title: "Could not create user",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add user</DialogTitle>
+          <DialogDescription>
+            Set an initial password — the user can change it later.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>First name</Label>
+              <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Last name</Label>
+              <Input value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Email</Label>
+            <Input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="name@lifehousereentry.com"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Role</Label>
+            <Select value={role} onValueChange={(v) => setRole(v as UserRole)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="submitter">Submitter</SelectItem>
+                <SelectItem value="approver">Approver</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Password</Label>
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="At least 6 characters"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy ? "Creating…" : "Create user"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ChangePasswordDialog({
+  user,
+  onClose,
+  onSaved,
+}: {
+  user: AuthUser;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (password.length < 6) {
+      toast({
+        title: "Password must be at least 6 characters",
+        variant: "destructive",
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      await changeUserPassword(user.id, password);
+      toast({ title: `Password updated for ${user.email}` });
+      onSaved();
+    } catch (e) {
+      toast({
+        title: "Could not change password",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Change password</DialogTitle>
+          <DialogDescription>
+            Set a new password for {user.firstName} {user.lastName} ({user.email}).
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>New password</Label>
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="At least 6 characters"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy ? "Saving…" : "Save password"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

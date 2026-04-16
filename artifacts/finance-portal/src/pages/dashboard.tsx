@@ -1,18 +1,103 @@
 import { useGetDashboardSummary, useGetSpendingByProgram, useGetRecentActivity } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { 
-  PieChart, 
-  Pie, 
-  Cell, 
-  ResponsiveContainer, 
-  Tooltip, 
-  Legend 
+import { Button } from "@/components/ui/button";
+import { Link } from "wouter";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  Legend
 } from "recharts";
 import { format } from "date-fns";
-import { DollarSign, Clock, AlertCircle, CheckSquare, Receipt, FileText } from "lucide-react";
+import { DollarSign, Clock, AlertCircle, CheckSquare, Receipt, FileText, FileBox } from "lucide-react";
+import { useAuth } from "@/lib/auth";
+
+function SubmitterDashboard() {
+  const { user } = useAuth();
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">
+          Welcome{user ? `, ${user.firstName}` : ""}!
+        </h1>
+        <p className="text-muted-foreground mt-1">
+          Submit a new expense or bill below. Finance staff will review and
+          approve it.
+        </p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card className="hover-elevate">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Receipt className="h-5 w-5 text-primary" />
+              <CardTitle>New expense</CardTitle>
+            </div>
+            <CardDescription>
+              Submit a receipt for reimbursement or a card charge.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/expenses/new">
+              <Button className="w-full">Start expense</Button>
+            </Link>
+          </CardContent>
+        </Card>
+        <Card className="hover-elevate">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              <CardTitle>New bill</CardTitle>
+            </div>
+            <CardDescription>
+              Enter a vendor invoice so finance can schedule payment.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/bills/new">
+              <Button className="w-full">Start bill</Button>
+            </Link>
+          </CardContent>
+        </Card>
+        <Card className="hover-elevate">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <FileBox className="h-5 w-5 text-primary" />
+              <CardTitle>My submissions</CardTitle>
+            </div>
+            <CardDescription>
+              Check on expenses and bills you've already sent in.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex gap-2">
+            <Link href="/expenses">
+              <Button variant="outline" className="flex-1">
+                Expenses
+              </Button>
+            </Link>
+            <Link href="/bills">
+              <Button variant="outline" className="flex-1">
+                Bills
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
+  const { user } = useAuth();
+  if (user?.role === "submitter") {
+    return <SubmitterDashboard />;
+  }
+  return <FullDashboard />;
+}
+
+function FullDashboard() {
   const { data: summary, isLoading: loadingSummary } = useGetDashboardSummary();
   const { data: spending, isLoading: loadingSpending } = useGetSpendingByProgram();
   const { data: activities, isLoading: loadingActivities } = useGetRecentActivity({ limit: 5 });

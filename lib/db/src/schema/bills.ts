@@ -10,6 +10,7 @@ export const billsTable = pgTable("bills", {
   dueDate: date("due_date").notNull(),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   description: text("description"),
+  submittedBy: text("submitted_by"),
   programId: integer("program_id"),
   status: text("status").notNull().default("draft"),
   approvedBy: text("approved_by"),

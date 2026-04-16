@@ -50,6 +50,8 @@ export * from "./getProgramSpendingParams";
 export * from "./getRecentActivityParams";
 export * from "./getReconciliationSummaryParams";
 export * from "./healthStatus";
+export * from "./linkTransactionToBillBody";
+export * from "./linkTransactionToExpenseBody";
 export * from "./linkTransactionToProgramBody";
 export * from "./listApprovalsParams";
 export * from "./listApprovalsType";

@@ -10,5 +10,7 @@ import type { ListTransactionsStatus } from "./listTransactionsStatus";
 export type ListTransactionsParams = {
   status?: ListTransactionsStatus;
   accountId?: number;
+  matchedExpenseId?: number;
+  matchedBillId?: number;
   page?: number;
 };

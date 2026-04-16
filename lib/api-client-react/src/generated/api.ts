@@ -41,6 +41,8 @@ import type {
   GetRecentActivityParams,
   GetReconciliationSummaryParams,
   HealthStatus,
+  LinkTransactionToBillBody,
+  LinkTransactionToExpenseBody,
   LinkTransactionToProgramBody,
   ListApprovalsParams,
   ListBillsParams,
@@ -2750,6 +2752,182 @@ export const useConvertTransactionToBill = <
   TContext
 > => {
   return useMutation(getConvertTransactionToBillMutationOptions(options));
+};
+
+/**
+ * @summary Link an already-submitted expense to a bank transaction.
+ */
+export const getLinkTransactionToExpenseUrl = (id: number) => {
+  return `/api/transactions/${id}/link-expense`;
+};
+
+export const linkTransactionToExpense = async (
+  id: number,
+  linkTransactionToExpenseBody: LinkTransactionToExpenseBody,
+  options?: RequestInit,
+): Promise<Transaction> => {
+  return customFetch<Transaction>(getLinkTransactionToExpenseUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(linkTransactionToExpenseBody),
+  });
+};
+
+export const getLinkTransactionToExpenseMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof linkTransactionToExpense>>,
+    TError,
+    { id: number; data: BodyType<LinkTransactionToExpenseBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof linkTransactionToExpense>>,
+  TError,
+  { id: number; data: BodyType<LinkTransactionToExpenseBody> },
+  TContext
+> => {
+  const mutationKey = ["linkTransactionToExpense"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof linkTransactionToExpense>>,
+    { id: number; data: BodyType<LinkTransactionToExpenseBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return linkTransactionToExpense(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type LinkTransactionToExpenseMutationResult = NonNullable<
+  Awaited<ReturnType<typeof linkTransactionToExpense>>
+>;
+export type LinkTransactionToExpenseMutationBody =
+  BodyType<LinkTransactionToExpenseBody>;
+export type LinkTransactionToExpenseMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Link an already-submitted expense to a bank transaction.
+ */
+export const useLinkTransactionToExpense = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof linkTransactionToExpense>>,
+    TError,
+    { id: number; data: BodyType<LinkTransactionToExpenseBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof linkTransactionToExpense>>,
+  TError,
+  { id: number; data: BodyType<LinkTransactionToExpenseBody> },
+  TContext
+> => {
+  return useMutation(getLinkTransactionToExpenseMutationOptions(options));
+};
+
+/**
+ * @summary Link an already-created bill to a bank transaction.
+ */
+export const getLinkTransactionToBillUrl = (id: number) => {
+  return `/api/transactions/${id}/link-bill`;
+};
+
+export const linkTransactionToBill = async (
+  id: number,
+  linkTransactionToBillBody: LinkTransactionToBillBody,
+  options?: RequestInit,
+): Promise<Transaction> => {
+  return customFetch<Transaction>(getLinkTransactionToBillUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(linkTransactionToBillBody),
+  });
+};
+
+export const getLinkTransactionToBillMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof linkTransactionToBill>>,
+    TError,
+    { id: number; data: BodyType<LinkTransactionToBillBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof linkTransactionToBill>>,
+  TError,
+  { id: number; data: BodyType<LinkTransactionToBillBody> },
+  TContext
+> => {
+  const mutationKey = ["linkTransactionToBill"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof linkTransactionToBill>>,
+    { id: number; data: BodyType<LinkTransactionToBillBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return linkTransactionToBill(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type LinkTransactionToBillMutationResult = NonNullable<
+  Awaited<ReturnType<typeof linkTransactionToBill>>
+>;
+export type LinkTransactionToBillMutationBody =
+  BodyType<LinkTransactionToBillBody>;
+export type LinkTransactionToBillMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Link an already-created bill to a bank transaction.
+ */
+export const useLinkTransactionToBill = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof linkTransactionToBill>>,
+    TError,
+    { id: number; data: BodyType<LinkTransactionToBillBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof linkTransactionToBill>>,
+  TError,
+  { id: number; data: BodyType<LinkTransactionToBillBody> },
+  TContext
+> => {
+  return useMutation(getLinkTransactionToBillMutationOptions(options));
 };
 
 /**

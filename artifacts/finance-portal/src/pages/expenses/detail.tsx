@@ -44,6 +44,7 @@ import { format } from "date-fns";
 import { RejectDialog } from "@/components/reject-dialog";
 import { ReceiptUploader, type PendingReceipt } from "@/components/receipt-uploader";
 import { ReceiptViewer, type ReceiptViewerFile } from "@/components/receipt-viewer";
+import { LinkedTransactions } from "@/components/linked-transactions";
 import { FileBox } from "lucide-react";
 
 export default function ExpenseDetail() {
@@ -533,6 +534,8 @@ export default function ExpenseDetail() {
           </Card>
         </div>
       </div>
+
+      <LinkedTransactions expenseId={id} />
 
       <Card>
         <CardHeader>

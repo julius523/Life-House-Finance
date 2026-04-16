@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation, Link } from "wouter";
 import { useCreateBill, useListVendors, useListPrograms, useCreateReceipt } from "@workspace/api-client-react";
 import { ReceiptUploader, type PendingReceipt } from "@/components/receipt-uploader";
+import { useAuth } from "@/lib/auth";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
@@ -21,6 +22,8 @@ const formSchema = z.object({
   amount: z.coerce.number().positive("Amount must be greater than 0"),
   description: z.string().optional(),
   programId: z.string().optional(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
 });
 
 export default function BillNew() {
@@ -31,6 +34,8 @@ export default function BillNew() {
   const { data: vendors, isLoading: vendorsLoading } = useListVendors();
   const { data: programs, isLoading: programsLoading } = useListPrograms();
   const [receipts, setReceipts] = useState<PendingReceipt[]>([]);
+  const { user } = useAuth();
+  const isShared = user?.role === "submitter";
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -42,16 +47,42 @@ export default function BillNew() {
       amount: 0,
       description: "",
       programId: "",
+      firstName: "",
+      lastName: "",
     },
   });
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     try {
+      let submittedBy: string;
+      if (isShared) {
+        const fn = (values.firstName ?? "").trim();
+        const ln = (values.lastName ?? "").trim();
+        if (!fn || !ln) {
+          toast({
+            title: "Please enter your first and last name",
+            variant: "destructive",
+          });
+          return;
+        }
+        submittedBy = `${fn} ${ln}`;
+      } else if (user) {
+        submittedBy = `${user.firstName} ${user.lastName}`;
+      } else {
+        submittedBy = "Unknown";
+      }
+      const { firstName, lastName, ...rest } = values;
+      void firstName;
+      void lastName;
       const billData = {
-        ...values,
-        programId: values.programId && values.programId !== "none" ? Number(values.programId) : undefined
+        ...rest,
+        submittedBy,
+        programId:
+          values.programId && values.programId !== "none"
+            ? Number(values.programId)
+            : undefined,
       };
-      
+
       const result = await createBill.mutateAsync({ data: billData });
 
       for (const r of receipts) {
@@ -75,7 +106,11 @@ export default function BillNew() {
       });
       setLocation(`/bills/${result.id}`);
     } catch (error) {
-      toast({ title: "Failed to create bill", variant: "destructive" });
+      toast({
+        title: "Failed to create bill",
+        description: error instanceof Error ? error.message : undefined,
+        variant: "destructive",
+      });
     }
   };
 
@@ -103,6 +138,43 @@ export default function BillNew() {
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              {isShared && (
+                <div className="rounded-md border bg-muted/30 p-4 space-y-3">
+                  <div className="text-sm font-semibold">Your name (required)</div>
+                  <p className="text-xs text-muted-foreground">
+                    This LifeUp account is shared. Please enter your name so
+                    admins know who submitted this bill.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <FormField
+                      control={form.control}
+                      name="firstName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>First name</FormLabel>
+                          <FormControl>
+                            <Input placeholder="First name" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="lastName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Last name</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Last name" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <FormField
                   control={form.control}

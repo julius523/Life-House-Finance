@@ -9,6 +9,7 @@ import {
   vendorsTable,
 } from "@workspace/db";
 import { eq, and, desc, count, sql } from "drizzle-orm";
+import { requireRole } from "../lib/auth";
 import {
   ListTransactionsQueryParams,
   ListTransactionsResponse,
@@ -24,6 +25,9 @@ import {
 import { z } from "zod";
 
 const router: IRouter = Router();
+
+// All transaction endpoints are finance-staff only. Submitters never see them.
+router.use("/transactions", requireRole("admin", "approver"));
 
 type TransactionRow = typeof transactionsTable.$inferSelect;
 
@@ -62,12 +66,16 @@ router.get("/transactions", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Invalid query params" });
     return;
   }
-  const { status, accountId, page = 1 } = parsed.data;
+  const { status, accountId, matchedExpenseId, matchedBillId, page = 1 } = parsed.data;
   const pageSize = 50;
 
   const conditions = [];
   if (status) conditions.push(eq(transactionsTable.status, status));
   if (accountId) conditions.push(eq(transactionsTable.bankAccountId, accountId));
+  if (matchedExpenseId)
+    conditions.push(eq(transactionsTable.matchedExpenseId, matchedExpenseId));
+  if (matchedBillId)
+    conditions.push(eq(transactionsTable.matchedBillId, matchedBillId));
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
   const offset = (page - 1) * pageSize;
@@ -359,6 +367,102 @@ router.post("/transactions/:id/convert-to-bill", async (req, res): Promise<void>
     },
     transaction: await formatTransaction(updated!),
   });
+});
+
+const LinkExpenseBody = z.object({ expenseId: z.number().int() });
+
+router.post("/transactions/:id/link-expense", async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const body = LinkExpenseBody.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ error: "expenseId is required" });
+    return;
+  }
+  const [tx] = await db.select().from(transactionsTable).where(eq(transactionsTable.id, id));
+  if (!tx) {
+    res.status(404).json({ error: "Transaction not found" });
+    return;
+  }
+  if (tx.matchedExpenseId) {
+    res.status(400).json({ error: "Transaction already linked to an expense." });
+    return;
+  }
+  const [expense] = await db
+    .select()
+    .from(expensesTable)
+    .where(eq(expensesTable.id, body.data.expenseId));
+  if (!expense) {
+    res.status(400).json({ error: "Expense not found" });
+    return;
+  }
+  const [updated] = await db
+    .update(transactionsTable)
+    .set({ matchedExpenseId: expense.id, status: "matched" })
+    .where(eq(transactionsTable.id, id))
+    .returning();
+  await db.insert(activityLogTable).values({
+    type: "transaction_imported",
+    description: `Transaction #${tx.id} linked to expense #${expense.id}`,
+    actor: req.authUser
+      ? `${req.authUser.firstName} ${req.authUser.lastName}`
+      : "Finance Staff",
+    amount: tx.amount,
+    referenceId: tx.id,
+    referenceType: "transaction",
+  });
+  res.json(await formatTransaction(updated!));
+});
+
+const LinkBillBody = z.object({ billId: z.number().int() });
+
+router.post("/transactions/:id/link-bill", async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const body = LinkBillBody.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ error: "billId is required" });
+    return;
+  }
+  const [tx] = await db.select().from(transactionsTable).where(eq(transactionsTable.id, id));
+  if (!tx) {
+    res.status(404).json({ error: "Transaction not found" });
+    return;
+  }
+  if (tx.matchedBillId) {
+    res.status(400).json({ error: "Transaction already linked to a bill." });
+    return;
+  }
+  const [bill] = await db
+    .select()
+    .from(billsTable)
+    .where(eq(billsTable.id, body.data.billId));
+  if (!bill) {
+    res.status(400).json({ error: "Bill not found" });
+    return;
+  }
+  const [updated] = await db
+    .update(transactionsTable)
+    .set({ matchedBillId: bill.id, status: "matched" })
+    .where(eq(transactionsTable.id, id))
+    .returning();
+  await db.insert(activityLogTable).values({
+    type: "transaction_imported",
+    description: `Transaction #${tx.id} linked to bill #${bill.id}`,
+    actor: req.authUser
+      ? `${req.authUser.firstName} ${req.authUser.lastName}`
+      : "Finance Staff",
+    amount: tx.amount,
+    referenceId: tx.id,
+    referenceType: "transaction",
+  });
+  res.json(await formatTransaction(updated!));
 });
 
 const LinkProgramBody = z.object({ programId: z.number().int() });

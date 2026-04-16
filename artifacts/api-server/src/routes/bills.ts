@@ -45,6 +45,7 @@ function formatBill(b: typeof billsTable.$inferSelect, vendorName: string, progr
     approvedBy: b.approvedBy ?? undefined,
     paidDate: b.paidDate ?? undefined,
     receiptIds: b.receiptIds ?? undefined,
+    submittedBy: b.submittedBy ?? undefined,
     createdAt: b.createdAt.toISOString(),
   };
 }
@@ -84,6 +85,13 @@ router.post("/bills", async (req, res): Promise<void> => {
     return;
   }
   const data = parsed.data;
+  const submittedBy =
+    (req.body && typeof req.body.submittedBy === "string"
+      ? req.body.submittedBy.trim()
+      : "") ||
+    (req.authUser
+      ? `${req.authUser.firstName} ${req.authUser.lastName}`
+      : "Unknown");
   const [bill] = await db
     .insert(billsTable)
     .values({
@@ -96,6 +104,7 @@ router.post("/bills", async (req, res): Promise<void> => {
       programId: data.programId,
       receiptIds: data.receiptIds,
       status: "submitted",
+      submittedBy,
     })
     .returning();
 

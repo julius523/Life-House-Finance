@@ -6,8 +6,12 @@ import {
   useConvertTransactionToExpense,
   useConvertTransactionToBill,
   useLinkTransactionToProgram,
+  useLinkTransactionToExpense,
+  useLinkTransactionToBill,
   useListPrograms,
   useListVendors,
+  useListExpenses,
+  useListBills,
   getListTransactionsQueryKey,
   getGetReconciliationSummaryQueryKey,
   type Transaction,
@@ -43,11 +47,27 @@ import {
   Receipt,
   FileText,
   PiggyBank,
+  Link2,
 } from "lucide-react";
 import { Empty } from "@/components/ui/empty";
 import { useToast } from "@/hooks/use-toast";
 import { BankStatementImport } from "@/components/bank-statement-import";
 import { Link } from "wouter";
+
+function extractErrorMessage(err: unknown): string | undefined {
+  if (!err) return undefined;
+  // Orval/axios wraps fetch errors: look for response.data.error, response.data.message, message
+  const anyErr = err as {
+    response?: { data?: { error?: string; message?: string } };
+    message?: string;
+  };
+  return (
+    anyErr?.response?.data?.error ??
+    anyErr?.response?.data?.message ??
+    anyErr?.message ??
+    (typeof err === "string" ? err : undefined)
+  );
+}
 
 export default function TransactionsList() {
   const [status, setStatus] = useState<string>("all");
@@ -65,6 +85,7 @@ export default function TransactionsList() {
   const [convertExpenseFor, setConvertExpenseFor] = useState<Transaction | null>(null);
   const [convertBillFor, setConvertBillFor] = useState<Transaction | null>(null);
   const [linkProgramFor, setLinkProgramFor] = useState<Transaction | null>(null);
+  const [linkExistingFor, setLinkExistingFor] = useState<Transaction | null>(null);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
@@ -250,6 +271,13 @@ export default function TransactionsList() {
                           <Button
                             variant="outline"
                             size="sm"
+                            onClick={() => setLinkExistingFor(t)}
+                          >
+                            <Link2 className="mr-2 h-3 w-3" /> Link existing
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => setConvertExpenseFor(t)}
                           >
                             <Receipt className="mr-2 h-3 w-3" /> Add as expense
@@ -338,7 +366,147 @@ export default function TransactionsList() {
           }}
         />
       )}
+      {linkExistingFor && (
+        <LinkExistingDialog
+          transaction={linkExistingFor}
+          onClose={() => setLinkExistingFor(null)}
+          onSuccess={() => {
+            invalidate();
+            setLinkExistingFor(null);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function LinkExistingDialog({
+  transaction,
+  onClose,
+  onSuccess,
+}: {
+  transaction: Transaction;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [mode, setMode] = useState<"expense" | "bill">("expense");
+  const [selectedId, setSelectedId] = useState<string>("");
+  const { data: expenses } = useListExpenses();
+  const { data: bills } = useListBills();
+  const linkExpense = useLinkTransactionToExpense();
+  const linkBill = useLinkTransactionToBill();
+
+  const submit = async () => {
+    if (!selectedId) {
+      toast({ title: "Pick an item to link", variant: "destructive" });
+      return;
+    }
+    try {
+      if (mode === "expense") {
+        await linkExpense.mutateAsync({
+          id: transaction.id,
+          data: { expenseId: Number(selectedId) },
+        });
+      } else {
+        await linkBill.mutateAsync({
+          id: transaction.id,
+          data: { billId: Number(selectedId) },
+        });
+      }
+      toast({ title: "Linked successfully" });
+      onSuccess();
+    } catch (e) {
+      toast({
+        title: "Could not link",
+        description: extractErrorMessage(e),
+        variant: "destructive",
+      });
+    }
+  };
+
+  const items =
+    mode === "expense"
+      ? (expenses?.items ?? []).map((e) => ({
+          id: e.id,
+          label: `#${e.id} • ${e.merchant} • $${e.amount.toFixed(2)} • ${e.expenseDate}`,
+        }))
+      : (bills?.items ?? []).map((b) => ({
+          id: b.id,
+          label: `#${b.id} • ${b.vendorName ?? "Vendor"} • $${b.amount.toFixed(2)} • due ${b.dueDate}`,
+        }));
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Link to existing record</DialogTitle>
+          <DialogDescription>
+            Attach this bank transaction to an already-submitted expense or
+            bill instead of creating a duplicate.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant={mode === "expense" ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setMode("expense");
+                setSelectedId("");
+              }}
+            >
+              Expense
+            </Button>
+            <Button
+              type="button"
+              variant={mode === "bill" ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setMode("bill");
+                setSelectedId("");
+              }}
+            >
+              Bill
+            </Button>
+          </div>
+          <div className="space-y-1.5">
+            <Label>
+              Pick {mode === "expense" ? "an expense" : "a bill"}
+            </Label>
+            <Select value={selectedId} onValueChange={setSelectedId}>
+              <SelectTrigger>
+                <SelectValue placeholder={`Select ${mode}…`} />
+              </SelectTrigger>
+              <SelectContent>
+                {items.length === 0 && (
+                  <div className="p-2 text-sm text-muted-foreground">
+                    Nothing to choose from.
+                  </div>
+                )}
+                {items.map((it) => (
+                  <SelectItem key={it.id} value={String(it.id)}>
+                    {it.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={submit}
+            disabled={linkExpense.isPending || linkBill.isPending}
+          >
+            {linkExpense.isPending || linkBill.isPending ? "Linking…" : "Link"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -369,8 +537,12 @@ function ConvertToExpenseDialog({
       });
       toast({ title: "Draft expense created from transaction" });
       onSuccess();
-    } catch {
-      toast({ title: "Could not create expense", variant: "destructive" });
+    } catch (e) {
+      toast({
+        title: "Could not create expense",
+        description: extractErrorMessage(e),
+        variant: "destructive",
+      });
     }
   };
 
@@ -394,7 +566,7 @@ function ConvertToExpenseDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">— None —</SelectItem>
-                {programs?.items.map((p) => (
+                {programs?.items?.map((p) => (
                   <SelectItem key={p.id} value={String(p.id)}>
                     {p.name}
                   </SelectItem>
@@ -463,8 +635,12 @@ function ConvertToBillDialog({
       });
       toast({ title: "Bill recorded from transaction" });
       onSuccess();
-    } catch {
-      toast({ title: "Could not record bill", variant: "destructive" });
+    } catch (e) {
+      toast({
+        title: "Could not record bill",
+        description: extractErrorMessage(e),
+        variant: "destructive",
+      });
     }
   };
 
@@ -487,12 +663,12 @@ function ConvertToBillDialog({
                 <SelectValue placeholder="Select a vendor…" />
               </SelectTrigger>
               <SelectContent>
-                {vendors?.items.length === 0 && (
+                {(vendors?.items?.length ?? 0) === 0 && (
                   <div className="p-2 text-sm text-muted-foreground">
                     No vendors yet — add one from the Vendors page.
                   </div>
                 )}
-                {vendors?.items.map((v) => (
+                {vendors?.items?.map((v) => (
                   <SelectItem key={v.id} value={String(v.id)}>
                     {v.name}
                   </SelectItem>
@@ -508,7 +684,7 @@ function ConvertToBillDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">— None —</SelectItem>
-                {programs?.items.map((p) => (
+                {programs?.items?.map((p) => (
                   <SelectItem key={p.id} value={String(p.id)}>
                     {p.name}
                   </SelectItem>
@@ -556,8 +732,12 @@ function LinkProgramDialog({
       });
       toast({ title: "Linked to program" });
       onSuccess();
-    } catch {
-      toast({ title: "Could not link", variant: "destructive" });
+    } catch (e) {
+      toast({
+        title: "Could not link",
+        description: extractErrorMessage(e),
+        variant: "destructive",
+      });
     }
   };
 
@@ -580,12 +760,12 @@ function LinkProgramDialog({
                 <SelectValue placeholder="Select a program…" />
               </SelectTrigger>
               <SelectContent>
-                {programs?.items.length === 0 && (
+                {(programs?.items?.length ?? 0) === 0 && (
                   <div className="p-2 text-sm text-muted-foreground">
                     No programs yet — add one from the Programs page.
                   </div>
                 )}
-                {programs?.items.map((p) => (
+                {programs?.items?.map((p) => (
                   <SelectItem key={p.id} value={String(p.id)}>
                     {p.name}
                   </SelectItem>

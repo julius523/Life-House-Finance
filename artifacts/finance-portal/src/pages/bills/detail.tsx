@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Check, Building2, Calendar, FileText, Tag, FileBox } from "lucide-react";
 import { format } from "date-fns";
 import { ReceiptViewer, type ReceiptViewerFile } from "@/components/receipt-viewer";
+import { LinkedTransactions } from "@/components/linked-transactions";
 
 export default function BillDetail() {
   const [, params] = useRoute("/bills/:id");
@@ -179,6 +180,8 @@ export default function BillDetail() {
           )}
         </div>
       </div>
+
+      <LinkedTransactions billId={id} />
 
       {linkedReceipts && linkedReceipts.items.length > 0 && (
         <Card>
