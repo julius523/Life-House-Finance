@@ -181,7 +181,7 @@ router.put("/bills/:id", async (req, res): Promise<void> => {
   res.json(UpdateBillResponse.parse(formatBill(bill, vendorName, programName)));
 });
 
-router.post("/bills/:id/approve", async (req, res): Promise<void> => {
+router.post("/bills/:id/approve", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const idParsed = ApproveBillParams.safeParse({ id: Number(req.params["id"]) });
   if (!idParsed.success) {
     res.status(400).json({ error: "Invalid id" });

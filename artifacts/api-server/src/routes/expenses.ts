@@ -252,7 +252,7 @@ router.delete("/expenses/:id", requireRole("admin"), async (req, res): Promise<v
   res.status(204).send();
 });
 
-router.post("/expenses/:id/approve", async (req, res): Promise<void> => {
+router.post("/expenses/:id/approve", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const idParsed = ApproveExpenseParams.safeParse({ id: Number(req.params["id"]) });
   if (!idParsed.success) {
     res.status(400).json({ error: "Invalid id" });
@@ -292,7 +292,7 @@ router.post("/expenses/:id/approve", async (req, res): Promise<void> => {
   res.json(ApproveExpenseResponse.parse(formatExpense(expense, programName)));
 });
 
-router.post("/expenses/:id/reject", async (req, res): Promise<void> => {
+router.post("/expenses/:id/reject", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const idParsed = RejectExpenseParams.safeParse({ id: Number(req.params["id"]) });
   if (!idParsed.success) {
     res.status(400).json({ error: "Invalid id" });
