@@ -150,17 +150,37 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
     .sort((a, b) => b.totalAmount - a.totalAmount)
     .slice(0, 10);
 
-  // Missing receipts.
-  const missing = await db
+  // Missing receipts: itemized list (the report needs concrete rows for
+  // follow-up, not just totals).
+  const missingItems = await db
     .select({
-      count: sql<number>`count(*)::int`,
-      amount: sql<string>`coalesce(sum(${expensesTable.amount}), 0)::text`,
+      expenseId: expensesTable.id,
+      submittedBy: expensesTable.submittedBy,
+      merchant: expensesTable.merchant,
+      amount: expensesTable.amount,
+      expenseDate: expensesTable.expenseDate,
+      createdAt: expensesTable.createdAt,
     })
     .from(expensesTable)
     .where(
-      sql`(${expensesTable.receiptIds} is null or array_length(${expensesTable.receiptIds}, 1) is null) and ${expensesTable.status} in ('submitted', 'approved', 'needs_correction')`
+      sql`(${expensesTable.receiptIds} is null or array_length(${expensesTable.receiptIds}, 1) is null) and ${expensesTable.status} in ('submitted', 'approved', 'needs_correction')`,
     );
-  const missingRow = missing[0] ?? { count: 0, amount: "0" };
+
+  const now = Date.now();
+  const missingReceipts = missingItems.map((row) => ({
+    expenseId: row.expenseId,
+    submittedBy: row.submittedBy,
+    merchant: row.merchant,
+    amount: parseFloat(row.amount as unknown as string),
+    expenseDate: row.expenseDate,
+    daysSinceSubmission: row.createdAt
+      ? Math.max(0, Math.floor((now - new Date(row.createdAt).getTime()) / 86_400_000))
+      : 0,
+  }));
+  const missingRow = {
+    count: missingReceipts.length,
+    amount: missingReceipts.reduce((s, r) => s + r.amount, 0),
+  };
 
   // Bank reconciliation totals (no date filter — match the existing summary endpoint).
   const txConds = [];
@@ -210,7 +230,8 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
       spendByProgram,
       topVendors: vendorTotals,
       missingReceiptCount: missingRow.count,
-      missingReceiptAmount: parseFloat(missingRow.amount),
+      missingReceiptAmount: missingRow.amount,
+      missingReceipts,
       bankReconciliation: {
         totalTransactions: tx.total,
         unmatched: tx.unmatched,

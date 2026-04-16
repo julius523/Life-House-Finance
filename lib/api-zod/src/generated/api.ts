@@ -1111,6 +1111,16 @@ export const GetFinancialSummaryReportResponse = zod.object({
   ),
   missingReceiptCount: zod.number(),
   missingReceiptAmount: zod.number(),
+  missingReceipts: zod.array(
+    zod.object({
+      expenseId: zod.number(),
+      submittedBy: zod.string(),
+      merchant: zod.string(),
+      amount: zod.number(),
+      expenseDate: zod.coerce.date(),
+      daysSinceSubmission: zod.number(),
+    }),
+  ),
   bankReconciliation: zod.object({
     totalTransactions: zod.number(),
     unmatched: zod.number(),

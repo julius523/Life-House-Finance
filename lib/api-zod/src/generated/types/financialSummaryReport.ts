@@ -10,6 +10,7 @@ import type { FinancialSummaryReportBillTotalsByStatusItem } from "./financialSu
 import type { FinancialSummaryReportExpenseTotalsByStatusItem } from "./financialSummaryReportExpenseTotalsByStatusItem";
 import type { FinancialSummaryReportSpendByProgramItem } from "./financialSummaryReportSpendByProgramItem";
 import type { FinancialSummaryReportTopVendorsItem } from "./financialSummaryReportTopVendorsItem";
+import type { MissingReceiptItem } from "./missingReceiptItem";
 
 export interface FinancialSummaryReport {
   generatedAt: Date;
@@ -21,5 +22,6 @@ export interface FinancialSummaryReport {
   topVendors: FinancialSummaryReportTopVendorsItem[];
   missingReceiptCount: number;
   missingReceiptAmount: number;
+  missingReceipts: MissingReceiptItem[];
   bankReconciliation: FinancialSummaryReportBankReconciliation;
 }

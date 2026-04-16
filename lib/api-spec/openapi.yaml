@@ -1932,6 +1932,10 @@ components:
           type: integer
         missingReceiptAmount:
           type: number
+        missingReceipts:
+          type: array
+          items:
+            $ref: "#/components/schemas/MissingReceiptItem"
         bankReconciliation:
           type: object
           properties:
@@ -1965,6 +1969,7 @@ components:
         - topVendors
         - missingReceiptCount
         - missingReceiptAmount
+        - missingReceipts
         - bankReconciliation
 
     UpdateMonthEndChecklistBody:

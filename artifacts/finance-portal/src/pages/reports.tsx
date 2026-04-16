@@ -262,6 +262,61 @@ export default function ReportsPage() {
             </CardContent>
           </Card>
 
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Expenses Missing Receipts</CardTitle>
+              <CardDescription>
+                {data.missingReceipts.length === 0
+                  ? "All submitted expenses have receipts attached."
+                  : `${data.missingReceipts.length} expense${
+                      data.missingReceipts.length === 1 ? "" : "s"
+                    } awaiting documentation (totals ${fmtMoney(
+                      data.missingReceiptAmount,
+                    )}).`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-muted-foreground border-b">
+                    <th className="py-2">Expense</th>
+                    <th className="py-2">Submitted by</th>
+                    <th className="py-2">Date</th>
+                    <th className="py-2 text-right">Days open</th>
+                    <th className="py-2 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.missingReceipts.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={5}
+                        className="py-4 text-muted-foreground text-center"
+                      >
+                        Nothing to follow up on.
+                      </td>
+                    </tr>
+                  )}
+                  {data.missingReceipts.map((row) => (
+                    <tr key={row.expenseId} className="border-b last:border-0">
+                      <td className="py-2 font-medium">
+                        #{row.expenseId} · {row.merchant}
+                      </td>
+                      <td className="py-2">{row.submittedBy}</td>
+                      <td className="py-2">{row.expenseDate}</td>
+                      <td className="py-2 text-right">
+                        {row.daysSinceSubmission}
+                      </td>
+                      <td className="py-2 text-right font-semibold">
+                        {fmtMoney(row.amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+
           <div className="grid gap-6 md:grid-cols-2">
             <Card>
               <CardHeader>

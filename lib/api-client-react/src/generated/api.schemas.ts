@@ -615,6 +615,7 @@ export interface FinancialSummaryReport {
   topVendors: FinancialSummaryReportTopVendorsItem[];
   missingReceiptCount: number;
   missingReceiptAmount: number;
+  missingReceipts: MissingReceiptItem[];
   bankReconciliation: FinancialSummaryReportBankReconciliation;
 }
 
