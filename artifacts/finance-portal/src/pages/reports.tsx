@@ -40,6 +40,73 @@ export default function ReportsPage() {
   const [fromDate, setFromDate] = useState<string>(monthAgo);
   const [toDate, setToDate] = useState<string>(today);
 
+  const iso = (d: Date) => d.toISOString().split("T")[0]!;
+  const setRange = (from: Date, to: Date) => {
+    setFromDate(iso(from));
+    setToDate(iso(to));
+  };
+  const now = new Date();
+  const presets: { label: string; apply: () => void }[] = [
+    {
+      label: "This month",
+      apply: () =>
+        setRange(new Date(now.getFullYear(), now.getMonth(), 1), now),
+    },
+    {
+      label: "Last month",
+      apply: () =>
+        setRange(
+          new Date(now.getFullYear(), now.getMonth() - 1, 1),
+          new Date(now.getFullYear(), now.getMonth(), 0),
+        ),
+    },
+    {
+      label: "This quarter",
+      apply: () => {
+        const q = Math.floor(now.getMonth() / 3);
+        setRange(new Date(now.getFullYear(), q * 3, 1), now);
+      },
+    },
+    {
+      label: "Last quarter",
+      apply: () => {
+        const q = Math.floor(now.getMonth() / 3) - 1;
+        const y = q < 0 ? now.getFullYear() - 1 : now.getFullYear();
+        const qq = (q + 4) % 4;
+        setRange(
+          new Date(y, qq * 3, 1),
+          new Date(y, qq * 3 + 3, 0),
+        );
+      },
+    },
+    {
+      label: "Year to date",
+      apply: () => setRange(new Date(now.getFullYear(), 0, 1), now),
+    },
+    {
+      label: "Last year",
+      apply: () =>
+        setRange(
+          new Date(now.getFullYear() - 1, 0, 1),
+          new Date(now.getFullYear() - 1, 11, 31),
+        ),
+    },
+    {
+      label: "Last 30 days",
+      apply: () =>
+        setRange(new Date(Date.now() - 1000 * 60 * 60 * 24 * 30), now),
+    },
+    {
+      label: "Last 90 days",
+      apply: () =>
+        setRange(new Date(Date.now() - 1000 * 60 * 60 * 24 * 90), now),
+    },
+    {
+      label: "All time",
+      apply: () => setRange(new Date(2000, 0, 1), now),
+    },
+  ];
+
   const SECTIONS: { key: SectionKey; label: string }[] = [
     { key: "summary", label: "Top summary stats" },
     { key: "pl", label: "Profit & Loss" },
@@ -123,6 +190,22 @@ export default function ReportsPage() {
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
               />
+            </div>
+          </div>
+          <div>
+            <div className="text-sm font-medium mb-2">Quick ranges</div>
+            <div className="flex flex-wrap gap-2">
+              {presets.map((p) => (
+                <Button
+                  key={p.label}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={p.apply}
+                >
+                  {p.label}
+                </Button>
+              ))}
             </div>
           </div>
           <div>
