@@ -1,7 +1,9 @@
 import { Router, type IRouter } from "express";
+import { requireRole } from "../lib/auth";
+import { z } from "zod";
 import { db } from "@workspace/db";
-import { programsTable, expensesTable, billsTable } from "@workspace/db";
-import { eq, and, sql } from "drizzle-orm";
+import { programsTable, programContactsTable, expensesTable, billsTable } from "@workspace/db";
+import { eq, and, sql, asc } from "drizzle-orm";
 import {
   ListProgramsQueryParams,
   ListProgramsResponse,
@@ -204,6 +206,149 @@ router.get("/programs/:id/spending", async (req, res): Promise<void> => {
       spendByMonth,
     })
   );
+});
+
+// --- Delete program ----------------------------------------------------
+
+router.delete("/programs/:id", requireRole("admin"), async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [expRef] = await db
+    .select({ c: sql<number>`count(*)` })
+    .from(expensesTable)
+    .where(eq(expensesTable.programId, id));
+  const [billRef] = await db
+    .select({ c: sql<number>`count(*)` })
+    .from(billsTable)
+    .where(eq(billsTable.programId, id));
+  if (Number(expRef?.c ?? 0) > 0 || Number(billRef?.c ?? 0) > 0) {
+    res.status(409).json({
+      error:
+        "This program is used by existing expenses or bills. Remove or reassign those records first.",
+    });
+    return;
+  }
+  const [deleted] = await db.delete(programsTable).where(eq(programsTable.id, id)).returning();
+  if (!deleted) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+// --- Program contacts --------------------------------------------------
+
+const ProgramContactBody = z.object({
+  name: z.string().min(1),
+  role: z.string().optional().nullable(),
+  email: z.string().email().optional().or(z.literal("")).nullable(),
+  phone: z.string().optional().nullable(),
+  isPrimary: z.boolean().optional(),
+});
+
+function formatProgramContact(c: typeof programContactsTable.$inferSelect) {
+  return {
+    id: c.id,
+    programId: c.programId,
+    name: c.name,
+    role: c.role ?? undefined,
+    email: c.email ?? undefined,
+    phone: c.phone ?? undefined,
+    isPrimary: c.isPrimary,
+    createdAt: c.createdAt.toISOString(),
+  };
+}
+
+router.get("/programs/:id/contacts", async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const rows = await db
+    .select()
+    .from(programContactsTable)
+    .where(eq(programContactsTable.programId, id))
+    .orderBy(asc(programContactsTable.id));
+  res.json({ contacts: rows.map(formatProgramContact) });
+});
+
+router.post("/programs/:id/contacts", async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const parsed = ProgramContactBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid body" });
+    return;
+  }
+  const [created] = await db
+    .insert(programContactsTable)
+    .values({
+      programId: id,
+      name: parsed.data.name,
+      role: parsed.data.role || null,
+      email: parsed.data.email || null,
+      phone: parsed.data.phone || null,
+      isPrimary: parsed.data.isPrimary ?? false,
+    })
+    .returning();
+  if (!created) {
+    res.status(500).json({ error: "Failed to create contact" });
+    return;
+  }
+  res.status(201).json({ contact: formatProgramContact(created) });
+});
+
+router.put("/program-contacts/:contactId", async (req, res): Promise<void> => {
+  const cid = Number(req.params["contactId"]);
+  if (!Number.isInteger(cid)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const parsed = ProgramContactBody.partial().safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid body" });
+    return;
+  }
+  const updates: Record<string, unknown> = {};
+  if (parsed.data.name !== undefined) updates["name"] = parsed.data.name;
+  if (parsed.data.role !== undefined) updates["role"] = parsed.data.role || null;
+  if (parsed.data.email !== undefined) updates["email"] = parsed.data.email || null;
+  if (parsed.data.phone !== undefined) updates["phone"] = parsed.data.phone || null;
+  if (parsed.data.isPrimary !== undefined) updates["isPrimary"] = parsed.data.isPrimary;
+  const [updated] = await db
+    .update(programContactsTable)
+    .set(updates)
+    .where(eq(programContactsTable.id, cid))
+    .returning();
+  if (!updated) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  res.json({ contact: formatProgramContact(updated) });
+});
+
+router.delete("/program-contacts/:contactId", requireRole("admin"), async (req, res): Promise<void> => {
+  const cid = Number(req.params["contactId"]);
+  if (!Number.isInteger(cid)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [deleted] = await db
+    .delete(programContactsTable)
+    .where(eq(programContactsTable.id, cid))
+    .returning();
+  if (!deleted) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 export default router;

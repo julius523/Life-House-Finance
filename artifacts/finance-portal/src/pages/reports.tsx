@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Printer, BarChart3 } from "lucide-react";
 import { format } from "date-fns";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const fmtMoney = (n: number) =>
   new Intl.NumberFormat("en-US", {
@@ -21,6 +22,16 @@ const fmtPct = (n?: number) =>
 const titleCase = (s: string) =>
   s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
+type SectionKey =
+  | "summary"
+  | "pl"
+  | "balance"
+  | "byStatus"
+  | "spendByProgram"
+  | "missingReceipts"
+  | "topVendors"
+  | "bank";
+
 export default function ReportsPage() {
   const today = new Date().toISOString().split("T")[0]!;
   const monthAgo = new Date(Date.now() - 1000 * 60 * 60 * 24 * 90)
@@ -28,6 +39,29 @@ export default function ReportsPage() {
     .split("T")[0]!;
   const [fromDate, setFromDate] = useState<string>(monthAgo);
   const [toDate, setToDate] = useState<string>(today);
+
+  const SECTIONS: { key: SectionKey; label: string }[] = [
+    { key: "summary", label: "Top summary stats" },
+    { key: "pl", label: "Profit & Loss" },
+    { key: "balance", label: "Balance Sheet" },
+    { key: "byStatus", label: "Expenses & Bills by Status" },
+    { key: "spendByProgram", label: "Spend by Program / Grant" },
+    { key: "missingReceipts", label: "Missing receipts" },
+    { key: "topVendors", label: "Top Vendors" },
+    { key: "bank", label: "Bank Reconciliation" },
+  ];
+  const [selected, setSelected] = useState<Record<SectionKey, boolean>>({
+    summary: true,
+    pl: true,
+    balance: true,
+    byStatus: true,
+    spendByProgram: true,
+    missingReceipts: true,
+    topVendors: true,
+    bank: true,
+  });
+  const toggle = (k: SectionKey) =>
+    setSelected((p) => ({ ...p, [k]: !p[k] }));
 
   const { data, isLoading } = useGetFinancialSummaryReport({
     fromDate,
@@ -65,9 +99,12 @@ export default function ReportsPage() {
 
       <Card className="no-print">
         <CardHeader>
-          <CardTitle className="text-base">Date range</CardTitle>
+          <CardTitle className="text-base">Date range &amp; sections to include</CardTitle>
+          <CardDescription>
+            Pick the sections you want in the printed report. Unchecked sections are hidden when printing.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
             <div className="space-y-1.5">
               <Label htmlFor="from">From</Label>
@@ -86,6 +123,38 @@ export default function ReportsPage() {
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
               />
+            </div>
+          </div>
+          <div>
+            <div className="text-sm font-medium mb-2">Sections</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              {SECTIONS.map((s) => (
+                <label key={s.key} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox checked={selected[s.key]} onCheckedChange={() => toggle(s.key)} />
+                  {s.label}
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-3 text-xs">
+              <button
+                type="button"
+                className="text-primary hover:underline"
+                onClick={() =>
+                  setSelected(Object.fromEntries(SECTIONS.map((s) => [s.key, true])) as Record<SectionKey, boolean>)
+                }
+              >
+                Select all
+              </button>
+              <span className="text-muted-foreground">·</span>
+              <button
+                type="button"
+                className="text-primary hover:underline"
+                onClick={() =>
+                  setSelected(Object.fromEntries(SECTIONS.map((s) => [s.key, false])) as Record<SectionKey, boolean>)
+                }
+              >
+                Clear
+              </button>
             </div>
           </div>
         </CardContent>
@@ -113,6 +182,7 @@ export default function ReportsPage() {
         </div>
       ) : (
         <>
+          {selected.summary && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <SummaryStat
               label="Total income (P&L)"
@@ -134,7 +204,9 @@ export default function ReportsPage() {
               accent={data.balanceSheet.cashOnHand >= 0 ? "ok" : "warn"}
             />
           </div>
+          )}
 
+          {selected.pl && (
           <Card className="print-page-break">
             <CardHeader>
               <CardTitle className="text-base">
@@ -227,7 +299,7 @@ export default function ReportsPage() {
                 </div>
 
                 <div className="flex items-center justify-between border-t-2 pt-3">
-                  <div className="font-bold text-base">Net income</div>
+                  <div className="font-bold text-base">Net income (P&amp;L)</div>
                   <div
                     className={`font-bold text-lg ${
                       data.profitAndLoss.netIncome >= 0
@@ -241,7 +313,9 @@ export default function ReportsPage() {
               </div>
             </CardContent>
           </Card>
+          )}
 
+          {selected.balance && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Balance Sheet</CardTitle>
@@ -298,9 +372,11 @@ export default function ReportsPage() {
               </div>
             </CardContent>
           </Card>
+          )}
 
-          <div className="print-page-break" />
+          {selected.byStatus && <div className="print-page-break" />}
 
+          {selected.byStatus && (
           <div className="grid gap-6 md:grid-cols-2">
             <Card>
               <CardHeader>
@@ -376,7 +452,9 @@ export default function ReportsPage() {
               </CardContent>
             </Card>
           </div>
+          )}
 
+          {selected.spendByProgram && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Spend by Program / Grant</CardTitle>
@@ -422,7 +500,9 @@ export default function ReportsPage() {
               </table>
             </CardContent>
           </Card>
+          )}
 
+          {selected.missingReceipts && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Expenses Missing Receipts</CardTitle>
@@ -477,8 +557,11 @@ export default function ReportsPage() {
               </table>
             </CardContent>
           </Card>
+          )}
 
+          {(selected.topVendors || selected.bank) && (
           <div className="grid gap-6 md:grid-cols-2">
+            {selected.topVendors && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Top Vendors</CardTitle>
@@ -516,7 +599,9 @@ export default function ReportsPage() {
                 </table>
               </CardContent>
             </Card>
+            )}
 
+            {selected.bank && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Bank Reconciliation</CardTitle>
@@ -541,7 +626,9 @@ export default function ReportsPage() {
                 </dl>
               </CardContent>
             </Card>
+            )}
           </div>
+          )}
         </>
       )}
     </div>

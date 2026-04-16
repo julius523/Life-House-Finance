@@ -26,6 +26,7 @@ import MonthEndList from "@/pages/month-end/index";
 import MonthEndDetail from "@/pages/month-end/detail";
 import ReportsPage from "@/pages/reports";
 import AdminPage from "@/pages/admin";
+import CreditsPage from "@/pages/credits";
 
 const queryClient = new QueryClient();
 
@@ -81,6 +82,7 @@ function AppRoutes() {
         {route("/transactions", "transactions", TransactionsList)}
         {route("/programs", "programs", ProgramsList)}
         {route("/vendors", "vendors", VendorsList)}
+        {route("/credits", "credits", CreditsPage)}
         {route("/month-end", "month-end", MonthEndList)}
         {route("/month-end/:id", "month-end", MonthEndDetail)}
         {route("/reports", "reports", ReportsPage)}

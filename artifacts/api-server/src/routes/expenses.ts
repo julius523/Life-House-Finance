@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { requireRole } from "../lib/auth";
 import { db } from "@workspace/db";
 import { expensesTable, programsTable, activityLogTable } from "@workspace/db";
 import { eq, and, desc, count, sql, ne } from "drizzle-orm";
@@ -241,7 +242,7 @@ router.put("/expenses/:id", async (req, res): Promise<void> => {
   res.json(UpdateExpenseResponse.parse(formatExpense(expense, programName)));
 });
 
-router.delete("/expenses/:id", async (req, res): Promise<void> => {
+router.delete("/expenses/:id", requireRole("admin"), async (req, res): Promise<void> => {
   const parsed = DeleteExpenseParams.safeParse({ id: Number(req.params["id"]) });
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid id" });

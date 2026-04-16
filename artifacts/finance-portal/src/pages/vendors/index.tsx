@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { useListVendors, useCreateVendor, getListVendorsQueryKey } from "@workspace/api-client-react";
+import {
+  useListVendors,
+  useCreateVendor,
+  useUpdateVendor,
+  getListVendorsQueryKey,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -10,10 +15,24 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Building2, Plus, Search, Mail, Phone, MapPin } from "lucide-react";
+import {
+  Building2,
+  Plus,
+  Search,
+  Mail,
+  Phone,
+  MapPin,
+  Pencil,
+  Trash2,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Empty } from "@/components/ui/empty";
 import { Badge } from "@/components/ui/badge";
+import { ContactList } from "@/components/contact-list";
+import { apiJson } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 const formSchema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -29,6 +48,19 @@ const formSchema = z.object({
 export default function VendorsList() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [editingVendor, setEditingVendor] = useState<any | null>(null);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const { user } = useAuth();
+  const canManage = user?.role === "admin" || user?.role === "approver";
+
+  const toggleExpanded = (id: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   
   const { data: vendorsList, isLoading } = useListVendors(
     search ? { search } : undefined
@@ -211,6 +243,17 @@ export default function VendorsList() {
         </Dialog>
       </div>
 
+      {editingVendor && (
+        <EditVendorDialog
+          vendor={editingVendor}
+          onClose={() => setEditingVendor(null)}
+          onSaved={() => {
+            setEditingVendor(null);
+            queryClient.invalidateQueries({ queryKey: getListVendorsQueryKey() });
+          }}
+        />
+      )}
+
       <Card>
         <CardHeader className="pb-4 border-b">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -233,43 +276,92 @@ export default function VendorsList() {
             </div>
           ) : vendorsList && (Array.isArray(vendorsList) ? vendorsList : (vendorsList as any)?.items ?? []).length > 0 ? (
             <div className="divide-y">
-              {(Array.isArray(vendorsList) ? vendorsList : (vendorsList as any)?.items ?? []).map((vendor: any) => (
-                <div key={vendor.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-6 hover:bg-muted/50 transition-colors">
-                  <div className="space-y-2">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-semibold text-lg">{vendor.name}</span>
-                      {!vendor.isActive && <Badge variant="secondary">Inactive</Badge>}
-                      {vendor.category && <Badge variant="outline">{vendor.category}</Badge>}
+              {(Array.isArray(vendorsList) ? vendorsList : (vendorsList as any)?.items ?? []).map((vendor: any) => {
+                const isOpen = expanded.has(vendor.id);
+                return (
+                  <div key={vendor.id} className="hover:bg-muted/30 transition-colors">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between p-6 gap-4">
+                      <button
+                        type="button"
+                        onClick={() => toggleExpanded(vendor.id)}
+                        className="flex items-start gap-3 text-left flex-1"
+                      >
+                        {isOpen ? <ChevronDown className="h-4 w-4 mt-1 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 mt-1 text-muted-foreground" />}
+                        <div className="space-y-2 flex-1">
+                          <div className="flex items-center flex-wrap gap-2">
+                            <span className="font-semibold text-lg">{vendor.name}</span>
+                            {!vendor.isActive && <Badge variant="secondary">Inactive</Badge>}
+                            {vendor.category && <Badge variant="outline">{vendor.category}</Badge>}
+                          </div>
+                          <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+                            {vendor.contactName && (
+                              <div className="flex items-center gap-1">
+                                <Building2 className="h-3 w-3" /> {vendor.contactName}
+                              </div>
+                            )}
+                            {vendor.email && (
+                              <div className="flex items-center gap-1">
+                                <Mail className="h-3 w-3" /> {vendor.email}
+                              </div>
+                            )}
+                            {vendor.phone && (
+                              <div className="flex items-center gap-1">
+                                <Phone className="h-3 w-3" /> {vendor.phone}
+                              </div>
+                            )}
+                            {vendor.address && (
+                              <div className="flex items-center gap-1">
+                                <MapPin className="h-3 w-3" /> {vendor.address}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <div className="text-xs text-muted-foreground mb-0.5">Total Spend</div>
+                          <div className="text-xl font-bold">
+                            ${(vendor.totalSpend || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                        {canManage && (
+                          <>
+                            <Button variant="outline" size="sm" onClick={() => setEditingVendor(vendor)}>
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                            {user?.role === "admin" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-destructive border-destructive/40 hover:bg-destructive/10"
+                                onClick={async () => {
+                                  if (!confirm(`Delete vendor "${vendor.name}"?`)) return;
+                                  try {
+                                    await apiJson(`/vendors/${vendor.id}`, { method: "DELETE" });
+                                    toast({ title: "Vendor deleted" });
+                                    queryClient.invalidateQueries({ queryKey: getListVendorsQueryKey() });
+                                  } catch (e) {
+                                    toast({ title: "Could not delete", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                      {vendor.contactName && (
-                        <div className="flex items-center gap-1">
-                          <Building2 className="h-3 w-3" /> {vendor.contactName}
+                    {isOpen && (
+                      <div className="px-6 pb-6 border-t bg-muted/20">
+                        <div className="pt-4">
+                          <ContactList parentId={vendor.id} kind="vendor" />
                         </div>
-                      )}
-                      {vendor.email && (
-                        <div className="flex items-center gap-1">
-                          <Mail className="h-3 w-3" /> {vendor.email}
-                        </div>
-                      )}
-                      {vendor.phone && (
-                        <div className="flex items-center gap-1">
-                          <Phone className="h-3 w-3" /> {vendor.phone}
-                        </div>
-                      )}
-                      {vendor.address && (
-                        <div className="flex items-center gap-1">
-                          <MapPin className="h-3 w-3" /> {vendor.address}
-                        </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="mt-4 sm:mt-0 text-right">
-                    <div className="text-sm text-muted-foreground mb-1">Total Spend</div>
-                    <div className="text-2xl font-bold">${(vendor.totalSpend || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="p-12">
@@ -288,5 +380,104 @@ export default function VendorsList() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function EditVendorDialog({
+  vendor,
+  onClose,
+  onSaved,
+}: {
+  vendor: any;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const updateVendor = useUpdateVendor();
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      name: vendor.name ?? "",
+      contactName: vendor.contactName ?? "",
+      email: vendor.email ?? "",
+      phone: vendor.phone ?? "",
+      address: vendor.address ?? "",
+      category: vendor.category ?? "",
+      taxId: vendor.taxId ?? "",
+      paymentTerms: vendor.paymentTerms ?? "Net 30",
+    },
+  });
+
+  const onSubmit = async (values: z.infer<typeof formSchema>) => {
+    try {
+      await updateVendor.mutateAsync({ id: vendor.id, data: values });
+      toast({ title: "Vendor updated" });
+      onSaved();
+    } catch (e) {
+      toast({
+        title: "Update failed",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>Edit Vendor</DialogTitle>
+          <DialogDescription>Update vendor details.</DialogDescription>
+        </DialogHeader>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField
+              control={form.control}
+              name="name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Company Name</FormLabel>
+                  <FormControl><Input {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <div className="grid grid-cols-2 gap-4">
+              <FormField control={form.control} name="contactName" render={({ field }) => (
+                <FormItem><FormLabel>Contact Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="category" render={({ field }) => (
+                <FormItem><FormLabel>Category</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <FormField control={form.control} name="email" render={({ field }) => (
+                <FormItem><FormLabel>Email</FormLabel><FormControl><Input type="email" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="phone" render={({ field }) => (
+                <FormItem><FormLabel>Phone</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+            </div>
+            <FormField control={form.control} name="address" render={({ field }) => (
+              <FormItem><FormLabel>Address</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <div className="grid grid-cols-2 gap-4">
+              <FormField control={form.control} name="taxId" render={({ field }) => (
+                <FormItem><FormLabel>Tax ID</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="paymentTerms" render={({ field }) => (
+                <FormItem><FormLabel>Payment Terms</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+              <Button type="submit" disabled={updateVendor.isPending}>
+                {updateVendor.isPending ? "Saving…" : "Save"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { requireRole } from "../lib/auth";
 import { db } from "@workspace/db";
 import { billsTable, vendorsTable, programsTable, activityLogTable } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
@@ -215,6 +216,20 @@ router.post("/bills/:id/approve", async (req, res): Promise<void> => {
 
   const programName = await getProgramName(bill.programId);
   res.json(ApproveBillResponse.parse(formatBill(bill, vendorName, programName)));
+});
+
+router.delete("/bills/:id", requireRole("admin"), async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [deleted] = await db.delete(billsTable).where(eq(billsTable.id, id)).returning();
+  if (!deleted) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 export default router;

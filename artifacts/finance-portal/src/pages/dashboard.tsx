@@ -1,8 +1,13 @@
+import { useEffect, useState } from "react";
 import { useGetDashboardSummary, useGetSpendingByProgram, useGetRecentActivity } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { apiJson } from "@/lib/api";
+import { CREDIT_STATUSES, STATUS_LABEL, STATUS_COLOR, type CreditStatus } from "@/pages/credits";
+import { TrendingUp } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -181,6 +186,8 @@ function FullDashboard() {
         </div>
       ) : null}
 
+      <CreditsDonut />
+
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
         <Card className="col-span-4">
           <CardHeader>
@@ -270,5 +277,124 @@ function FullDashboard() {
         </Card>
       </div>
     </div>
+  );
+}
+
+type CreditSummary = {
+  realized: number;
+  potential: number;
+  writeOff: number;
+  byStatus: { status: CreditStatus; amount: number; count: number }[];
+};
+
+function CreditsDonut() {
+  const [data, setData] = useState<CreditSummary | null>(null);
+  const [filter, setFilter] = useState<CreditStatus | "all">("all");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const summary = await apiJson<CreditSummary>(`/credit-summary`);
+        if (!cancelled) setData(summary);
+      } catch {
+        // ignore — user may not have access
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) return <Skeleton className="h-64 w-full" />;
+  if (!data) return null;
+
+  const fmt = (n: number) =>
+    new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+
+  const slices = data.byStatus
+    .filter((s) => (filter === "all" ? true : s.status === filter))
+    .filter((s) => s.amount > 0);
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between gap-3 flex-wrap">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-primary" /> Credits & Deposits
+          </CardTitle>
+          <CardDescription>
+            Realized income only counts items marked Received. Write-offs are excluded from potential.
+          </CardDescription>
+        </div>
+        <Select value={filter} onValueChange={(v) => setFilter(v as CreditStatus | "all")}>
+          <SelectTrigger className="w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            {CREDIT_STATUSES.map((s) => (
+              <SelectItem key={s} value={s}>{STATUS_LABEL[s]}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+          <div className="space-y-3">
+            <div className="rounded-lg border p-4 bg-success/5">
+              <div className="text-xs text-muted-foreground">Realized income</div>
+              <div className="text-2xl font-bold" style={{ color: "#24b556" }}>{fmt(data.realized)}</div>
+            </div>
+            <div className="rounded-lg border p-4 bg-primary/5">
+              <div className="text-xs text-muted-foreground">Potential income</div>
+              <div className="text-2xl font-bold" style={{ color: "#4175f4" }}>{fmt(data.potential)}</div>
+            </div>
+            <div className="rounded-lg border p-4 bg-destructive/5">
+              <div className="text-xs text-muted-foreground">Write-offs</div>
+              <div className="text-2xl font-bold" style={{ color: "#ef4444" }}>{fmt(data.writeOff)}</div>
+            </div>
+          </div>
+          <div className="md:col-span-2 h-[260px]">
+            {slices.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+                No credits in this view yet.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={slices}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={100}
+                    paddingAngle={2}
+                    dataKey="amount"
+                    nameKey="status"
+                  >
+                    {slices.map((s) => (
+                      <Cell key={s.status} fill={STATUS_COLOR[s.status]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value: number, _name: string, p: any) => [
+                      `$${value.toLocaleString()}`,
+                      STATUS_LABEL[p.payload.status as CreditStatus],
+                    ]}
+                  />
+                  <Legend
+                    formatter={(value: string) => STATUS_LABEL[value as CreditStatus] ?? value}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

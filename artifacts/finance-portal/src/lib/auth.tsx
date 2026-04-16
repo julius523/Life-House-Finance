@@ -126,6 +126,7 @@ export type Section =
   | "transactions"
   | "programs"
   | "vendors"
+  | "credits"
   | "month-end"
   | "reports"
   | "admin";

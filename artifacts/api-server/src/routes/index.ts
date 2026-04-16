@@ -14,6 +14,7 @@ import monthEndRouter from "./month-end";
 import storageRouter from "./storage";
 import aiRouter from "./ai";
 import reportsRouter from "./reports";
+import creditsRouter from "./credits";
 
 const router: IRouter = Router();
 
@@ -32,5 +33,6 @@ router.use(monthEndRouter);
 router.use(storageRouter);
 router.use(aiRouter);
 router.use(reportsRouter);
+router.use(creditsRouter);
 
 export default router;

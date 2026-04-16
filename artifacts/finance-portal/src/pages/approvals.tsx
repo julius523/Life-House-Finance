@@ -11,15 +11,20 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
-import { AlertCircle, Clock, Check, X, CheckSquare } from "lucide-react";
+import { Clock, Check, X, CheckSquare, Eye, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { Empty } from "@/components/ui/empty";
+import { useLocation } from "wouter";
+import { apiJson } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 export default function Approvals() {
   const { data: approvals, isLoading } = useListApprovals();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
+  const { user } = useAuth();
 
   const approveExpense = useApproveExpense();
   const rejectExpense = useRejectExpense();
@@ -120,12 +125,48 @@ export default function Approvals() {
                       </span>
                     </div>
                   </div>
-                  <div className="mt-4 sm:mt-0 flex items-center space-x-2 w-full sm:w-auto">
-                    <Button variant="outline" size="sm" className="w-full sm:w-auto text-destructive border-destructive hover:bg-destructive/10" onClick={() => handleReject(item)}>
-                      <X className="mr-2 h-4 w-4" />
-                      Reject
+                  <div className="mt-4 sm:mt-0 flex items-center gap-2 w-full sm:w-auto flex-wrap">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        navigate(item.type === "expense"
+                          ? `/expenses/${item.referenceId}`
+                          : `/bills/${item.referenceId}`)
+                      }
+                      title="View / Edit"
+                    >
+                      <Eye className="h-4 w-4" />
                     </Button>
-                    <Button variant="default" size="sm" className="w-full sm:w-auto bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => handleApprove(item)}>
+                    {user?.role === "admin" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive border-destructive/40 hover:bg-destructive/10"
+                        onClick={async () => {
+                          if (!confirm(`Delete this ${item.type}? This cannot be undone.`)) return;
+                          try {
+                            const path = item.type === "expense"
+                              ? `/expenses/${item.referenceId}`
+                              : `/bills/${item.referenceId}`;
+                            await apiJson(path, { method: "DELETE" });
+                            toast({ title: "Item deleted" });
+                            queryClient.invalidateQueries({ queryKey: getListApprovalsQueryKey() });
+                          } catch (e) {
+                            toast({ title: "Could not delete", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {item.type === "expense" && (
+                      <Button variant="outline" size="sm" className="text-destructive border-destructive hover:bg-destructive/10" onClick={() => handleReject(item)}>
+                        <X className="mr-2 h-4 w-4" />
+                        Reject
+                      </Button>
+                    )}
+                    <Button variant="default" size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => handleApprove(item)}>
                       <Check className="mr-2 h-4 w-4" />
                       Approve
                     </Button>
