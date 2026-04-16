@@ -7,18 +7,31 @@ import {
   vendorsTable,
   transactionsTable,
 } from "@workspace/db";
-import { sql, eq, and, gte, lte } from "drizzle-orm";
-import {
-  GetFinancialSummaryReportQueryParams,
-  GetFinancialSummaryReportResponse,
-} from "@workspace/api-zod";
+import { sql, and, gte, lte } from "drizzle-orm";
+import { z } from "zod";
+import { GetFinancialSummaryReportResponse } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
+// Query params arrive as strings; coerce them to Date locally rather than
+// relying on the generated z.date() schema (which would reject ISO strings).
+// Accept ISO date strings (YYYY-MM-DD or full ISO timestamp) and normalize to
+// the YYYY-MM-DD form used by drizzle's `date` columns.
+const isoDateString = z
+  .string()
+  .min(1)
+  .refine((v) => !Number.isNaN(Date.parse(v)), { message: "Invalid date" })
+  .transform((v) => new Date(v).toISOString().slice(0, 10));
+
+const QuerySchema = z.object({
+  fromDate: isoDateString.optional(),
+  toDate: isoDateString.optional(),
+});
+
 router.get("/reports/financial-summary", async (req, res): Promise<void> => {
-  const parsed = GetFinancialSummaryReportQueryParams.safeParse(req.query);
+  const parsed = QuerySchema.safeParse(req.query);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid query params" });
+    res.status(400).json({ error: "Invalid date range", details: parsed.error.format() });
     return;
   }
   const { fromDate, toDate } = parsed.data;

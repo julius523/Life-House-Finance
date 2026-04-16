@@ -25,6 +25,7 @@ import {
   getListExpensesQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Sparkles, Upload, Loader2, FileText } from "lucide-react";
 
 interface Props {
@@ -38,13 +39,12 @@ export function BankStatementImport({ trigger }: Props) {
   const [programId, setProgramId] = useState<string>("none");
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [, navigate] = useLocation();
   const { uploadFile, isUploading, progress } = useUpload();
   const parse = useParseBankStatement();
   const { data: programs } = useListPrograms();
 
-  const programList = Array.isArray(programs)
-    ? programs
-    : ((programs as any)?.items ?? []);
+  const programList = programs ?? [];
 
   const handleSubmit = async () => {
     if (!file) {
@@ -76,12 +76,15 @@ export function BankStatementImport({ trigger }: Props) {
         title: `Imported ${result.createdCount} draft expense${result.createdCount === 1 ? "" : "s"}`,
         description:
           result.skippedCount > 0
-            ? `${result.skippedCount} non-debit lines were skipped.`
-            : "Review the drafts and submit for approval.",
+            ? `${result.skippedCount} non-debit lines were skipped. Opening drafts for review…`
+            : "Opening drafts for review…",
       });
       queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey() });
       setOpen(false);
       setFile(null);
+      if (result.createdCount > 0) {
+        navigate("/expenses?status=draft");
+      }
     } catch (e) {
       toast({
         title: "Could not parse this statement",
@@ -174,7 +177,7 @@ export function BankStatementImport({ trigger }: Props) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">General Fund (Unallocated)</SelectItem>
-                  {programList.map((p: any) => (
+                  {programList.map((p) => (
                     <SelectItem key={p.id} value={String(p.id)}>
                       {p.name}
                     </SelectItem>

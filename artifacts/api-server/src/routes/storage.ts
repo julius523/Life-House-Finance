@@ -5,7 +5,8 @@ import {
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { ObjectPermission } from "../lib/objectAcl";
+import { db, receiptsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -89,23 +90,21 @@ router.get("/storage/objects/*path", async (req: Request, res: Response) => {
     const raw = req.params.path;
     const wildcardPath = Array.isArray(raw) ? raw.join("/") : raw;
     const objectPath = `/objects/${wildcardPath}`;
+
+    // ACL: only serve private objects that are registered as receipts in the
+    // application database. This prevents enumeration of arbitrary objects in
+    // the bucket and limits exposure to files explicitly tracked by the app.
+    const known = await db
+      .select({ id: receiptsTable.id })
+      .from(receiptsTable)
+      .where(eq(receiptsTable.fileUrl, objectPath))
+      .limit(1);
+    if (known.length === 0) {
+      res.status(404).json({ error: "Object not found" });
+      return;
+    }
+
     const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
-
-    // --- Protected route example (uncomment when using replit-auth) ---
-    // if (!req.isAuthenticated()) {
-    //   res.status(401).json({ error: "Unauthorized" });
-    //   return;
-    // }
-    // const canAccess = await objectStorageService.canAccessObjectEntity({
-    //   userId: req.user.id,
-    //   objectFile,
-    //   requestedPermission: ObjectPermission.READ,
-    // });
-    // if (!canAccess) {
-    //   res.status(403).json({ error: "Forbidden" });
-    //   return;
-    // }
-
     const response = await objectStorageService.downloadObject(objectFile);
 
     res.status(response.status);

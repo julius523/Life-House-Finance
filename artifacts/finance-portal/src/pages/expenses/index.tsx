@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link } from "wouter";
+import { useEffect, useState } from "react";
+import { Link, useSearch } from "wouter";
 import { useListExpenses } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,22 +10,48 @@ import { format } from "date-fns";
 import { Plus, Receipt, Filter } from "lucide-react";
 import { Empty } from "@/components/ui/empty";
 
+type ExpenseStatus =
+  | "draft"
+  | "submitted"
+  | "approved"
+  | "rejected"
+  | "needs_correction"
+  | "reimbursed";
+
 export default function ExpensesList() {
-  const [status, setStatus] = useState<string>("all");
-  
+  const search = useSearch();
+  const initialStatus = new URLSearchParams(search).get("status") ?? "all";
+  const [status, setStatus] = useState<string>(initialStatus);
+
+  // Keep filter in sync if URL changes (e.g. AI import navigation).
+  useEffect(() => {
+    const next = new URLSearchParams(search).get("status") ?? "all";
+    setStatus(next);
+  }, [search]);
+
   const { data: expensesList, isLoading } = useListExpenses(
-    status !== "all" ? { status: status as any } : undefined
+    status !== "all" ? { status: status as ExpenseStatus } : undefined,
   );
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'approved': return 'bg-success text-success-foreground';
-      case 'rejected': return 'bg-destructive text-destructive-foreground';
-      case 'submitted': return 'bg-info text-info-foreground';
-      case 'reimbursed': return 'bg-primary text-primary-foreground';
-      default: return 'bg-secondary text-secondary-foreground';
+      case "approved":
+        return "bg-success text-success-foreground";
+      case "rejected":
+        return "bg-destructive text-destructive-foreground";
+      case "needs_correction":
+        return "bg-warning text-warning-foreground";
+      case "submitted":
+        return "bg-info text-info-foreground";
+      case "reimbursed":
+        return "bg-primary text-primary-foreground";
+      default:
+        return "bg-secondary text-secondary-foreground";
     }
   };
+
+  const formatStatus = (s: string) =>
+    s === "needs_correction" ? "Needs Correction" : s;
 
   return (
     <div className="space-y-6">
@@ -58,6 +84,7 @@ export default function ExpensesList() {
                   <SelectItem value="draft">Draft</SelectItem>
                   <SelectItem value="submitted">Submitted</SelectItem>
                   <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="needs_correction">Needs Correction</SelectItem>
                   <SelectItem value="rejected">Rejected</SelectItem>
                   <SelectItem value="reimbursed">Reimbursed</SelectItem>
                 </SelectContent>
@@ -82,7 +109,7 @@ export default function ExpensesList() {
                           {expense.merchant}
                         </span>
                         <Badge className={getStatusColor(expense.status)} variant="outline">
-                          {expense.status}
+                          {formatStatus(expense.status)}
                         </Badge>
                       </div>
                       <div className="text-sm text-muted-foreground">
