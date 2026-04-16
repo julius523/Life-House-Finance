@@ -182,7 +182,26 @@ router.delete("/receipts/:id", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
+  const [existing] = await db
+    .select()
+    .from(receiptsTable)
+    .where(eq(receiptsTable.id, parsed.data.id));
+  if (!existing) {
+    res.status(204).send();
+    return;
+  }
   await db.delete(receiptsTable).where(eq(receiptsTable.id, parsed.data.id));
+  // Remove the receipt id from any linked expense's receiptIds array so it
+  // disappears from the attached-receipts list immediately.
+  if (existing.linkedExpenseId) {
+    await db
+      .update(expensesTable)
+      .set({
+        receiptIds: sql`array_remove(${expensesTable.receiptIds}, ${existing.id})`,
+        updatedAt: new Date(),
+      })
+      .where(eq(expensesTable.id, existing.linkedExpenseId));
+  }
   res.status(204).send();
 });
 

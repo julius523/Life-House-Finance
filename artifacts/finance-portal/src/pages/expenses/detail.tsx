@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useUpload } from "@workspace/object-storage-web";
 import { useRoute, Link } from "wouter";
 import {
   useGetExpense,
@@ -8,6 +9,7 @@ import {
   useCreateReceipt,
   useListReceipts,
   useDeleteExpense,
+  useDeleteReceipt,
   useDismissExpenseDuplicate,
   getGetExpenseQueryKey,
   getListReceiptsQueryKey,
@@ -35,6 +37,8 @@ import {
   Send,
   AlertTriangle,
   Trash2,
+  Replace,
+  Plus,
 } from "lucide-react";
 import { format } from "date-fns";
 import { RejectDialog } from "@/components/reject-dialog";
@@ -65,7 +69,90 @@ export default function ExpenseDetail() {
   const updateExpense = useUpdateExpense();
   const createReceipt = useCreateReceipt();
   const deleteExpense = useDeleteExpense();
+  const deleteReceipt = useDeleteReceipt();
   const dismissDuplicate = useDismissExpenseDuplicate();
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const addInputRef = useRef<HTMLInputElement>(null);
+  const [replacingId, setReplacingId] = useState<number | null>(null);
+  const { uploadFile } = useUpload({
+    onError: (e) => toast({ title: e.message, variant: "destructive" }),
+  });
+
+  const invalidateReceipts = () => {
+    queryClient.invalidateQueries({
+      queryKey: getListReceiptsQueryKey({ linkedExpenseId: id }),
+    });
+    refetch();
+  };
+
+  const handleAddReceipt = async (file: File) => {
+    if (!expense) return;
+    const result = await uploadFile(file);
+    if (!result) return;
+    try {
+      await createReceipt.mutateAsync({
+        data: {
+          fileName: file.name,
+          fileType: file.type || "application/octet-stream",
+          fileUrl: result.objectPath,
+          linkedExpenseId: expense.id,
+          amount: expense.amount,
+          receiptDate: expense.expenseDate,
+        },
+      });
+      toast({ title: "Receipt added" });
+      invalidateReceipts();
+    } catch {
+      toast({ title: "Failed to add receipt", variant: "destructive" });
+    }
+  };
+
+  const handleDeleteReceipt = async (receiptId: number) => {
+    if (!confirm("Delete this receipt? This cannot be undone.")) return;
+    try {
+      await deleteReceipt.mutateAsync({ id: receiptId });
+      toast({ title: "Receipt deleted" });
+      invalidateReceipts();
+    } catch {
+      toast({ title: "Failed to delete receipt", variant: "destructive" });
+    }
+  };
+
+  const handleReplaceClick = (receiptId: number) => {
+    setReplacingId(receiptId);
+    replaceInputRef.current?.click();
+  };
+
+  const handleReplaceFile = async (files: FileList | null) => {
+    const file = files?.[0];
+    const targetId = replacingId;
+    if (replaceInputRef.current) replaceInputRef.current.value = "";
+    setReplacingId(null);
+    if (!file || !targetId || !expense) return;
+    const result = await uploadFile(file);
+    if (!result) return;
+    try {
+      // Create the new receipt first so the old one is only removed once the
+      // replacement is safely persisted. Avoids losing the receipt if the
+      // create call fails.
+      await createReceipt.mutateAsync({
+        data: {
+          fileName: file.name,
+          fileType: file.type || "application/octet-stream",
+          fileUrl: result.objectPath,
+          linkedExpenseId: expense.id,
+          amount: expense.amount,
+          receiptDate: expense.expenseDate,
+        },
+      });
+      await deleteReceipt.mutateAsync({ id: targetId });
+      toast({ title: "Receipt replaced" });
+      invalidateReceipts();
+    } catch {
+      toast({ title: "Failed to replace receipt", variant: "destructive" });
+      invalidateReceipts();
+    }
+  };
 
   const refetch = () =>
     queryClient.invalidateQueries({ queryKey: getGetExpenseQueryKey(id) });
@@ -447,46 +534,102 @@ export default function ExpenseDetail() {
         </div>
       </div>
 
-      {linkedReceipts && linkedReceipts.items.length > 0 && (
-        <Card>
-          <CardHeader>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
             <CardTitle>Attached Receipts</CardTitle>
-          </CardHeader>
-          <CardContent>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => addInputRef.current?.click()}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Receipt
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <input
+            ref={addInputRef}
+            type="file"
+            accept="image/*,application/pdf"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (e.target) e.target.value = "";
+              if (file) await handleAddReceipt(file);
+            }}
+          />
+          <input
+            ref={replaceInputRef}
+            type="file"
+            accept="image/*,application/pdf"
+            className="hidden"
+            onChange={(e) => handleReplaceFile(e.target.files)}
+          />
+          {linkedReceipts && linkedReceipts.items.length > 0 ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
               {linkedReceipts.items.map((r) => (
-                <button
+                <div
                   key={r.id}
-                  type="button"
-                  onClick={() =>
-                    setViewerFile({
-                      fileUrl: r.fileUrl,
-                      fileName: r.fileName,
-                      fileType: r.fileType,
-                    })
-                  }
-                  className="group block text-left rounded-md border overflow-hidden hover:shadow-md transition-shadow"
+                  className="group rounded-md border overflow-hidden hover:shadow-md transition-shadow flex flex-col"
                 >
-                  <div className="h-28 bg-muted flex items-center justify-center overflow-hidden">
-                    {r.fileType?.startsWith("image/") && r.fileUrl ? (
-                      <img
-                        src={`/api/storage/${r.fileUrl.replace(/^\/+/, "")}`}
-                        alt={r.fileName}
-                        className="object-cover w-full h-full"
-                      />
-                    ) : (
-                      <FileBox className="h-8 w-8 text-muted-foreground/40" />
-                    )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setViewerFile({
+                        fileUrl: r.fileUrl,
+                        fileName: r.fileName,
+                        fileType: r.fileType,
+                      })
+                    }
+                    className="block text-left"
+                  >
+                    <div className="h-28 bg-muted flex items-center justify-center overflow-hidden">
+                      {r.fileType?.startsWith("image/") && r.fileUrl ? (
+                        <img
+                          src={`/api/storage/${r.fileUrl.replace(/^\/+/, "")}`}
+                          alt={r.fileName}
+                          className="object-cover w-full h-full"
+                        />
+                      ) : (
+                        <FileBox className="h-8 w-8 text-muted-foreground/40" />
+                      )}
+                    </div>
+                    <div className="p-2 text-xs truncate" title={r.fileName}>
+                      {r.fileName}
+                    </div>
+                  </button>
+                  <div className="border-t flex">
+                    <button
+                      type="button"
+                      onClick={() => handleReplaceClick(r.id)}
+                      className="flex-1 px-2 py-1.5 text-xs hover:bg-muted flex items-center justify-center gap-1"
+                    >
+                      <Replace className="h-3 w-3" />
+                      Replace
+                    </button>
+                    <div className="w-px bg-border" />
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteReceipt(r.id)}
+                      className="flex-1 px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      Delete
+                    </button>
                   </div>
-                  <div className="p-2 text-xs truncate" title={r.fileName}>
-                    {r.fileName}
-                  </div>
-                </button>
+                </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          ) : (
+            <div className="text-sm text-muted-foreground py-6 text-center">
+              No receipts attached. Use "Add Receipt" above to upload one.
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <ReceiptViewer
         file={viewerFile}
