@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@workspace/object-storage-web";
 import { BankStatementImport } from "@/components/bank-statement-import";
+import { ReceiptViewer, type ReceiptViewerFile } from "@/components/receipt-viewer";
 
 export default function ReceiptsList() {
   const [search, setSearch] = useState("");
@@ -28,6 +29,7 @@ export default function ReceiptsList() {
   const createReceipt = useCreateReceipt();
   const { uploadFile, isUploading } = useUpload();
   const [pendingExpenseId, setPendingExpenseId] = useState<number | null>(null);
+  const [viewerFile, setViewerFile] = useState<ReceiptViewerFile | null>(null);
 
   const { data: receiptsList, isLoading: receiptsLoading } = useListReceipts(
     search ? { search } : undefined,
@@ -171,18 +173,27 @@ export default function ReceiptsList() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 p-6">
                   {receiptsList.items.map((receipt) => (
                     <Card key={receipt.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                      <a
-                        href={
-                          receipt.fileUrl
-                            ? `/api/storage/${receipt.fileUrl.replace(/^\/+/, "")}`
-                            : "#"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViewerFile({
+                            fileUrl: receipt.fileUrl,
+                            fileName: receipt.fileName,
+                            fileType: receipt.fileType,
+                          })
                         }
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block"
+                        className="block w-full text-left"
                       >
-                        <div className="h-32 bg-muted flex items-center justify-center border-b relative">
-                          <FileBox className="h-10 w-10 text-muted-foreground/30" />
+                        <div className="h-32 bg-muted flex items-center justify-center border-b relative overflow-hidden">
+                          {receipt.fileType?.startsWith("image/") && receipt.fileUrl ? (
+                            <img
+                              src={`/api/storage/${receipt.fileUrl.replace(/^\/+/, "")}`}
+                              alt={receipt.fileName}
+                              className="object-cover w-full h-full"
+                            />
+                          ) : (
+                            <FileBox className="h-10 w-10 text-muted-foreground/30" />
+                          )}
                           {(receipt.linkedExpenseId || receipt.linkedBillId) && (
                             <div
                               className="absolute top-2 right-2 bg-background/80 backdrop-blur-sm p-1 rounded-md shadow-sm border"
@@ -192,7 +203,7 @@ export default function ReceiptsList() {
                             </div>
                           )}
                         </div>
-                      </a>
+                      </button>
                       <CardContent className="p-4 space-y-2">
                         <div className="font-medium truncate" title={receipt.fileName}>
                           {receipt.fileName}
@@ -343,6 +354,14 @@ export default function ReceiptsList() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <ReceiptViewer
+        file={viewerFile}
+        open={viewerFile !== null}
+        onOpenChange={(o) => {
+          if (!o) setViewerFile(null);
+        }}
+      />
     </div>
   );
 }

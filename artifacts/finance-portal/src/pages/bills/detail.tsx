@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { useRoute, Link } from "wouter";
-import { 
-  useGetBill, 
+import {
+  useGetBill,
   useApproveBill,
-  getGetBillQueryKey
+  useListReceipts,
+  getGetBillQueryKey,
+  getListReceiptsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,16 +14,23 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Check, Building2, Calendar, FileText, Tag } from "lucide-react";
+import { ArrowLeft, Check, Building2, Calendar, FileText, Tag, FileBox } from "lucide-react";
 import { format } from "date-fns";
+import { ReceiptViewer, type ReceiptViewerFile } from "@/components/receipt-viewer";
 
 export default function BillDetail() {
   const [, params] = useRoute("/bills/:id");
   const id = params?.id ? parseInt(params.id) : 0;
   
-  const { data: bill, isLoading } = useGetBill(id, { 
-    query: { enabled: !!id, queryKey: getGetBillQueryKey(id) } 
+  const [viewerFile, setViewerFile] = useState<ReceiptViewerFile | null>(null);
+
+  const { data: bill, isLoading } = useGetBill(id, {
+    query: { enabled: !!id, queryKey: getGetBillQueryKey(id) }
   });
+  const { data: linkedReceipts } = useListReceipts(
+    { linkedBillId: id },
+    { query: { enabled: !!id, queryKey: getListReceiptsQueryKey({ linkedBillId: id }) } },
+  );
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -169,6 +179,55 @@ export default function BillDetail() {
           )}
         </div>
       </div>
+
+      {linkedReceipts && linkedReceipts.items.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Attached Documents</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {linkedReceipts.items.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() =>
+                    setViewerFile({
+                      fileUrl: r.fileUrl,
+                      fileName: r.fileName,
+                      fileType: r.fileType,
+                    })
+                  }
+                  className="block text-left rounded-md border overflow-hidden hover:shadow-md transition-shadow"
+                >
+                  <div className="h-28 bg-muted flex items-center justify-center overflow-hidden">
+                    {r.fileType?.startsWith("image/") && r.fileUrl ? (
+                      <img
+                        src={`/api/storage/${r.fileUrl.replace(/^\/+/, "")}`}
+                        alt={r.fileName}
+                        className="object-cover w-full h-full"
+                      />
+                    ) : (
+                      <FileBox className="h-8 w-8 text-muted-foreground/40" />
+                    )}
+                  </div>
+                  <div className="p-2 text-xs truncate" title={r.fileName}>
+                    {r.fileName}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <ReceiptViewer
+        file={viewerFile}
+        open={viewerFile !== null}
+        onOpenChange={(o) => {
+          if (!o) setViewerFile(null);
+        }}
+      />
     </div>
   );
 }

@@ -6,7 +6,9 @@ import {
   useRejectExpense,
   useUpdateExpense,
   useCreateReceipt,
+  useListReceipts,
   getGetExpenseQueryKey,
+  getListReceiptsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,16 +32,23 @@ import {
 import { format } from "date-fns";
 import { RejectDialog } from "@/components/reject-dialog";
 import { ReceiptUploader, type PendingReceipt } from "@/components/receipt-uploader";
+import { ReceiptViewer, type ReceiptViewerFile } from "@/components/receipt-viewer";
+import { FileBox } from "lucide-react";
 
 export default function ExpenseDetail() {
   const [, params] = useRoute("/expenses/:id");
   const id = params?.id ? parseInt(params.id) : 0;
   const [rejectOpen, setRejectOpen] = useState(false);
   const [resubmitReceipts, setResubmitReceipts] = useState<PendingReceipt[]>([]);
+  const [viewerFile, setViewerFile] = useState<ReceiptViewerFile | null>(null);
 
   const { data: expense, isLoading } = useGetExpense(id, {
     query: { enabled: !!id, queryKey: getGetExpenseQueryKey(id) },
   });
+  const { data: linkedReceipts } = useListReceipts(
+    { linkedExpenseId: id },
+    { query: { enabled: !!id, queryKey: getListReceiptsQueryKey({ linkedExpenseId: id }) } },
+  );
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -328,6 +337,55 @@ export default function ExpenseDetail() {
           </Card>
         </div>
       </div>
+
+      {linkedReceipts && linkedReceipts.items.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Attached Receipts</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {linkedReceipts.items.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() =>
+                    setViewerFile({
+                      fileUrl: r.fileUrl,
+                      fileName: r.fileName,
+                      fileType: r.fileType,
+                    })
+                  }
+                  className="group block text-left rounded-md border overflow-hidden hover:shadow-md transition-shadow"
+                >
+                  <div className="h-28 bg-muted flex items-center justify-center overflow-hidden">
+                    {r.fileType?.startsWith("image/") && r.fileUrl ? (
+                      <img
+                        src={`/api/storage/${r.fileUrl.replace(/^\/+/, "")}`}
+                        alt={r.fileName}
+                        className="object-cover w-full h-full"
+                      />
+                    ) : (
+                      <FileBox className="h-8 w-8 text-muted-foreground/40" />
+                    )}
+                  </div>
+                  <div className="p-2 text-xs truncate" title={r.fileName}>
+                    {r.fileName}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <ReceiptViewer
+        file={viewerFile}
+        open={viewerFile !== null}
+        onOpenChange={(o) => {
+          if (!o) setViewerFile(null);
+        }}
+      />
 
       <RejectDialog
         open={rejectOpen}

@@ -475,6 +475,16 @@ paths:
           description: Filter by whether the receipt is linked to an expense/bill
           schema:
             type: boolean
+        - name: linkedExpenseId
+          in: query
+          description: Only return receipts attached to this expense
+          schema:
+            type: integer
+        - name: linkedBillId
+          in: query
+          description: Only return receipts attached to this bill
+          schema:
+            type: integer
         - name: page
           in: query
           schema:

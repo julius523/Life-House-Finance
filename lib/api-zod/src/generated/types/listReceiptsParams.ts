@@ -13,5 +13,13 @@ export type ListReceiptsParams = {
    * Filter by whether the receipt is linked to an expense/bill
    */
   linked?: boolean;
+  /**
+   * Only return receipts attached to this expense
+   */
+  linkedExpenseId?: number;
+  /**
+   * Only return receipts attached to this bill
+   */
+  linkedBillId?: number;
   page?: number;
 };

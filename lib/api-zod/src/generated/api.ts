@@ -639,6 +639,14 @@ export const ListReceiptsQueryParams = zod.object({
     .boolean()
     .optional()
     .describe("Filter by whether the receipt is linked to an expense\/bill"),
+  linkedExpenseId: zod.coerce
+    .number()
+    .optional()
+    .describe("Only return receipts attached to this expense"),
+  linkedBillId: zod.coerce
+    .number()
+    .optional()
+    .describe("Only return receipts attached to this bill"),
   page: zod.coerce.number().default(listReceiptsQueryPageDefault),
 });
 

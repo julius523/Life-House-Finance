@@ -44,11 +44,16 @@ router.get("/receipts", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Invalid query params" });
     return;
   }
-  const { search, vendorId, linked, page = 1 } = parsed.data;
+  const { search, vendorId, linked, linkedExpenseId, linkedBillId, page = 1 } =
+    parsed.data;
   const pageSize = 20;
 
   const conditions = [];
   if (vendorId) conditions.push(eq(receiptsTable.vendorId, vendorId));
+  if (linkedExpenseId)
+    conditions.push(eq(receiptsTable.linkedExpenseId, linkedExpenseId));
+  if (linkedBillId)
+    conditions.push(eq(receiptsTable.linkedBillId, linkedBillId));
   if (search && search.trim().length > 0) {
     const term = `%${search.trim()}%`;
     conditions.push(
