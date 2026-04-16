@@ -150,8 +150,15 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
     .sort((a, b) => b.totalAmount - a.totalAmount)
     .slice(0, 10);
 
-  // Missing receipts: itemized list (the report needs concrete rows for
-  // follow-up, not just totals).
+  // Missing receipts: itemized list, scoped to the same date range as the
+  // rest of the report so totals stay consistent with the active filter.
+  const missingConds = [
+    sql`(${expensesTable.receiptIds} is null or array_length(${expensesTable.receiptIds}, 1) is null)`,
+    sql`${expensesTable.status} in ('submitted', 'approved', 'needs_correction')`,
+  ];
+  if (fromDate) missingConds.push(gte(expensesTable.expenseDate, fromDate));
+  if (toDate) missingConds.push(lte(expensesTable.expenseDate, toDate));
+
   const missingItems = await db
     .select({
       expenseId: expensesTable.id,
@@ -162,9 +169,7 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
       createdAt: expensesTable.createdAt,
     })
     .from(expensesTable)
-    .where(
-      sql`(${expensesTable.receiptIds} is null or array_length(${expensesTable.receiptIds}, 1) is null) and ${expensesTable.status} in ('submitted', 'approved', 'needs_correction')`,
-    );
+    .where(and(...missingConds));
 
   const now = Date.now();
   const missingReceipts = missingItems.map((row) => ({

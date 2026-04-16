@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { receiptsTable, vendorsTable, expensesTable } from "@workspace/db";
-import { eq, and, desc, count, sql } from "drizzle-orm";
+import { eq, and, desc, count, sql, ilike, or } from "drizzle-orm";
 import {
   ListReceiptsQueryParams,
   ListReceiptsResponse,
@@ -49,6 +49,15 @@ router.get("/receipts", async (req, res): Promise<void> => {
 
   const conditions = [];
   if (vendorId) conditions.push(eq(receiptsTable.vendorId, vendorId));
+  if (search && search.trim().length > 0) {
+    const term = `%${search.trim()}%`;
+    conditions.push(
+      or(
+        ilike(receiptsTable.fileName, term),
+        ilike(receiptsTable.ocrText, term),
+      )!,
+    );
+  }
   if (linked === true) {
     conditions.push(
       sql`(${receiptsTable.linkedExpenseId} is not null or ${receiptsTable.linkedBillId} is not null)`
