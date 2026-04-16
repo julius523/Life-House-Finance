@@ -1002,6 +1002,90 @@ export const useApproveExpense = <
 };
 
 /**
+ * @summary Mark an expense as not a duplicate
+ */
+export const getDismissExpenseDuplicateUrl = (id: number) => {
+  return `/api/expenses/${id}/dismiss-duplicate`;
+};
+
+export const dismissExpenseDuplicate = async (
+  id: number,
+  options?: RequestInit,
+): Promise<Expense> => {
+  return customFetch<Expense>(getDismissExpenseDuplicateUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getDismissExpenseDuplicateMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof dismissExpenseDuplicate>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof dismissExpenseDuplicate>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["dismissExpenseDuplicate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof dismissExpenseDuplicate>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return dismissExpenseDuplicate(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DismissExpenseDuplicateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof dismissExpenseDuplicate>>
+>;
+
+export type DismissExpenseDuplicateMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Mark an expense as not a duplicate
+ */
+export const useDismissExpenseDuplicate = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof dismissExpenseDuplicate>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof dismissExpenseDuplicate>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getDismissExpenseDuplicateMutationOptions(options));
+};
+
+/**
  * @summary Reject an expense claim
  */
 export const getRejectExpenseUrl = (id: number) => {

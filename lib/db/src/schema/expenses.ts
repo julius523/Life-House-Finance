@@ -1,4 +1,4 @@
-import { pgTable, text, serial, numeric, timestamp, date, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, numeric, timestamp, date, integer, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -18,6 +18,7 @@ export const expensesTable = pgTable("expenses", {
   rejectionReason: text("rejection_reason"),
   reimbursedDate: date("reimbursed_date"),
   receiptIds: integer("receipt_ids").array(),
+  duplicateDismissed: boolean("duplicate_dismissed").notNull().default(false),
   accountingEntryRef: text("accounting_entry_ref"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

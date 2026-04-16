@@ -239,6 +239,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/Expense"
 
+  /expenses/{id}/dismiss-duplicate:
+    post:
+      operationId: dismissExpenseDuplicate
+      tags: [expenses]
+      summary: Mark an expense as not a duplicate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Updated expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
   /expenses/{id}/reject:
     post:
       operationId: rejectExpense
@@ -1084,6 +1103,14 @@ components:
             type: integer
         accountingEntryRef:
           type: string
+        duplicateDismissed:
+          type: boolean
+          description: True when the user has confirmed this is not a duplicate.
+        potentialDuplicateIds:
+          type: array
+          items:
+            type: integer
+          description: Other expense ids with matching date + amount.
         createdAt:
           type: string
           format: date-time

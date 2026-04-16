@@ -111,6 +111,11 @@ export default function ExpensesList() {
                         <Badge className={getStatusColor(expense.status)} variant="outline">
                           {formatStatus(expense.status)}
                         </Badge>
+                        {expense.potentialDuplicateIds && expense.potentialDuplicateIds.length > 0 && (
+                          <Badge variant="outline" className="bg-warning/10 text-warning border-warning/40">
+                            Possible Duplicate
+                          </Badge>
+                        )}
                       </div>
                       <div className="text-sm text-muted-foreground">
                         {expense.description || "No description"}

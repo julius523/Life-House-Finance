@@ -103,6 +103,10 @@ export interface Expense {
   reimbursedDate?: string;
   receiptIds?: number[];
   accountingEntryRef?: string;
+  /** True when the user has confirmed this is not a duplicate. */
+  duplicateDismissed?: boolean;
+  /** Other expense ids with matching date + amount. */
+  potentialDuplicateIds?: number[];
   createdAt: string;
   updatedAt?: string;
 }

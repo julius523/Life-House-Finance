@@ -143,6 +143,14 @@ export const ListExpensesResponse = zod.object({
       reimbursedDate: zod.coerce.date().optional(),
       receiptIds: zod.array(zod.number()).optional(),
       accountingEntryRef: zod.string().optional(),
+      duplicateDismissed: zod
+        .boolean()
+        .optional()
+        .describe("True when the user has confirmed this is not a duplicate."),
+      potentialDuplicateIds: zod
+        .array(zod.number())
+        .optional()
+        .describe("Other expense ids with matching date + amount."),
       createdAt: zod.coerce.date(),
       updatedAt: zod.coerce.date().optional(),
     }),
@@ -213,6 +221,14 @@ export const GetExpenseResponse = zod.object({
   reimbursedDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   accountingEntryRef: zod.string().optional(),
+  duplicateDismissed: zod
+    .boolean()
+    .optional()
+    .describe("True when the user has confirmed this is not a duplicate."),
+  potentialDuplicateIds: zod
+    .array(zod.number())
+    .optional()
+    .describe("Other expense ids with matching date + amount."),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date().optional(),
 });
@@ -285,6 +301,14 @@ export const UpdateExpenseResponse = zod.object({
   reimbursedDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   accountingEntryRef: zod.string().optional(),
+  duplicateDismissed: zod
+    .boolean()
+    .optional()
+    .describe("True when the user has confirmed this is not a duplicate."),
+  potentialDuplicateIds: zod
+    .array(zod.number())
+    .optional()
+    .describe("Other expense ids with matching date + amount."),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date().optional(),
 });
@@ -340,6 +364,65 @@ export const ApproveExpenseResponse = zod.object({
   reimbursedDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   accountingEntryRef: zod.string().optional(),
+  duplicateDismissed: zod
+    .boolean()
+    .optional()
+    .describe("True when the user has confirmed this is not a duplicate."),
+  potentialDuplicateIds: zod
+    .array(zod.number())
+    .optional()
+    .describe("Other expense ids with matching date + amount."),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date().optional(),
+});
+
+/**
+ * @summary Mark an expense as not a duplicate
+ */
+export const DismissExpenseDuplicateParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DismissExpenseDuplicateResponse = zod.object({
+  id: zod.number(),
+  submittedBy: zod.string(),
+  submittedByEmail: zod.string().optional(),
+  expenseDate: zod.coerce.date(),
+  merchant: zod.string(),
+  description: zod.string(),
+  amount: zod.number(),
+  paymentMethod: zod.enum([
+    "cash",
+    "check",
+    "credit_card",
+    "debit_card",
+    "bank_transfer",
+    "other",
+  ]),
+  programId: zod.number().optional(),
+  programName: zod.string().optional(),
+  status: zod.enum([
+    "draft",
+    "submitted",
+    "approved",
+    "rejected",
+    "reimbursed",
+    "needs_correction",
+  ]),
+  managerApprovedBy: zod.string().optional(),
+  financeApprovedBy: zod.string().optional(),
+  rejectionReason: zod.string().optional(),
+  reimbursedDate: zod.coerce.date().optional(),
+  receiptIds: zod.array(zod.number()).optional(),
+  accountingEntryRef: zod.string().optional(),
+  duplicateDismissed: zod
+    .boolean()
+    .optional()
+    .describe("True when the user has confirmed this is not a duplicate."),
+  potentialDuplicateIds: zod
+    .array(zod.number())
+    .optional()
+    .describe("Other expense ids with matching date + amount."),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date().optional(),
 });
@@ -396,6 +479,14 @@ export const RejectExpenseResponse = zod.object({
   reimbursedDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   accountingEntryRef: zod.string().optional(),
+  duplicateDismissed: zod
+    .boolean()
+    .optional()
+    .describe("True when the user has confirmed this is not a duplicate."),
+  potentialDuplicateIds: zod
+    .array(zod.number())
+    .optional()
+    .describe("Other expense ids with matching date + amount."),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date().optional(),
 });
@@ -1065,6 +1156,14 @@ export const ParseBankStatementResponse = zod.object({
       reimbursedDate: zod.coerce.date().optional(),
       receiptIds: zod.array(zod.number()).optional(),
       accountingEntryRef: zod.string().optional(),
+      duplicateDismissed: zod
+        .boolean()
+        .optional()
+        .describe("True when the user has confirmed this is not a duplicate."),
+      potentialDuplicateIds: zod
+        .array(zod.number())
+        .optional()
+        .describe("Other expense ids with matching date + amount."),
       createdAt: zod.coerce.date(),
       updatedAt: zod.coerce.date().optional(),
     }),

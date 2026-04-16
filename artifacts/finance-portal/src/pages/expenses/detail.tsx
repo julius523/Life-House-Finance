@@ -7,8 +7,11 @@ import {
   useUpdateExpense,
   useCreateReceipt,
   useListReceipts,
+  useDeleteExpense,
+  useDismissExpenseDuplicate,
   getGetExpenseQueryKey,
   getListReceiptsQueryKey,
+  getListExpensesQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +33,8 @@ import {
   RotateCcw,
   Pencil,
   Send,
+  AlertTriangle,
+  Trash2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { RejectDialog } from "@/components/reject-dialog";
@@ -59,6 +64,8 @@ export default function ExpenseDetail() {
   const rejectExpense = useRejectExpense();
   const updateExpense = useUpdateExpense();
   const createReceipt = useCreateReceipt();
+  const deleteExpense = useDeleteExpense();
+  const dismissDuplicate = useDismissExpenseDuplicate();
 
   const refetch = () =>
     queryClient.invalidateQueries({ queryKey: getGetExpenseQueryKey(id) });
@@ -161,6 +168,28 @@ export default function ExpenseDetail() {
   const isSubmitted = expense.status === "submitted";
   const isDraft = expense.status === "draft";
 
+  const handleDismissDuplicate = async () => {
+    try {
+      await dismissDuplicate.mutateAsync({ id: expense.id });
+      toast({ title: "Marked as not a duplicate" });
+      refetch();
+      queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey() });
+    } catch {
+      toast({ title: "Failed to dismiss", variant: "destructive" });
+    }
+  };
+
+  const handleDeleteAsDuplicate = async () => {
+    try {
+      await deleteExpense.mutateAsync({ id: expense.id });
+      toast({ title: "Duplicate expense deleted" });
+      queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey() });
+      window.location.href = `${import.meta.env.BASE_URL}expenses`;
+    } catch {
+      toast({ title: "Failed to delete", variant: "destructive" });
+    }
+  };
+
   const handleSubmitDraft = async () => {
     try {
       await updateExpense.mutateAsync({
@@ -233,6 +262,53 @@ export default function ExpenseDetail() {
           )}
         </div>
       </div>
+
+      {expense.potentialDuplicateIds && expense.potentialDuplicateIds.length > 0 && (
+        <div className="rounded-md border border-warning/40 bg-warning/10 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-warning shrink-0 mt-0.5" />
+            <div className="flex-1 space-y-2">
+              <div className="font-semibold text-warning">
+                Potential duplicate detected
+              </div>
+              <div className="text-sm">
+                This expense has the same date and amount as{" "}
+                {expense.potentialDuplicateIds.length === 1 ? "another expense" : "other expenses"}:
+                {" "}
+                {expense.potentialDuplicateIds.map((dupId, i) => (
+                  <span key={dupId}>
+                    {i > 0 && ", "}
+                    <Link href={`/expenses/${dupId}`} className="font-medium underline">
+                      Expense #{dupId}
+                    </Link>
+                  </span>
+                ))}
+                . Please confirm whether this is a duplicate.
+              </div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDismissDuplicate}
+                  disabled={dismissDuplicate.isPending}
+                >
+                  Not a duplicate
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive border-destructive hover:bg-destructive/10"
+                  onClick={handleDeleteAsDuplicate}
+                  disabled={deleteExpense.isPending}
+                >
+                  <Trash2 className="mr-2 h-3 w-3" />
+                  Delete this expense
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="md:col-span-2">

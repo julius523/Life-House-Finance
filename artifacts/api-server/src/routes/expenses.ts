@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { expensesTable, programsTable, activityLogTable } from "@workspace/db";
-import { eq, and, desc, count, sql } from "drizzle-orm";
+import { eq, and, desc, count, sql, ne } from "drizzle-orm";
 import {
   ListExpensesQueryParams,
   ListExpensesResponse,
@@ -28,7 +28,11 @@ async function getProgramName(programId: number | null | undefined): Promise<str
   return prog?.name;
 }
 
-function formatExpense(e: typeof expensesTable.$inferSelect, programName?: string) {
+function formatExpense(
+  e: typeof expensesTable.$inferSelect,
+  programName?: string,
+  potentialDuplicateIds: number[] = [],
+) {
   return {
     id: e.id,
     submittedBy: e.submittedBy,
@@ -47,9 +51,51 @@ function formatExpense(e: typeof expensesTable.$inferSelect, programName?: strin
     reimbursedDate: e.reimbursedDate ?? undefined,
     receiptIds: e.receiptIds ?? undefined,
     accountingEntryRef: e.accountingEntryRef ?? undefined,
+    duplicateDismissed: e.duplicateDismissed,
+    potentialDuplicateIds: e.duplicateDismissed ? [] : potentialDuplicateIds,
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString(),
   };
+}
+
+// For each (date, amount) combination across the given expenses, return a map
+// from expense id -> array of OTHER expense ids that share the same date and
+// amount. Used to flag potential duplicates without per-row N+1 queries.
+async function buildDuplicateMap(
+  expenses: (typeof expensesTable.$inferSelect)[],
+): Promise<Map<number, number[]>> {
+  if (expenses.length === 0) return new Map();
+  const keys = Array.from(
+    new Set(expenses.map((e) => `${e.expenseDate}|${e.amount}`)),
+  );
+  // Pull every expense whose (date, amount) matches one of the input rows.
+  const candidates = await db
+    .select({
+      id: expensesTable.id,
+      expenseDate: expensesTable.expenseDate,
+      amount: expensesTable.amount,
+    })
+    .from(expensesTable)
+    .where(
+      sql`(${expensesTable.expenseDate}::text || '|' || ${expensesTable.amount}::text) in (${sql.join(
+        keys.map((k) => sql`${k}`),
+        sql`, `,
+      )})`,
+    );
+  const byKey = new Map<string, number[]>();
+  for (const c of candidates) {
+    const k = `${c.expenseDate}|${c.amount}`;
+    const arr = byKey.get(k) ?? [];
+    arr.push(c.id);
+    byKey.set(k, arr);
+  }
+  const result = new Map<number, number[]>();
+  for (const e of expenses) {
+    const k = `${e.expenseDate}|${e.amount}`;
+    const others = (byKey.get(k) ?? []).filter((id) => id !== e.id);
+    result.set(e.id, others);
+  }
+  return result;
 }
 
 router.get("/expenses", async (req, res): Promise<void> => {
@@ -73,10 +119,11 @@ router.get("/expenses", async (req, res): Promise<void> => {
     db.select({ cnt: count() }).from(expensesTable).where(where),
   ]);
 
+  const dupMap = await buildDuplicateMap(expenses);
   const items = await Promise.all(
     expenses.map(async (e) => {
       const programName = await getProgramName(e.programId);
-      return formatExpense(e, programName);
+      return formatExpense(e, programName, dupMap.get(e.id) ?? []);
     })
   );
 
@@ -137,7 +184,25 @@ router.get("/expenses/:id", async (req, res): Promise<void> => {
     return;
   }
   const programName = await getProgramName(expense.programId);
-  res.json(GetExpenseResponse.parse(formatExpense(expense, programName)));
+  const dups = await db
+    .select({ id: expensesTable.id })
+    .from(expensesTable)
+    .where(
+      and(
+        eq(expensesTable.expenseDate, expense.expenseDate),
+        eq(expensesTable.amount, expense.amount),
+        ne(expensesTable.id, expense.id),
+      ),
+    );
+  res.json(
+    GetExpenseResponse.parse(
+      formatExpense(
+        expense,
+        programName,
+        dups.map((d) => d.id),
+      ),
+    ),
+  );
 });
 
 router.put("/expenses/:id", async (req, res): Promise<void> => {
@@ -269,6 +334,25 @@ router.post("/expenses/:id/reject", async (req, res): Promise<void> => {
 
   const programName = await getProgramName(expense.programId);
   res.json(RejectExpenseResponse.parse(formatExpense(expense, programName)));
+});
+
+router.post("/expenses/:id/dismiss-duplicate", async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [expense] = await db
+    .update(expensesTable)
+    .set({ duplicateDismissed: true, updatedAt: new Date() })
+    .where(eq(expensesTable.id, id))
+    .returning();
+  if (!expense) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const programName = await getProgramName(expense.programId);
+  res.json(GetExpenseResponse.parse(formatExpense(expense, programName, [])));
 });
 
 export default router;
