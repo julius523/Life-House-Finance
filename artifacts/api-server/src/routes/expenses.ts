@@ -40,7 +40,7 @@ function formatExpense(e: typeof expensesTable.$inferSelect, programName?: strin
     paymentMethod: e.paymentMethod as "cash" | "check" | "credit_card" | "debit_card" | "bank_transfer" | "other",
     programId: e.programId ?? undefined,
     programName,
-    status: e.status as "draft" | "submitted" | "approved" | "rejected" | "reimbursed",
+    status: e.status as "draft" | "submitted" | "approved" | "rejected" | "reimbursed" | "needs_correction",
     managerApprovedBy: e.managerApprovedBy ?? undefined,
     financeApprovedBy: e.financeApprovedBy ?? undefined,
     rejectionReason: e.rejectionReason ?? undefined,
@@ -238,10 +238,13 @@ router.post("/expenses/:id/reject", async (req, res): Promise<void> => {
     return;
   }
 
+  const action = bodyParsed.data.action ?? "close";
+  const newStatus = action === "send_back" ? "needs_correction" : "rejected";
+
   const [expense] = await db
     .update(expensesTable)
     .set({
-      status: "rejected",
+      status: newStatus,
       rejectionReason: bodyParsed.data.reason,
       updatedAt: new Date(),
     })
@@ -255,7 +258,10 @@ router.post("/expenses/:id/reject", async (req, res): Promise<void> => {
 
   await db.insert(activityLogTable).values({
     type: "expense_rejected",
-    description: `Expense rejected: ${bodyParsed.data.reason}`,
+    description:
+      action === "send_back"
+        ? `Expense sent back for correction: ${bodyParsed.data.reason}`
+        : `Expense rejected: ${bodyParsed.data.reason}`,
     actor: bodyParsed.data.rejectedBy,
     referenceId: expense.id,
     referenceType: "expense",

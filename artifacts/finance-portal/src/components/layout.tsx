@@ -9,6 +9,7 @@ import {
   Building2, 
   CheckSquare, 
   CalendarCheck,
+  BarChart3,
   Menu
 } from "lucide-react";
 import { useState } from "react";
@@ -25,6 +26,7 @@ const NAV_ITEMS = [
   { href: "/programs", label: "Programs", icon: FolderTree },
   { href: "/vendors", label: "Vendors", icon: Building2 },
   { href: "/month-end", label: "Month End", icon: CalendarCheck },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {

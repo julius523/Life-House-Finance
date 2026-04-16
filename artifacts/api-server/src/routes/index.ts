@@ -9,6 +9,9 @@ import transactionsRouter from "./transactions";
 import programsRouter from "./programs";
 import approvalsRouter from "./approvals";
 import monthEndRouter from "./month-end";
+import storageRouter from "./storage";
+import aiRouter from "./ai";
+import reportsRouter from "./reports";
 
 const router: IRouter = Router();
 
@@ -22,5 +25,8 @@ router.use(transactionsRouter);
 router.use(programsRouter);
 router.use(approvalsRouter);
 router.use(monthEndRouter);
+router.use(storageRouter);
+router.use(aiRouter);
+router.use(reportsRouter);
 
 export default router;

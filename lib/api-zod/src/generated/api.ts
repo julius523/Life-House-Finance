@@ -94,7 +94,14 @@ export const listExpensesQueryPageSizeDefault = 20;
 
 export const ListExpensesQueryParams = zod.object({
   status: zod
-    .enum(["draft", "submitted", "approved", "rejected", "reimbursed"])
+    .enum([
+      "draft",
+      "submitted",
+      "approved",
+      "rejected",
+      "reimbursed",
+      "needs_correction",
+    ])
     .optional(),
   programId: zod.coerce.number().optional(),
   submittedBy: zod.coerce.string().optional(),
@@ -128,6 +135,7 @@ export const ListExpensesResponse = zod.object({
         "approved",
         "rejected",
         "reimbursed",
+        "needs_correction",
       ]),
       managerApprovedBy: zod.string().optional(),
       financeApprovedBy: zod.string().optional(),
@@ -197,6 +205,7 @@ export const GetExpenseResponse = zod.object({
     "approved",
     "rejected",
     "reimbursed",
+    "needs_correction",
   ]),
   managerApprovedBy: zod.string().optional(),
   financeApprovedBy: zod.string().optional(),
@@ -233,7 +242,14 @@ export const UpdateExpenseBody = zod.object({
   programId: zod.number().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   status: zod
-    .enum(["draft", "submitted", "approved", "rejected", "reimbursed"])
+    .enum([
+      "draft",
+      "submitted",
+      "approved",
+      "rejected",
+      "reimbursed",
+      "needs_correction",
+    ])
     .optional(),
 });
 
@@ -261,6 +277,7 @@ export const UpdateExpenseResponse = zod.object({
     "approved",
     "rejected",
     "reimbursed",
+    "needs_correction",
   ]),
   managerApprovedBy: zod.string().optional(),
   financeApprovedBy: zod.string().optional(),
@@ -315,6 +332,7 @@ export const ApproveExpenseResponse = zod.object({
     "approved",
     "rejected",
     "reimbursed",
+    "needs_correction",
   ]),
   managerApprovedBy: zod.string().optional(),
   financeApprovedBy: zod.string().optional(),
@@ -333,9 +351,17 @@ export const RejectExpenseParams = zod.object({
   id: zod.coerce.number(),
 });
 
+export const rejectExpenseBodyActionDefault = `close`;
+
 export const RejectExpenseBody = zod.object({
   rejectedBy: zod.string(),
   reason: zod.string(),
+  action: zod
+    .enum(["send_back", "close"])
+    .default(rejectExpenseBodyActionDefault)
+    .describe(
+      "send_back returns the expense to the submitter for correction; close marks it permanently rejected.",
+    ),
 });
 
 export const RejectExpenseResponse = zod.object({
@@ -362,6 +388,7 @@ export const RejectExpenseResponse = zod.object({
     "approved",
     "rejected",
     "reimbursed",
+    "needs_correction",
   ]),
   managerApprovedBy: zod.string().optional(),
   financeApprovedBy: zod.string().optional(),
@@ -649,6 +676,8 @@ export const CreateReceiptBody = zod.object({
   amount: zod.number().optional(),
   receiptDate: zod.coerce.date().optional(),
   tags: zod.array(zod.string()).optional(),
+  linkedExpenseId: zod.number().optional(),
+  linkedBillId: zod.number().optional(),
 });
 
 /**
@@ -947,6 +976,151 @@ export const ListApprovalsResponseItem = zod.object({
   urgency: zod.enum(["low", "medium", "high"]),
 });
 export const ListApprovalsResponse = zod.array(ListApprovalsResponseItem);
+
+/**
+ * @summary Request a presigned URL for uploading a file
+ */
+export const RequestUploadUrlBody = zod.object({
+  name: zod.string(),
+  size: zod.number(),
+  contentType: zod.string(),
+});
+
+export const RequestUploadUrlResponse = zod.object({
+  uploadURL: zod.string(),
+  objectPath: zod.string(),
+  metadata: zod.object({
+    name: zod.string(),
+    size: zod.number(),
+    contentType: zod.string(),
+  }),
+});
+
+/**
+ * @summary Parse a bank statement file into draft expenses
+ */
+export const ParseBankStatementBody = zod.object({
+  objectPath: zod
+    .string()
+    .describe(
+      "objectPath of the uploaded statement (PDF, image, or CSV\/text)",
+    ),
+  fileName: zod.string(),
+  contentType: zod.string(),
+  defaultPaymentMethod: zod
+    .enum([
+      "cash",
+      "check",
+      "credit_card",
+      "debit_card",
+      "bank_transfer",
+      "other",
+    ])
+    .optional(),
+  defaultProgramId: zod.number().optional(),
+  submittedBy: zod.string(),
+});
+
+export const ParseBankStatementResponse = zod.object({
+  createdCount: zod.number(),
+  skippedCount: zod.number(),
+  expenses: zod.array(
+    zod.object({
+      id: zod.number(),
+      submittedBy: zod.string(),
+      submittedByEmail: zod.string().optional(),
+      expenseDate: zod.coerce.date(),
+      merchant: zod.string(),
+      description: zod.string(),
+      amount: zod.number(),
+      paymentMethod: zod.enum([
+        "cash",
+        "check",
+        "credit_card",
+        "debit_card",
+        "bank_transfer",
+        "other",
+      ]),
+      programId: zod.number().optional(),
+      programName: zod.string().optional(),
+      status: zod.enum([
+        "draft",
+        "submitted",
+        "approved",
+        "rejected",
+        "reimbursed",
+        "needs_correction",
+      ]),
+      managerApprovedBy: zod.string().optional(),
+      financeApprovedBy: zod.string().optional(),
+      rejectionReason: zod.string().optional(),
+      reimbursedDate: zod.coerce.date().optional(),
+      receiptIds: zod.array(zod.number()).optional(),
+      accountingEntryRef: zod.string().optional(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date().optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Aggregated reporting data for the printable Reports page
+ */
+export const GetFinancialSummaryReportQueryParams = zod.object({
+  fromDate: zod.date().optional(),
+  toDate: zod.date().optional(),
+});
+
+export const GetFinancialSummaryReportResponse = zod.object({
+  generatedAt: zod.coerce.date(),
+  fromDate: zod.coerce.date().optional(),
+  toDate: zod.coerce.date().optional(),
+  expenseTotalsByStatus: zod.array(
+    zod.object({
+      status: zod.string(),
+      count: zod.number(),
+      amount: zod.number(),
+    }),
+  ),
+  billTotalsByStatus: zod.array(
+    zod.object({
+      status: zod.string(),
+      count: zod.number(),
+      amount: zod.number(),
+    }),
+  ),
+  spendByProgram: zod.array(
+    zod.object({
+      programId: zod.number().optional(),
+      programName: zod.string(),
+      budgetAmount: zod.number().optional(),
+      expenseAmount: zod.number(),
+      billAmount: zod.number(),
+      totalAmount: zod.number(),
+      percentUsed: zod.number().optional(),
+    }),
+  ),
+  topVendors: zod.array(
+    zod.object({
+      vendorId: zod.number().optional(),
+      vendorName: zod.string(),
+      billAmount: zod.number().optional(),
+      expenseAmount: zod.number().optional(),
+      totalAmount: zod.number(),
+    }),
+  ),
+  missingReceiptCount: zod.number(),
+  missingReceiptAmount: zod.number(),
+  bankReconciliation: zod.object({
+    totalTransactions: zod.number(),
+    unmatched: zod.number(),
+    matched: zod.number(),
+    reconciled: zod.number(),
+    totalDebits: zod.number(),
+    totalCredits: zod.number(),
+    netCashFlow: zod.number(),
+  }),
+});
 
 /**
  * @summary List month-end close checklists

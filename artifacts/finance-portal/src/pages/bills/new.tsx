@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { useLocation, Link } from "wouter";
-import { useCreateBill, useListVendors, useListPrograms } from "@workspace/api-client-react";
+import { useCreateBill, useListVendors, useListPrograms, useCreateReceipt } from "@workspace/api-client-react";
+import { ReceiptUploader, type PendingReceipt } from "@/components/receipt-uploader";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
@@ -25,8 +27,10 @@ export default function BillNew() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const createBill = useCreateBill();
+  const createReceipt = useCreateReceipt();
   const { data: vendors, isLoading: vendorsLoading } = useListVendors();
   const { data: programs, isLoading: programsLoading } = useListPrograms();
+  const [receipts, setReceipts] = useState<PendingReceipt[]>([]);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -49,7 +53,26 @@ export default function BillNew() {
       };
       
       const result = await createBill.mutateAsync({ data: billData });
-      toast({ title: "Bill created successfully" });
+
+      for (const r of receipts) {
+        await createReceipt.mutateAsync({
+          data: {
+            fileName: r.file.name,
+            fileType: r.contentType,
+            fileUrl: r.objectPath,
+            linkedBillId: result.id,
+            amount: values.amount,
+            receiptDate: values.invoiceDate || values.dueDate,
+          },
+        });
+      }
+
+      toast({
+        title: "Bill created successfully",
+        description: receipts.length > 0
+          ? `${receipts.length} document${receipts.length === 1 ? "" : "s"} attached.`
+          : undefined,
+      });
       setLocation(`/bills/${result.id}`);
     } catch (error) {
       toast({ title: "Failed to create bill", variant: "destructive" });
@@ -196,6 +219,15 @@ export default function BillNew() {
                       <FormMessage />
                     </FormItem>
                   )}
+                />
+              </div>
+
+              <div className="pt-4 border-t">
+                <ReceiptUploader
+                  value={receipts}
+                  onChange={setReceipts}
+                  label="Invoice / Supporting Documents"
+                  hint="Attach the invoice PDF or supporting receipts."
                 />
               </div>
 

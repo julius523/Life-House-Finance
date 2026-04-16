@@ -20,6 +20,7 @@ import ProgramsList from "@/pages/programs/index";
 import VendorsList from "@/pages/vendors/index";
 import MonthEndList from "@/pages/month-end/index";
 import MonthEndDetail from "@/pages/month-end/detail";
+import ReportsPage from "@/pages/reports";
 
 const queryClient = new QueryClient();
 
@@ -44,6 +45,7 @@ function Router() {
         <Route path="/vendors" component={VendorsList} />
         <Route path="/month-end" component={MonthEndList} />
         <Route path="/month-end/:id" component={MonthEndDetail} />
+        <Route path="/reports" component={ReportsPage} />
 
         <Route component={NotFound} />
       </Switch>

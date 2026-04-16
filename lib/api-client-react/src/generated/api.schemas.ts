@@ -82,6 +82,7 @@ export const ExpenseStatus = {
   approved: "approved",
   rejected: "rejected",
   reimbursed: "reimbursed",
+  needs_correction: "needs_correction",
 } as const;
 
 export interface Expense {
@@ -158,6 +159,7 @@ export const UpdateExpenseBodyStatus = {
   approved: "approved",
   rejected: "rejected",
   reimbursed: "reimbursed",
+  needs_correction: "needs_correction",
 } as const;
 
 export interface UpdateExpenseBody {
@@ -176,9 +178,22 @@ export interface ApprovalActionBody {
   notes?: string;
 }
 
+/**
+ * send_back returns the expense to the submitter for correction; close marks it permanently rejected.
+ */
+export type RejectionBodyAction =
+  (typeof RejectionBodyAction)[keyof typeof RejectionBodyAction];
+
+export const RejectionBodyAction = {
+  send_back: "send_back",
+  close: "close",
+} as const;
+
 export interface RejectionBody {
   rejectedBy: string;
   reason: string;
+  /** send_back returns the expense to the submitter for correction; close marks it permanently rejected. */
+  action?: RejectionBodyAction;
 }
 
 export interface Vendor {
@@ -277,6 +292,8 @@ export interface CreateReceiptBody {
   amount?: number;
   receiptDate?: string;
   tags?: string[];
+  linkedExpenseId?: number;
+  linkedBillId?: number;
 }
 
 export interface MissingReceiptItem {
@@ -502,6 +519,105 @@ export interface CreateMonthEndChecklistBody {
   owner?: string;
 }
 
+export interface RequestUploadUrlBody {
+  name: string;
+  size: number;
+  contentType: string;
+}
+
+export type RequestUploadUrlResponseMetadata = {
+  name: string;
+  size: number;
+  contentType: string;
+};
+
+export interface RequestUploadUrlResponse {
+  uploadURL: string;
+  objectPath: string;
+  metadata: RequestUploadUrlResponseMetadata;
+}
+
+export type ParseBankStatementBodyDefaultPaymentMethod =
+  (typeof ParseBankStatementBodyDefaultPaymentMethod)[keyof typeof ParseBankStatementBodyDefaultPaymentMethod];
+
+export const ParseBankStatementBodyDefaultPaymentMethod = {
+  cash: "cash",
+  check: "check",
+  credit_card: "credit_card",
+  debit_card: "debit_card",
+  bank_transfer: "bank_transfer",
+  other: "other",
+} as const;
+
+export interface ParseBankStatementBody {
+  /** objectPath of the uploaded statement (PDF, image, or CSV/text) */
+  objectPath: string;
+  fileName: string;
+  contentType: string;
+  defaultPaymentMethod?: ParseBankStatementBodyDefaultPaymentMethod;
+  defaultProgramId?: number;
+  submittedBy: string;
+}
+
+export interface ParseBankStatementResponse {
+  createdCount: number;
+  skippedCount: number;
+  expenses: Expense[];
+}
+
+export type FinancialSummaryReportExpenseTotalsByStatusItem = {
+  status: string;
+  count: number;
+  amount: number;
+};
+
+export type FinancialSummaryReportBillTotalsByStatusItem = {
+  status: string;
+  count: number;
+  amount: number;
+};
+
+export type FinancialSummaryReportSpendByProgramItem = {
+  programId?: number;
+  programName: string;
+  budgetAmount?: number;
+  expenseAmount: number;
+  billAmount: number;
+  totalAmount: number;
+  percentUsed?: number;
+};
+
+export type FinancialSummaryReportTopVendorsItem = {
+  vendorId?: number;
+  vendorName: string;
+  billAmount?: number;
+  expenseAmount?: number;
+  totalAmount: number;
+};
+
+export type FinancialSummaryReportBankReconciliation = {
+  totalTransactions: number;
+  unmatched: number;
+  matched: number;
+  reconciled: number;
+  totalDebits: number;
+  totalCredits: number;
+  netCashFlow: number;
+};
+
+export interface FinancialSummaryReport {
+  generatedAt: string;
+  fromDate?: string;
+  toDate?: string;
+  expenseTotalsByStatus: FinancialSummaryReportExpenseTotalsByStatusItem[];
+  billTotalsByStatus: FinancialSummaryReportBillTotalsByStatusItem[];
+  spendByProgram: FinancialSummaryReportSpendByProgramItem[];
+  topVendors: FinancialSummaryReportTopVendorsItem[];
+  missingReceiptCount: number;
+  missingReceiptAmount: number;
+  bankReconciliation: FinancialSummaryReportBankReconciliation;
+}
+
 export type UpdateMonthEndChecklistBodyStatus =
   (typeof UpdateMonthEndChecklistBodyStatus)[keyof typeof UpdateMonthEndChecklistBodyStatus];
 
@@ -545,6 +661,7 @@ export const ListExpensesStatus = {
   approved: "approved",
   rejected: "rejected",
   reimbursed: "reimbursed",
+  needs_correction: "needs_correction",
 } as const;
 
 export type ListVendorsParams = {
@@ -631,3 +748,8 @@ export const ListApprovalsType = {
   expense: "expense",
   bill: "bill",
 } as const;
+
+export type GetFinancialSummaryReportParams = {
+  fromDate?: string;
+  toDate?: string;
+};

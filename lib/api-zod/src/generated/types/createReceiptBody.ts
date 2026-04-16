@@ -15,4 +15,6 @@ export interface CreateReceiptBody {
   amount?: number;
   receiptDate?: Date;
   tags?: string[];
+  linkedExpenseId?: number;
+  linkedBillId?: number;
 }

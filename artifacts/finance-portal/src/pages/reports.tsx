@@ -1,0 +1,383 @@
+import { useState } from "react";
+import { useGetFinancialSummaryReport } from "@workspace/api-client-react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Printer, BarChart3 } from "lucide-react";
+import { format } from "date-fns";
+
+const fmtMoney = (n: number) =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+  }).format(n);
+
+const fmtPct = (n?: number) =>
+  n === undefined ? "—" : `${n.toFixed(1)}%`;
+
+const titleCase = (s: string) =>
+  s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+export default function ReportsPage() {
+  const today = new Date().toISOString().split("T")[0]!;
+  const monthAgo = new Date(Date.now() - 1000 * 60 * 60 * 24 * 90)
+    .toISOString()
+    .split("T")[0]!;
+  const [fromDate, setFromDate] = useState<string>(monthAgo);
+  const [toDate, setToDate] = useState<string>(today);
+
+  const { data, isLoading } = useGetFinancialSummaryReport({
+    fromDate,
+    toDate,
+  });
+
+  const handlePrint = () => window.print();
+
+  return (
+    <div className="space-y-6 print:space-y-4">
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          body { background: white !important; }
+          .print-page-break { break-before: page; }
+          aside, nav, [data-sidebar] { display: none !important; }
+          main { padding: 0 !important; }
+        }
+      `}</style>
+
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 no-print">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Reports</h1>
+          <p className="text-muted-foreground mt-1">
+            Generate a printable financial summary across any date range.
+          </p>
+        </div>
+        <Button
+          onClick={handlePrint}
+          className="bg-primary text-primary-foreground hover:bg-primary/90"
+        >
+          <Printer className="mr-2 h-4 w-4" /> Print Report
+        </Button>
+      </div>
+
+      <Card className="no-print">
+        <CardHeader>
+          <CardTitle className="text-base">Date range</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
+            <div className="space-y-1.5">
+              <Label htmlFor="from">From</Label>
+              <Input
+                id="from"
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="to">To</Label>
+              <Input
+                id="to"
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="hidden print:block space-y-1 mb-4">
+        <h1 className="text-2xl font-bold">Life House Reentry — Financial Summary</h1>
+        <p className="text-sm text-muted-foreground">
+          Period: {format(new Date(fromDate), "MMM d, yyyy")} —{" "}
+          {format(new Date(toDate), "MMM d, yyyy")}
+        </p>
+        {data?.generatedAt && (
+          <p className="text-xs text-muted-foreground">
+            Generated {format(new Date(data.generatedAt), "PPpp")}
+          </p>
+        )}
+      </div>
+
+      {isLoading || !data ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          <Skeleton className="h-48" />
+          <Skeleton className="h-48" />
+          <Skeleton className="h-48" />
+          <Skeleton className="h-48" />
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <SummaryStat
+              label="Total expenses"
+              value={fmtMoney(
+                data.expenseTotalsByStatus.reduce((s, r) => s + r.amount, 0)
+              )}
+            />
+            <SummaryStat
+              label="Total bills"
+              value={fmtMoney(
+                data.billTotalsByStatus.reduce((s, r) => s + r.amount, 0)
+              )}
+            />
+            <SummaryStat
+              label="Missing receipts"
+              value={`${data.missingReceiptCount} (${fmtMoney(data.missingReceiptAmount)})`}
+              accent={data.missingReceiptCount > 0 ? "warn" : "ok"}
+            />
+            <SummaryStat
+              label="Net cash flow"
+              value={fmtMoney(data.bankReconciliation.netCashFlow)}
+              accent={
+                data.bankReconciliation.netCashFlow >= 0 ? "ok" : "warn"
+              }
+            />
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4" /> Expense Claims by Status
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-muted-foreground border-b">
+                      <th className="py-2">Status</th>
+                      <th className="py-2 text-right">Count</th>
+                      <th className="py-2 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.expenseTotalsByStatus.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="py-4 text-muted-foreground text-center">
+                          No expenses in this period.
+                        </td>
+                      </tr>
+                    )}
+                    {data.expenseTotalsByStatus.map((row) => (
+                      <tr key={row.status} className="border-b last:border-0">
+                        <td className="py-2">{titleCase(row.status)}</td>
+                        <td className="py-2 text-right">{row.count}</td>
+                        <td className="py-2 text-right font-medium">
+                          {fmtMoney(row.amount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4" /> Vendor Bills by Status
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-muted-foreground border-b">
+                      <th className="py-2">Status</th>
+                      <th className="py-2 text-right">Count</th>
+                      <th className="py-2 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.billTotalsByStatus.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="py-4 text-muted-foreground text-center">
+                          No bills in this period.
+                        </td>
+                      </tr>
+                    )}
+                    {data.billTotalsByStatus.map((row) => (
+                      <tr key={row.status} className="border-b last:border-0">
+                        <td className="py-2">{titleCase(row.status)}</td>
+                        <td className="py-2 text-right">{row.count}</td>
+                        <td className="py-2 text-right font-medium">
+                          {fmtMoney(row.amount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Spend by Program / Grant</CardTitle>
+              <CardDescription>
+                Combined expense + bill spend, with budget utilisation when defined.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-muted-foreground border-b">
+                    <th className="py-2">Program</th>
+                    <th className="py-2 text-right">Expenses</th>
+                    <th className="py-2 text-right">Bills</th>
+                    <th className="py-2 text-right">Total</th>
+                    <th className="py-2 text-right">Budget</th>
+                    <th className="py-2 text-right">% Used</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.spendByProgram.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="py-4 text-muted-foreground text-center">
+                        No program spend in this period.
+                      </td>
+                    </tr>
+                  )}
+                  {data.spendByProgram.map((row) => (
+                    <tr key={row.programName} className="border-b last:border-0">
+                      <td className="py-2 font-medium">{row.programName}</td>
+                      <td className="py-2 text-right">{fmtMoney(row.expenseAmount)}</td>
+                      <td className="py-2 text-right">{fmtMoney(row.billAmount)}</td>
+                      <td className="py-2 text-right font-semibold">
+                        {fmtMoney(row.totalAmount)}
+                      </td>
+                      <td className="py-2 text-right">
+                        {row.budgetAmount ? fmtMoney(row.budgetAmount) : "—"}
+                      </td>
+                      <td className="py-2 text-right">{fmtPct(row.percentUsed)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Top Vendors</CardTitle>
+                <CardDescription>By total spend in this period.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-muted-foreground border-b">
+                      <th className="py-2">Vendor</th>
+                      <th className="py-2 text-right">Bills</th>
+                      <th className="py-2 text-right">Expenses</th>
+                      <th className="py-2 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.topVendors.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="py-4 text-muted-foreground text-center">
+                          No vendor activity.
+                        </td>
+                      </tr>
+                    )}
+                    {data.topVendors.map((v) => (
+                      <tr key={v.vendorName} className="border-b last:border-0">
+                        <td className="py-2 font-medium">{v.vendorName}</td>
+                        <td className="py-2 text-right">{fmtMoney(v.billAmount)}</td>
+                        <td className="py-2 text-right">{fmtMoney(v.expenseAmount)}</td>
+                        <td className="py-2 text-right font-semibold">
+                          {fmtMoney(v.totalAmount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Bank Reconciliation</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <dl className="text-sm divide-y">
+                  <Row k="Total transactions" v={String(data.bankReconciliation.totalTransactions)} />
+                  <Row k="Reconciled" v={String(data.bankReconciliation.reconciled)} />
+                  <Row k="Matched" v={String(data.bankReconciliation.matched)} />
+                  <Row
+                    k="Unmatched"
+                    v={String(data.bankReconciliation.unmatched)}
+                    accent={data.bankReconciliation.unmatched > 0 ? "warn" : undefined}
+                  />
+                  <Row k="Total credits (in)" v={fmtMoney(data.bankReconciliation.totalCredits)} />
+                  <Row k="Total debits (out)" v={fmtMoney(data.bankReconciliation.totalDebits)} />
+                  <Row
+                    k="Net cash flow"
+                    v={fmtMoney(data.bankReconciliation.netCashFlow)}
+                    accent={data.bankReconciliation.netCashFlow >= 0 ? "ok" : "warn"}
+                  />
+                </dl>
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SummaryStat({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: "ok" | "warn";
+}) {
+  const cls =
+    accent === "ok"
+      ? "text-success"
+      : accent === "warn"
+        ? "text-warning"
+        : "text-foreground";
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">
+          {label}
+        </div>
+        <div className={`text-2xl font-bold mt-1 ${cls}`}>{value}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function Row({
+  k,
+  v,
+  accent,
+}: {
+  k: string;
+  v: string;
+  accent?: "ok" | "warn";
+}) {
+  const cls =
+    accent === "ok"
+      ? "text-success"
+      : accent === "warn"
+        ? "text-warning"
+        : undefined;
+  return (
+    <div className="flex items-center justify-between py-2">
+      <dt className="text-muted-foreground">{k}</dt>
+      <dd className={`font-semibold ${cls ?? ""}`}>{v}</dd>
+    </div>
+  );
+}

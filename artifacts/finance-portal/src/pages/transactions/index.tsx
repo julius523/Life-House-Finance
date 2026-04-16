@@ -11,6 +11,7 @@ import { format } from "date-fns";
 import { Landmark, ArrowUpRight, ArrowDownRight, Link as LinkIcon, Filter, CheckCircle2 } from "lucide-react";
 import { Empty } from "@/components/ui/empty";
 import { useToast } from "@/hooks/use-toast";
+import { BankStatementImport } from "@/components/bank-statement-import";
 
 export default function TransactionsList() {
   const [status, setStatus] = useState<string>("all");
@@ -50,11 +51,14 @@ export default function TransactionsList() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Bank Transactions</h1>
-        <p className="text-muted-foreground mt-1">
-          Review, match, and reconcile bank feed data.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Bank Transactions</h1>
+          <p className="text-muted-foreground mt-1">
+            Review, match, and reconcile bank feed data.
+          </p>
+        </div>
+        <BankStatementImport />
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">

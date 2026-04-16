@@ -1,77 +1,153 @@
+import { useState } from "react";
 import { useRoute, Link } from "wouter";
-import { 
-  useGetExpense, 
-  useApproveExpense, 
+import {
+  useGetExpense,
+  useApproveExpense,
   useRejectExpense,
-  getGetExpenseQueryKey
+  useUpdateExpense,
+  useCreateReceipt,
+  getGetExpenseQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Check, X, Building, Calendar, CreditCard, Tag, FileText, User } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  X,
+  Building,
+  Calendar,
+  CreditCard,
+  Tag,
+  FileText,
+  User,
+  RotateCcw,
+} from "lucide-react";
 import { format } from "date-fns";
+import { RejectDialog } from "@/components/reject-dialog";
+import { ReceiptUploader, type PendingReceipt } from "@/components/receipt-uploader";
 
 export default function ExpenseDetail() {
   const [, params] = useRoute("/expenses/:id");
   const id = params?.id ? parseInt(params.id) : 0;
-  
-  const { data: expense, isLoading } = useGetExpense(id, { 
-    query: { enabled: !!id, queryKey: getGetExpenseQueryKey(id) } 
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [resubmitReceipts, setResubmitReceipts] = useState<PendingReceipt[]>([]);
+
+  const { data: expense, isLoading } = useGetExpense(id, {
+    query: { enabled: !!id, queryKey: getGetExpenseQueryKey(id) },
   });
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  
+
   const approveExpense = useApproveExpense();
   const rejectExpense = useRejectExpense();
+  const updateExpense = useUpdateExpense();
+  const createReceipt = useCreateReceipt();
+
+  const refetch = () =>
+    queryClient.invalidateQueries({ queryKey: getGetExpenseQueryKey(id) });
 
   const handleApprove = async () => {
     try {
-      await approveExpense.mutateAsync({ 
-        id, 
-        data: { approvedBy: "Finance Manager", notes: "Looks good" } 
+      await approveExpense.mutateAsync({
+        id,
+        data: { approvedBy: "Finance Manager", notes: "Looks good" },
       });
       toast({ title: "Expense approved" });
-      queryClient.invalidateQueries({ queryKey: getGetExpenseQueryKey(id) });
-    } catch (e) {
+      refetch();
+    } catch {
       toast({ title: "Failed to approve", variant: "destructive" });
     }
   };
 
-  const handleReject = async () => {
+  const handleReject = async (data: {
+    reason: string;
+    action: "send_back" | "close";
+  }) => {
     try {
-      await rejectExpense.mutateAsync({ 
-        id, 
-        data: { rejectedBy: "Finance Manager", reason: "Missing receipt or inadequate description" } 
+      await rejectExpense.mutateAsync({
+        id,
+        data: { rejectedBy: "Finance Manager", ...data },
       });
-      toast({ title: "Expense rejected" });
-      queryClient.invalidateQueries({ queryKey: getGetExpenseQueryKey(id) });
-    } catch (e) {
+      toast({
+        title:
+          data.action === "send_back"
+            ? "Sent back to submitter"
+            : "Expense rejected",
+      });
+      setRejectOpen(false);
+      refetch();
+    } catch {
       toast({ title: "Failed to reject", variant: "destructive" });
+    }
+  };
+
+  const handleResubmit = async () => {
+    if (!expense) return;
+    try {
+      // Attach any newly uploaded receipts.
+      for (const r of resubmitReceipts) {
+        await createReceipt.mutateAsync({
+          data: {
+            fileName: r.file.name,
+            fileType: r.contentType,
+            fileUrl: r.objectPath,
+            linkedExpenseId: expense.id,
+            amount: expense.amount,
+            receiptDate: expense.expenseDate,
+          },
+        });
+      }
+      // Move back into the queue as 'submitted'.
+      await updateExpense.mutateAsync({
+        id: expense.id,
+        data: { status: "submitted" },
+      });
+      toast({ title: "Resubmitted for approval" });
+      setResubmitReceipts([]);
+      refetch();
+    } catch {
+      toast({ title: "Failed to resubmit", variant: "destructive" });
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'approved': return 'bg-success text-success-foreground';
-      case 'rejected': return 'bg-destructive text-destructive-foreground';
-      case 'submitted': return 'bg-info text-info-foreground';
-      case 'reimbursed': return 'bg-primary text-primary-foreground';
-      default: return 'bg-secondary text-secondary-foreground';
+      case "approved":
+        return "bg-success text-success-foreground";
+      case "rejected":
+        return "bg-destructive text-destructive-foreground";
+      case "needs_correction":
+        return "bg-warning text-warning-foreground";
+      case "submitted":
+        return "bg-info text-info-foreground";
+      case "reimbursed":
+        return "bg-primary text-primary-foreground";
+      default:
+        return "bg-secondary text-secondary-foreground";
     }
   };
 
   if (isLoading) {
-    return <div className="space-y-6"><Skeleton className="h-32 w-full" /><Skeleton className="h-64 w-full" /></div>;
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
   }
 
   if (!expense) {
     return <div>Expense not found</div>;
   }
+
+  const isNeedsCorrection = expense.status === "needs_correction";
+  const isSubmitted = expense.status === "submitted";
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -84,21 +160,32 @@ export default function ExpenseDetail() {
           </Link>
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold tracking-tight">Expense #{expense.id}</h1>
-              <Badge className={getStatusColor(expense.status)}>{expense.status.toUpperCase()}</Badge>
+              <h1 className="text-3xl font-bold tracking-tight">
+                Expense #{expense.id}
+              </h1>
+              <Badge className={getStatusColor(expense.status)}>
+                {expense.status.replace("_", " ").toUpperCase()}
+              </Badge>
             </div>
             <p className="text-muted-foreground mt-1">
               Submitted on {format(new Date(expense.createdAt), "MMMM d, yyyy")}
             </p>
           </div>
         </div>
-        
-        {expense.status === "submitted" && (
+
+        {isSubmitted && (
           <div className="flex items-center gap-2">
-            <Button variant="outline" className="text-destructive border-destructive hover:bg-destructive/10" onClick={handleReject}>
+            <Button
+              variant="outline"
+              className="text-destructive border-destructive hover:bg-destructive/10"
+              onClick={() => setRejectOpen(true)}
+            >
               <X className="mr-2 h-4 w-4" /> Reject
             </Button>
-            <Button className="bg-primary hover:bg-primary/90 text-primary-foreground" onClick={handleApprove}>
+            <Button
+              className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              onClick={handleApprove}
+            >
               <Check className="mr-2 h-4 w-4" /> Approve
             </Button>
           </div>
@@ -122,12 +209,14 @@ export default function ExpenseDetail() {
                 <div className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                   <Calendar className="h-4 w-4" /> Date
                 </div>
-                <div className="font-semibold text-lg">{format(new Date(expense.expenseDate), "MMM d, yyyy")}</div>
+                <div className="font-semibold text-lg">
+                  {format(new Date(expense.expenseDate), "MMM d, yyyy")}
+                </div>
               </div>
             </div>
-            
+
             <Separator />
-            
+
             <div className="space-y-1">
               <div className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <FileText className="h-4 w-4" /> Description
@@ -148,16 +237,57 @@ export default function ExpenseDetail() {
                 <div className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                   <CreditCard className="h-4 w-4" /> Payment Method
                 </div>
-                <div className="capitalize">{expense.paymentMethod.replace('_', ' ')}</div>
+                <div className="capitalize">
+                  {expense.paymentMethod.replace("_", " ")}
+                </div>
               </div>
             </div>
 
             {expense.rejectionReason && (
               <>
                 <Separator />
-                <div className="bg-destructive/10 p-4 rounded-md">
-                  <div className="font-semibold text-destructive mb-1">Rejection Reason</div>
+                <div
+                  className={`p-4 rounded-md ${
+                    isNeedsCorrection
+                      ? "bg-warning/10 border border-warning/30"
+                      : "bg-destructive/10"
+                  }`}
+                >
+                  <div
+                    className={`font-semibold mb-1 ${
+                      isNeedsCorrection ? "text-warning" : "text-destructive"
+                    }`}
+                  >
+                    {isNeedsCorrection
+                      ? "Sent back for correction"
+                      : "Rejection Reason"}
+                  </div>
                   <div className="text-sm">{expense.rejectionReason}</div>
+                </div>
+              </>
+            )}
+
+            {isNeedsCorrection && (
+              <>
+                <Separator />
+                <div className="space-y-3">
+                  <div className="text-sm font-medium">
+                    Add a missing receipt and resubmit
+                  </div>
+                  <ReceiptUploader
+                    value={resubmitReceipts}
+                    onChange={setResubmitReceipts}
+                    label=""
+                    hint="Optional — upload a clearer or replacement receipt before resubmitting."
+                  />
+                  <Button
+                    onClick={handleResubmit}
+                    disabled={updateExpense.isPending}
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    {updateExpense.isPending ? "Resubmitting…" : "Resubmit for Approval"}
+                  </Button>
                 </div>
               </>
             )}
@@ -170,7 +300,9 @@ export default function ExpenseDetail() {
               <CardTitle>Amount</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-4xl font-bold">${expense.amount.toFixed(2)}</div>
+              <div className="text-4xl font-bold">
+                ${expense.amount.toFixed(2)}
+              </div>
             </CardContent>
           </Card>
 
@@ -186,7 +318,9 @@ export default function ExpenseDetail() {
                 <div>
                   <div className="font-medium">{expense.submittedBy}</div>
                   {expense.submittedByEmail && (
-                    <div className="text-sm text-muted-foreground">{expense.submittedByEmail}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {expense.submittedByEmail}
+                    </div>
                   )}
                 </div>
               </div>
@@ -194,6 +328,13 @@ export default function ExpenseDetail() {
           </Card>
         </div>
       </div>
+
+      <RejectDialog
+        open={rejectOpen}
+        onOpenChange={setRejectOpen}
+        onConfirm={handleReject}
+        isSubmitting={rejectExpense.isPending}
+      />
     </div>
   );
 }

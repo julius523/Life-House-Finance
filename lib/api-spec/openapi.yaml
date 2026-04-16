@@ -115,7 +115,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [draft, submitted, approved, rejected, reimbursed]
+            enum: [draft, submitted, approved, rejected, reimbursed, needs_correction]
         - name: programId
           in: query
           schema:
@@ -787,6 +787,68 @@ paths:
                 items:
                   $ref: "#/components/schemas/ApprovalQueueItem"
 
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [storage]
+      summary: Request a presigned URL for uploading a file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestUploadUrlBody"
+      responses:
+        "200":
+          description: Presigned URL details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestUploadUrlResponse"
+
+  /ai/parse-bank-statement:
+    post:
+      operationId: parseBankStatement
+      tags: [ai]
+      summary: Parse a bank statement file into draft expenses
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParseBankStatementBody"
+      responses:
+        "200":
+          description: Draft expenses created from the bank statement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseBankStatementResponse"
+
+  /reports/financial-summary:
+    get:
+      operationId: getFinancialSummaryReport
+      tags: [reports]
+      summary: Aggregated reporting data for the printable Reports page
+      parameters:
+        - name: fromDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: toDate
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Financial summary report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinancialSummaryReport"
+
   /month-end:
     get:
       operationId: listMonthEndChecklists
@@ -996,7 +1058,7 @@ components:
           type: string
         status:
           type: string
-          enum: [draft, submitted, approved, rejected, reimbursed]
+          enum: [draft, submitted, approved, rejected, reimbursed, needs_correction]
         managerApprovedBy:
           type: string
         financeApprovedBy:
@@ -1104,7 +1166,7 @@ components:
             type: integer
         status:
           type: string
-          enum: [draft, submitted, approved, rejected, reimbursed]
+          enum: [draft, submitted, approved, rejected, reimbursed, needs_correction]
 
     ApprovalActionBody:
       type: object
@@ -1123,6 +1185,11 @@ components:
           type: string
         reason:
           type: string
+        action:
+          type: string
+          description: "send_back returns the expense to the submitter for correction; close marks it permanently rejected."
+          enum: [send_back, close]
+          default: close
       required:
         - rejectedBy
         - reason
@@ -1336,6 +1403,10 @@ components:
           type: array
           items:
             type: string
+        linkedExpenseId:
+          type: integer
+        linkedBillId:
+          type: integer
       required:
         - fileName
 
@@ -1694,6 +1765,207 @@ components:
       required:
         - month
         - fiscalYear
+
+    RequestUploadUrlBody:
+      type: object
+      properties:
+        name:
+          type: string
+        size:
+          type: integer
+        contentType:
+          type: string
+      required:
+        - name
+        - size
+        - contentType
+
+    RequestUploadUrlResponse:
+      type: object
+      properties:
+        uploadURL:
+          type: string
+        objectPath:
+          type: string
+        metadata:
+          type: object
+          properties:
+            name:
+              type: string
+            size:
+              type: integer
+            contentType:
+              type: string
+          required:
+            - name
+            - size
+            - contentType
+      required:
+        - uploadURL
+        - objectPath
+        - metadata
+
+    ParseBankStatementBody:
+      type: object
+      properties:
+        objectPath:
+          type: string
+          description: objectPath of the uploaded statement (PDF, image, or CSV/text)
+        fileName:
+          type: string
+        contentType:
+          type: string
+        defaultPaymentMethod:
+          type: string
+          enum: [cash, check, credit_card, debit_card, bank_transfer, other]
+        defaultProgramId:
+          type: integer
+        submittedBy:
+          type: string
+      required:
+        - objectPath
+        - fileName
+        - contentType
+        - submittedBy
+
+    ParseBankStatementResponse:
+      type: object
+      properties:
+        createdCount:
+          type: integer
+        skippedCount:
+          type: integer
+        expenses:
+          type: array
+          items:
+            $ref: "#/components/schemas/Expense"
+      required:
+        - createdCount
+        - skippedCount
+        - expenses
+
+    FinancialSummaryReport:
+      type: object
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        fromDate:
+          type: string
+          format: date
+        toDate:
+          type: string
+          format: date
+        expenseTotalsByStatus:
+          type: array
+          items:
+            type: object
+            properties:
+              status:
+                type: string
+              count:
+                type: integer
+              amount:
+                type: number
+            required:
+              - status
+              - count
+              - amount
+        billTotalsByStatus:
+          type: array
+          items:
+            type: object
+            properties:
+              status:
+                type: string
+              count:
+                type: integer
+              amount:
+                type: number
+            required:
+              - status
+              - count
+              - amount
+        spendByProgram:
+          type: array
+          items:
+            type: object
+            properties:
+              programId:
+                type: integer
+              programName:
+                type: string
+              budgetAmount:
+                type: number
+              expenseAmount:
+                type: number
+              billAmount:
+                type: number
+              totalAmount:
+                type: number
+              percentUsed:
+                type: number
+            required:
+              - programName
+              - expenseAmount
+              - billAmount
+              - totalAmount
+        topVendors:
+          type: array
+          items:
+            type: object
+            properties:
+              vendorId:
+                type: integer
+              vendorName:
+                type: string
+              billAmount:
+                type: number
+              expenseAmount:
+                type: number
+              totalAmount:
+                type: number
+            required:
+              - vendorName
+              - totalAmount
+        missingReceiptCount:
+          type: integer
+        missingReceiptAmount:
+          type: number
+        bankReconciliation:
+          type: object
+          properties:
+            totalTransactions:
+              type: integer
+            unmatched:
+              type: integer
+            matched:
+              type: integer
+            reconciled:
+              type: integer
+            totalDebits:
+              type: number
+            totalCredits:
+              type: number
+            netCashFlow:
+              type: number
+          required:
+            - totalTransactions
+            - unmatched
+            - matched
+            - reconciled
+            - totalDebits
+            - totalCredits
+            - netCashFlow
+      required:
+        - generatedAt
+        - expenseTotalsByStatus
+        - billTotalsByStatus
+        - spendByProgram
+        - topVendors
+        - missingReceiptCount
+        - missingReceiptAmount
+        - bankReconciliation
 
     UpdateMonthEndChecklistBody:
       type: object

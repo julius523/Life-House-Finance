@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useCreateExpense, useListPrograms } from "@workspace/api-client-react";
+import { useCreateExpense, useListPrograms, useCreateReceipt } from "@workspace/api-client-react";
+import { ReceiptUploader, type PendingReceipt } from "@/components/receipt-uploader";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
@@ -28,7 +29,9 @@ export default function ExpenseNew() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const createExpense = useCreateExpense();
+  const createReceipt = useCreateReceipt();
   const { data: programs, isLoading: programsLoading } = useListPrograms();
+  const [receipts, setReceipts] = useState<PendingReceipt[]>([]);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -51,7 +54,27 @@ export default function ExpenseNew() {
       };
       
       const result = await createExpense.mutateAsync({ data: expenseData });
-      toast({ title: "Expense created successfully" });
+
+      // Persist any uploaded receipts and link them to this expense.
+      for (const r of receipts) {
+        await createReceipt.mutateAsync({
+          data: {
+            fileName: r.file.name,
+            fileType: r.contentType,
+            fileUrl: r.objectPath,
+            linkedExpenseId: result.id,
+            amount: values.amount,
+            receiptDate: values.expenseDate,
+          },
+        });
+      }
+
+      toast({
+        title: "Expense created successfully",
+        description: receipts.length > 0
+          ? `${receipts.length} receipt${receipts.length === 1 ? "" : "s"} attached.`
+          : undefined,
+      });
       setLocation(`/expenses/${result.id}`);
     } catch (error) {
       toast({ title: "Failed to create expense", variant: "destructive" });
@@ -187,6 +210,14 @@ export default function ExpenseNew() {
                       <FormMessage />
                     </FormItem>
                   )}
+                />
+              </div>
+
+              <div className="pt-4 border-t">
+                <ReceiptUploader
+                  value={receipts}
+                  onChange={setReceipts}
+                  hint="Attach a photo or PDF of the receipt. Required for reimbursement."
                 />
               </div>
 

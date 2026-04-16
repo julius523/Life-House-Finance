@@ -15,4 +15,5 @@ export const UpdateExpenseBodyStatus = {
   approved: "approved",
   rejected: "rejected",
   reimbursed: "reimbursed",
+  needs_correction: "needs_correction",
 } as const;

@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { receiptsTable, vendorsTable, expensesTable } from "@workspace/db";
-import { eq, ilike, and, desc, count, sql, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, desc, count, sql } from "drizzle-orm";
 import {
   ListReceiptsQueryParams,
   ListReceiptsResponse,
@@ -95,6 +95,8 @@ router.post("/receipts", async (req, res): Promise<void> => {
       amount: data.amount !== undefined ? String(data.amount) : undefined,
       receiptDate: data.receiptDate,
       tags: data.tags,
+      linkedExpenseId: data.linkedExpenseId,
+      linkedBillId: data.linkedBillId,
     })
     .returning();
 
@@ -102,6 +104,19 @@ router.post("/receipts", async (req, res): Promise<void> => {
     res.status(500).json({ error: "Failed to create receipt" });
     return;
   }
+
+  // Append the receipt to the linked expense's receiptIds array so it no
+  // longer shows up in the missing-receipts report.
+  if (data.linkedExpenseId) {
+    await db
+      .update(expensesTable)
+      .set({
+        receiptIds: sql`array_append(coalesce(${expensesTable.receiptIds}, ARRAY[]::integer[]), ${receipt.id})`,
+        updatedAt: new Date(),
+      })
+      .where(eq(expensesTable.id, data.linkedExpenseId));
+  }
+
   const vendorName = await getVendorName(receipt.vendorId);
   res.status(201).json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName)));
 });
@@ -112,7 +127,7 @@ router.get("/receipts/missing-report", async (_req, res): Promise<void> => {
     .select()
     .from(expensesTable)
     .where(
-      sql`(${expensesTable.receiptIds} is null or array_length(${expensesTable.receiptIds}, 1) is null) and ${expensesTable.status} in ('submitted', 'approved')`
+      sql`(${expensesTable.receiptIds} is null or array_length(${expensesTable.receiptIds}, 1) is null) and ${expensesTable.status} in ('submitted', 'approved', 'needs_correction')`
     );
 
   const items = expenses.map((e) => {

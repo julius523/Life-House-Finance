@@ -31,6 +31,8 @@ import type {
   DashboardSummary,
   Expense,
   ExpenseListResponse,
+  FinancialSummaryReport,
+  GetFinancialSummaryReportParams,
   GetProgramSpendingParams,
   GetRecentActivityParams,
   GetReconciliationSummaryParams,
@@ -44,6 +46,8 @@ import type {
   ListVendorsParams,
   MissingReceiptItem,
   MonthEndChecklist,
+  ParseBankStatementBody,
+  ParseBankStatementResponse,
   PendingApprovalsCount,
   Program,
   ProgramSpendingReport,
@@ -51,6 +55,8 @@ import type {
   ReceiptListResponse,
   ReconciliationSummary,
   RejectionBody,
+  RequestUploadUrlBody,
+  RequestUploadUrlResponse,
   SpendingByDimension,
   Transaction,
   TransactionListResponse,
@@ -3308,6 +3314,287 @@ export function useListApprovals<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getListApprovalsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Request a presigned URL for uploading a file
+ */
+export const getRequestUploadUrlUrl = () => {
+  return `/api/storage/uploads/request-url`;
+};
+
+export const requestUploadUrl = async (
+  requestUploadUrlBody: RequestUploadUrlBody,
+  options?: RequestInit,
+): Promise<RequestUploadUrlResponse> => {
+  return customFetch<RequestUploadUrlResponse>(getRequestUploadUrlUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(requestUploadUrlBody),
+  });
+};
+
+export const getRequestUploadUrlMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestUploadUrl>>,
+    TError,
+    { data: BodyType<RequestUploadUrlBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestUploadUrl>>,
+  TError,
+  { data: BodyType<RequestUploadUrlBody> },
+  TContext
+> => {
+  const mutationKey = ["requestUploadUrl"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestUploadUrl>>,
+    { data: BodyType<RequestUploadUrlBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return requestUploadUrl(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestUploadUrlMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestUploadUrl>>
+>;
+export type RequestUploadUrlMutationBody = BodyType<RequestUploadUrlBody>;
+export type RequestUploadUrlMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Request a presigned URL for uploading a file
+ */
+export const useRequestUploadUrl = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestUploadUrl>>,
+    TError,
+    { data: BodyType<RequestUploadUrlBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof requestUploadUrl>>,
+  TError,
+  { data: BodyType<RequestUploadUrlBody> },
+  TContext
+> => {
+  return useMutation(getRequestUploadUrlMutationOptions(options));
+};
+
+/**
+ * @summary Parse a bank statement file into draft expenses
+ */
+export const getParseBankStatementUrl = () => {
+  return `/api/ai/parse-bank-statement`;
+};
+
+export const parseBankStatement = async (
+  parseBankStatementBody: ParseBankStatementBody,
+  options?: RequestInit,
+): Promise<ParseBankStatementResponse> => {
+  return customFetch<ParseBankStatementResponse>(getParseBankStatementUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(parseBankStatementBody),
+  });
+};
+
+export const getParseBankStatementMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof parseBankStatement>>,
+    TError,
+    { data: BodyType<ParseBankStatementBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof parseBankStatement>>,
+  TError,
+  { data: BodyType<ParseBankStatementBody> },
+  TContext
+> => {
+  const mutationKey = ["parseBankStatement"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof parseBankStatement>>,
+    { data: BodyType<ParseBankStatementBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return parseBankStatement(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ParseBankStatementMutationResult = NonNullable<
+  Awaited<ReturnType<typeof parseBankStatement>>
+>;
+export type ParseBankStatementMutationBody = BodyType<ParseBankStatementBody>;
+export type ParseBankStatementMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Parse a bank statement file into draft expenses
+ */
+export const useParseBankStatement = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof parseBankStatement>>,
+    TError,
+    { data: BodyType<ParseBankStatementBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof parseBankStatement>>,
+  TError,
+  { data: BodyType<ParseBankStatementBody> },
+  TContext
+> => {
+  return useMutation(getParseBankStatementMutationOptions(options));
+};
+
+/**
+ * @summary Aggregated reporting data for the printable Reports page
+ */
+export const getGetFinancialSummaryReportUrl = (
+  params?: GetFinancialSummaryReportParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reports/financial-summary?${stringifiedParams}`
+    : `/api/reports/financial-summary`;
+};
+
+export const getFinancialSummaryReport = async (
+  params?: GetFinancialSummaryReportParams,
+  options?: RequestInit,
+): Promise<FinancialSummaryReport> => {
+  return customFetch<FinancialSummaryReport>(
+    getGetFinancialSummaryReportUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetFinancialSummaryReportQueryKey = (
+  params?: GetFinancialSummaryReportParams,
+) => {
+  return [
+    `/api/reports/financial-summary`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetFinancialSummaryReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getFinancialSummaryReport>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetFinancialSummaryReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getFinancialSummaryReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetFinancialSummaryReportQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getFinancialSummaryReport>>
+  > = ({ signal }) =>
+    getFinancialSummaryReport(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getFinancialSummaryReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetFinancialSummaryReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getFinancialSummaryReport>>
+>;
+export type GetFinancialSummaryReportQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Aggregated reporting data for the printable Reports page
+ */
+
+export function useGetFinancialSummaryReport<
+  TData = Awaited<ReturnType<typeof getFinancialSummaryReport>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetFinancialSummaryReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getFinancialSummaryReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetFinancialSummaryReportQueryOptions(
+    params,
+    options,
+  );
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

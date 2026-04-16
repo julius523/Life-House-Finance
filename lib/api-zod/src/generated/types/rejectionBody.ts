@@ -5,8 +5,11 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { RejectionBodyAction } from "./rejectionBodyAction";
 
 export interface RejectionBody {
   rejectedBy: string;
   reason: string;
+  /** send_back returns the expense to the submitter for correction; close marks it permanently rejected. */
+  action?: RejectionBodyAction;
 }
