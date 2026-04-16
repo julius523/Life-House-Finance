@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, UserPlus, KeyRound } from "lucide-react";
+import { Shield, UserPlus, KeyRound, AlertTriangle } from "lucide-react";
 
 const ROLE_LABEL: Record<UserRole, string> = {
   admin: "Admin",
@@ -41,6 +41,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [passwordFor, setPasswordFor] = useState<AuthUser | null>(null);
+  const [wipeOpen, setWipeOpen] = useState(false);
 
   const refresh = async () => {
     try {
@@ -138,7 +139,138 @@ export default function AdminPage() {
           onSaved={() => setPasswordFor(null)}
         />
       )}
+
+      <Card className="border-destructive/40">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-destructive">
+            <AlertTriangle className="h-5 w-5" />
+            Danger zone
+          </CardTitle>
+          <CardDescription>
+            Permanently delete every transaction, expense, bill, vendor,
+            program, receipt, and activity log entry. User accounts are
+            preserved so the team can still sign in. Requires the master
+            password.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="destructive" onClick={() => setWipeOpen(true)}>
+            <AlertTriangle className="mr-2 h-4 w-4" />
+            Clear all data
+          </Button>
+        </CardContent>
+      </Card>
+
+      {wipeOpen && (
+        <WipeDataDialog
+          onClose={() => setWipeOpen(false)}
+          onWiped={() => setWipeOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+function WipeDataDialog({
+  onClose,
+  onWiped,
+}: {
+  onClose: () => void;
+  onWiped: () => void;
+}) {
+  const { toast } = useToast();
+  const [masterPassword, setMasterPassword] = useState("");
+  const [confirmText, setConfirmText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (confirmText !== "DELETE EVERYTHING") {
+      toast({
+        title: "Type DELETE EVERYTHING to confirm",
+        variant: "destructive",
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/wipe-data", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ masterPassword }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Wipe failed (${res.status})`);
+      }
+      toast({
+        title: "All data cleared",
+        description: "Transactions, expenses, bills, and related records were deleted.",
+      });
+      onWiped();
+    } catch (e) {
+      toast({
+        title: "Could not clear data",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <AlertTriangle className="h-5 w-5" />
+            Clear all data
+          </DialogTitle>
+          <DialogDescription>
+            This permanently deletes every transaction, expense, bill,
+            vendor, program, receipt, and activity log entry. User
+            accounts are kept. This cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Master password</Label>
+            <Input
+              type="password"
+              value={masterPassword}
+              onChange={(e) => setMasterPassword(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>
+              Type{" "}
+              <span className="font-mono font-semibold">DELETE EVERYTHING</span>{" "}
+              to confirm
+            </Label>
+            <Input
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="DELETE EVERYTHING"
+              autoComplete="off"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={submit}
+            disabled={busy || !masterPassword || confirmText !== "DELETE EVERYTHING"}
+          >
+            {busy ? "Clearing…" : "Clear all data"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

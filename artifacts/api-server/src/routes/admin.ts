@@ -1,9 +1,22 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
-import { db, usersTable } from "@workspace/db";
+import {
+  db,
+  usersTable,
+  transactionsTable,
+  expensesTable,
+  billsTable,
+  vendorsTable,
+  programsTable,
+  receiptsTable,
+  activityLogTable,
+  monthEndChecklistsTable,
+} from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth, requireRole, toAuthUser } from "../lib/auth";
+
+const MASTER_WIPE_PASSWORD = "Leg@ci2433!";
 
 const router: IRouter = Router();
 
@@ -84,6 +97,35 @@ router.post("/admin/users/:id/password", async (req, res): Promise<void> => {
     res.status(404).json({ error: "User not found" });
     return;
   }
+  res.json({ ok: true });
+});
+
+const WipeBody = z.object({
+  masterPassword: z.string(),
+});
+
+router.post("/admin/wipe-data", async (req, res): Promise<void> => {
+  const parsed = WipeBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Master password is required" });
+    return;
+  }
+  if (parsed.data.masterPassword !== MASTER_WIPE_PASSWORD) {
+    res.status(403).json({ error: "Incorrect master password" });
+    return;
+  }
+
+  // Order matters: child rows first, then parents. User accounts are kept
+  // so the team can keep signing in after the wipe.
+  await db.delete(monthEndChecklistsTable);
+  await db.delete(activityLogTable);
+  await db.delete(transactionsTable);
+  await db.delete(billsTable);
+  await db.delete(expensesTable);
+  await db.delete(receiptsTable);
+  await db.delete(vendorsTable);
+  await db.delete(programsTable);
+
   res.json({ ok: true });
 });
 
