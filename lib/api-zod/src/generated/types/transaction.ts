@@ -20,6 +20,8 @@ export interface Transaction {
   status: TransactionStatus;
   matchedExpenseId?: number;
   matchedBillId?: number;
+  matchedProgramId?: number;
+  matchedProgramName?: string;
   notes?: string;
   importedAt: Date;
 }

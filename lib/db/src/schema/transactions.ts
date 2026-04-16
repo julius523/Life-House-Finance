@@ -14,6 +14,7 @@ export const transactionsTable = pgTable("transactions", {
   status: text("status").notNull().default("unmatched"),
   matchedExpenseId: integer("matched_expense_id"),
   matchedBillId: integer("matched_bill_id"),
+  matchedProgramId: integer("matched_program_id"),
   notes: text("notes"),
   importedAt: timestamp("imported_at").notNull().defaultNow(),
 });

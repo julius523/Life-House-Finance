@@ -217,6 +217,153 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
   const totalDebits = parseFloat(tx.debits);
   const totalCredits = parseFloat(tx.credits);
 
+  // ---- Profit & Loss (cash basis, restricted to date range) ----
+  // Income = bank credits, attributed to a program when linked.
+  const incomeRows = await db
+    .select({
+      programId: transactionsTable.matchedProgramId,
+      amount: sql<string>`coalesce(sum(${transactionsTable.amount}), 0)::text`,
+    })
+    .from(transactionsTable)
+    .where(
+      and(
+        sql`${transactionsTable.type} = 'credit'`,
+        ...(fromDate ? [gte(transactionsTable.transactionDate, fromDate)] : []),
+        ...(toDate ? [lte(transactionsTable.transactionDate, toDate)] : []),
+      ),
+    )
+    .groupBy(transactionsTable.matchedProgramId);
+
+  const incomeByProgram = incomeRows
+    .filter((r) => r.programId !== null)
+    .map((r) => {
+      const program = programs.find((p) => p.id === r.programId);
+      return {
+        programId: r.programId!,
+        programName: program?.name ?? `Program #${r.programId}`,
+        amount: parseFloat(r.amount),
+      };
+    })
+    .sort((a, b) => b.amount - a.amount);
+  const uncategorizedIncome = incomeRows
+    .filter((r) => r.programId === null)
+    .reduce((s, r) => s + parseFloat(r.amount), 0);
+  const totalIncome =
+    incomeByProgram.reduce((s, r) => s + r.amount, 0) + uncategorizedIncome;
+
+  // Expenses = approved/reimbursed expenses + paid bills (so the P&L matches
+  // money actually committed in the period — drafts are excluded).
+  const plExpenseConds = [
+    sql`${expensesTable.status} in ('approved', 'reimbursed', 'submitted')`,
+  ];
+  if (fromDate) plExpenseConds.push(gte(expensesTable.expenseDate, fromDate));
+  if (toDate) plExpenseConds.push(lte(expensesTable.expenseDate, toDate));
+  const plExpenseRows = await db
+    .select({
+      programId: expensesTable.programId,
+      amount: sql<string>`coalesce(sum(${expensesTable.amount}), 0)::text`,
+    })
+    .from(expensesTable)
+    .where(and(...plExpenseConds))
+    .groupBy(expensesTable.programId);
+
+  const plBillConds = [sql`${billsTable.status} in ('paid', 'scheduled')`];
+  if (fromDate) plBillConds.push(gte(billsTable.dueDate, fromDate));
+  if (toDate) plBillConds.push(lte(billsTable.dueDate, toDate));
+  const plBillRows = await db
+    .select({
+      programId: billsTable.programId,
+      amount: sql<string>`coalesce(sum(${billsTable.amount}), 0)::text`,
+    })
+    .from(billsTable)
+    .where(and(...plBillConds))
+    .groupBy(billsTable.programId);
+
+  const expenseByProgramMap = new Map<number | null, number>();
+  for (const r of plExpenseRows) {
+    const k = r.programId;
+    expenseByProgramMap.set(k, (expenseByProgramMap.get(k) ?? 0) + parseFloat(r.amount));
+  }
+  for (const r of plBillRows) {
+    const k = r.programId;
+    expenseByProgramMap.set(k, (expenseByProgramMap.get(k) ?? 0) + parseFloat(r.amount));
+  }
+  const expensesByProgram = [...expenseByProgramMap.entries()]
+    .filter(([k]) => k !== null)
+    .map(([k, amount]) => {
+      const program = programs.find((p) => p.id === k);
+      return {
+        programId: k as number,
+        programName: program?.name ?? `Program #${k}`,
+        amount,
+      };
+    })
+    .sort((a, b) => b.amount - a.amount);
+  const uncategorizedExpenses = expenseByProgramMap.get(null) ?? 0;
+  const totalExpenses =
+    expensesByProgram.reduce((s, r) => s + r.amount, 0) + uncategorizedExpenses;
+
+  // ---- Balance sheet snapshot (as-of `toDate`, ignoring fromDate) ----
+  const reconciledAgg = await db
+    .select({
+      credits: sql<string>`coalesce(sum(${transactionsTable.amount}) filter (where ${transactionsTable.type} = 'credit'), 0)::text`,
+      debits: sql<string>`coalesce(sum(${transactionsTable.amount}) filter (where ${transactionsTable.type} = 'debit'), 0)::text`,
+    })
+    .from(transactionsTable)
+    .where(
+      and(
+        sql`${transactionsTable.status} = 'reconciled'`,
+        ...(toDate ? [lte(transactionsTable.transactionDate, toDate)] : []),
+      ),
+    );
+  const cashOnHand =
+    parseFloat(reconciledAgg[0]?.credits ?? "0") -
+    parseFloat(reconciledAgg[0]?.debits ?? "0");
+
+  const receivableAgg = await db
+    .select({
+      amount: sql<string>`coalesce(sum(${transactionsTable.amount}), 0)::text`,
+    })
+    .from(transactionsTable)
+    .where(
+      and(
+        sql`${transactionsTable.type} = 'credit'`,
+        sql`${transactionsTable.status} in ('unmatched', 'matched')`,
+        ...(toDate ? [lte(transactionsTable.transactionDate, toDate)] : []),
+      ),
+    );
+  const outstandingReceivables = parseFloat(receivableAgg[0]?.amount ?? "0");
+
+  const unpaidBillAgg = await db
+    .select({
+      amount: sql<string>`coalesce(sum(${billsTable.amount}), 0)::text`,
+    })
+    .from(billsTable)
+    .where(
+      and(
+        sql`${billsTable.status} in ('draft', 'scheduled', 'overdue')`,
+        ...(toDate ? [lte(billsTable.dueDate, toDate)] : []),
+      ),
+    );
+  const unpaidBills = parseFloat(unpaidBillAgg[0]?.amount ?? "0");
+
+  const unreimbursedAgg = await db
+    .select({
+      amount: sql<string>`coalesce(sum(${expensesTable.amount}), 0)::text`,
+    })
+    .from(expensesTable)
+    .where(
+      and(
+        sql`${expensesTable.status} in ('approved', 'submitted')`,
+        ...(toDate ? [lte(expensesTable.expenseDate, toDate)] : []),
+      ),
+    );
+  const unreimbursedExpenses = parseFloat(unreimbursedAgg[0]?.amount ?? "0");
+
+  const totalAssets = cashOnHand + outstandingReceivables;
+  const totalLiabilities = unpaidBills + unreimbursedExpenses;
+  const equity = totalAssets - totalLiabilities;
+
   res.json(
     GetFinancialSummaryReportResponse.parse({
       generatedAt: new Date().toISOString(),
@@ -245,6 +392,24 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
         totalDebits,
         totalCredits,
         netCashFlow: totalCredits - totalDebits,
+      },
+      profitAndLoss: {
+        incomeByProgram,
+        uncategorizedIncome,
+        totalIncome,
+        expensesByProgram,
+        uncategorizedExpenses,
+        totalExpenses,
+        netIncome: totalIncome - totalExpenses,
+      },
+      balanceSheet: {
+        cashOnHand,
+        outstandingReceivables,
+        unpaidBills,
+        unreimbursedExpenses,
+        totalAssets,
+        totalLiabilities,
+        equity,
       },
     })
   );

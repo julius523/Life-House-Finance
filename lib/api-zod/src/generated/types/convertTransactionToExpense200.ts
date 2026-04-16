@@ -5,11 +5,10 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { Expense } from "./expense";
 import type { Transaction } from "./transaction";
 
-export interface ParseBankStatementResponse {
-  /** Number of transactions imported into the bank ledger. */
-  createdCount: number;
-  skippedCount: number;
-  transactions: Transaction[];
-}
+export type ConvertTransactionToExpense200 = {
+  expense: Expense;
+  transaction: Transaction;
+};

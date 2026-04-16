@@ -22,7 +22,7 @@ import { useUpload } from "@workspace/object-storage-web";
 import {
   useParseBankStatement,
   useListPrograms,
-  getListExpensesQueryKey,
+  getListTransactionsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -44,7 +44,7 @@ export function BankStatementImport({ trigger }: Props) {
   const parse = useParseBankStatement();
   const { data: programs } = useListPrograms();
 
-  const programList = programs ?? [];
+  const programList = programs?.items ?? [];
 
   const handleSubmit = async () => {
     if (!file) {
@@ -73,17 +73,17 @@ export function BankStatementImport({ trigger }: Props) {
         },
       });
       toast({
-        title: `Imported ${result.createdCount} draft expense${result.createdCount === 1 ? "" : "s"}`,
+        title: `Imported ${result.createdCount} transaction${result.createdCount === 1 ? "" : "s"}`,
         description:
           result.skippedCount > 0
-            ? `${result.skippedCount} non-debit lines were skipped. Opening drafts for review…`
-            : "Opening drafts for review…",
+            ? `${result.skippedCount} lines were skipped. Opening transactions…`
+            : "Opening transactions for review…",
       });
-      queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
       setOpen(false);
       setFile(null);
       if (result.createdCount > 0) {
-        navigate("/expenses?status=draft");
+        navigate("/transactions");
       }
     } catch (e) {
       toast({
@@ -113,8 +113,9 @@ export function BankStatementImport({ trigger }: Props) {
             AI Bank Statement Import
           </DialogTitle>
           <DialogDescription>
-            Upload a bank or credit-card statement (PDF, image, or CSV). Each debit
-            line will be turned into a draft expense for review.
+            Upload a bank or credit-card statement (PDF, image, or CSV). Every
+            debit and credit will be imported into your transactions list, ready
+            to convert into expenses, bills, or program income.
           </DialogDescription>
         </DialogHeader>
 
@@ -209,7 +210,7 @@ export function BankStatementImport({ trigger }: Props) {
             ) : (
               <>
                 <Sparkles className="mr-2 h-4 w-4" />
-                Extract Expenses
+                Import transactions
               </>
             )}
           </Button>

@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import OpenAI from "openai";
 import { db } from "@workspace/db";
-import { expensesTable, activityLogTable } from "@workspace/db";
+import { transactionsTable, activityLogTable } from "@workspace/db";
 import {
   ParseBankStatementBody,
   ParseBankStatementResponse,
@@ -11,8 +11,6 @@ import { z } from "zod";
 
 const router: IRouter = Router();
 
-// Strict schema for the AI response. Anything that doesn't match this exact
-// shape is rejected before we touch the database.
 const ParsedLineItemSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
   description: z.string().min(1).max(2000),
@@ -31,16 +29,16 @@ const apiKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
 const openai = baseURL && apiKey ? new OpenAI({ baseURL, apiKey }) : null;
 const objectStorage = new ObjectStorageService();
 
-const SYSTEM_PROMPT = `You are a meticulous bookkeeping assistant. You will be given the contents of a bank or credit card statement (as text or as an image). Extract every line item that represents a debit (money going out / expense). Ignore credits (deposits, refunds, payments to the card), running balances, fees that are interest charges, and headers/footers.
+const SYSTEM_PROMPT = `You are a meticulous bookkeeping assistant. You will be given the contents of a bank or credit card statement (as text or as an image). Extract every line item, both money out (debits / expenses / withdrawals / charges) and money in (credits / deposits / refunds / payments received). Ignore running balances and headers/footers.
 
 Return ONLY a JSON object of the form:
-{ "items": [ { "date": "YYYY-MM-DD", "description": "string", "amount": 12.34, "type": "debit", "merchant": "string" } ] }
+{ "items": [ { "date": "YYYY-MM-DD", "description": "string", "amount": 12.34, "type": "debit" | "credit", "merchant": "string" } ] }
 
 Rules:
-- "amount" must be a positive number (no currency symbols).
-- "type" must be "debit" for expenses.
+- "amount" must always be a positive number (no currency symbols, no minus signs).
+- "type" must be "debit" for money leaving the account or "credit" for money entering it.
 - "date" must be ISO YYYY-MM-DD. If the year is missing, infer it from context or use the most plausible recent year.
-- "merchant" is the cleaned up vendor name when one is identifiable (e.g. "STARBUCKS #1234 SEATTLE WA" -> "Starbucks"). If unclear, omit.
+- "merchant" is the cleaned up vendor or payer name when one is identifiable (e.g. "STARBUCKS #1234 SEATTLE WA" -> "Starbucks"). If unclear, omit.
 - Do not include any text outside the JSON object.`;
 
 router.post("/ai/parse-bank-statement", async (req, res): Promise<void> => {
@@ -58,7 +56,6 @@ router.post("/ai/parse-bank-statement", async (req, res): Promise<void> => {
   }
   const data = parsed.data;
 
-  // Pull the file from object storage.
   let buffer: Buffer;
   try {
     const file = await objectStorage.getObjectEntityFile(data.objectPath);
@@ -72,24 +69,18 @@ router.post("/ai/parse-bank-statement", async (req, res): Promise<void> => {
 
   const isImage = data.contentType.startsWith("image/");
 
-  // Build the OpenAI message. Images are sent as base64 data URLs; everything
-  // else (CSV, plain text, PDF) is decoded as text. PDF text extraction here
-  // is best-effort: many digital PDFs include extractable text in the bytes.
   let userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[];
   if (isImage) {
     const dataUrl = `data:${data.contentType};base64,${buffer.toString("base64")}`;
     userContent = [
       {
         type: "text",
-        text: `Extract all expense line items from this bank or credit-card statement image (${data.fileName}).`,
+        text: `Extract all debit and credit line items from this bank or credit-card statement image (${data.fileName}).`,
       },
       { type: "image_url", image_url: { url: dataUrl } },
     ];
   } else {
-    const text = buffer
-      .toString("utf8")
-      // Trim huge files so we stay well under the context window.
-      .slice(0, 60_000);
+    const text = buffer.toString("utf8").slice(0, 60_000);
     userContent = [
       {
         type: "text",
@@ -114,8 +105,6 @@ router.post("/ai/parse-bank-statement", async (req, res): Promise<void> => {
     if (!envelope.success) {
       throw new Error("AI response did not match expected shape");
     }
-    // Validate each item independently so a single bad row doesn't sink the
-    // whole import — invalid rows are dropped and surfaced via skippedCount.
     parsedItems = envelope.data.items.flatMap((candidate) => {
       const r = ParsedLineItemSchema.safeParse(candidate);
       return r.success ? [r.data] : [];
@@ -128,83 +117,70 @@ router.post("/ai/parse-bank-statement", async (req, res): Promise<void> => {
     return;
   }
 
-  // Filter to debits only.
-  const debits = parsedItems.filter((it) => it.type !== "credit");
-
-  if (debits.length === 0) {
+  if (parsedItems.length === 0) {
     res.json(
       ParseBankStatementResponse.parse({
         createdCount: 0,
-        skippedCount: parsedItems.length,
-        expenses: [],
+        skippedCount: 0,
+        transactions: [],
       })
     );
     return;
   }
 
-  // Insert all as draft expenses.
   const inserted = await db
-    .insert(expensesTable)
+    .insert(transactionsTable)
     .values(
-      debits.map((it) => ({
-        submittedBy: data.submittedBy,
-        expenseDate: it.date,
-        merchant: it.merchant?.trim() || it.description.slice(0, 80),
-        description: it.description.slice(0, 500),
+      parsedItems.map((it) => ({
+        transactionDate: it.date,
+        description: (it.merchant?.trim()
+          ? `${it.merchant.trim()} — ${it.description}`
+          : it.description
+        ).slice(0, 500),
         amount: String(it.amount.toFixed(2)),
-        paymentMethod: data.defaultPaymentMethod ?? "credit_card",
-        programId: data.defaultProgramId,
-        status: "draft",
+        type: it.type,
+        status: "unmatched",
+        bankAccountName: data.fileName,
       }))
     )
     .returning();
 
   if (inserted.length > 0) {
+    const total = parsedItems.reduce(
+      (sum, it) => sum + (it.type === "credit" ? it.amount : -it.amount),
+      0
+    );
     await db.insert(activityLogTable).values({
       type: "transaction_imported",
-      description: `${inserted.length} draft expense${inserted.length === 1 ? "" : "s"} imported from ${data.fileName}`,
+      description: `${inserted.length} transaction${inserted.length === 1 ? "" : "s"} imported from ${data.fileName}`,
       actor: data.submittedBy,
-      amount: String(
-        debits.reduce((sum, it) => sum + it.amount, 0).toFixed(2)
-      ),
-      referenceType: "expense",
+      amount: String(Math.abs(total).toFixed(2)),
+      referenceType: "transaction",
     });
   }
 
-  const expensesPayload = inserted.map((e) => ({
-    id: e.id,
-    submittedBy: e.submittedBy,
-    submittedByEmail: e.submittedByEmail ?? undefined,
-    expenseDate: e.expenseDate,
-    merchant: e.merchant,
-    description: e.description,
-    amount: parseFloat(e.amount),
-    paymentMethod: e.paymentMethod as
-      | "cash"
-      | "check"
-      | "credit_card"
-      | "debit_card"
-      | "bank_transfer"
-      | "other",
-    programId: e.programId ?? undefined,
-    status: e.status as
-      | "draft"
-      | "submitted"
-      | "approved"
-      | "rejected"
-      | "reimbursed"
-      | "needs_correction",
-    receiptIds: e.receiptIds ?? undefined,
-    rejectionReason: e.rejectionReason ?? undefined,
-    createdAt: e.createdAt.toISOString(),
-    updatedAt: e.updatedAt.toISOString(),
+  const transactionsPayload = inserted.map((t) => ({
+    id: t.id,
+    externalId: t.externalId ?? undefined,
+    bankAccountId: t.bankAccountId ?? undefined,
+    bankAccountName: t.bankAccountName ?? undefined,
+    transactionDate: t.transactionDate,
+    description: t.description,
+    amount: parseFloat(t.amount),
+    type: t.type as "debit" | "credit",
+    status: t.status as "unmatched" | "matched" | "reconciled",
+    matchedExpenseId: t.matchedExpenseId ?? undefined,
+    matchedBillId: t.matchedBillId ?? undefined,
+    matchedProgramId: t.matchedProgramId ?? undefined,
+    notes: t.notes ?? undefined,
+    importedAt: t.importedAt.toISOString(),
   }));
 
   res.json(
     ParseBankStatementResponse.parse({
       createdCount: inserted.length,
-      skippedCount: parsedItems.length - inserted.length,
-      expenses: expensesPayload,
+      skippedCount: 0,
+      transactions: transactionsPayload,
     })
   );
 });

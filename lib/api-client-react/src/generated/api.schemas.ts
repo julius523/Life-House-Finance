@@ -338,6 +338,8 @@ export interface Transaction {
   status: TransactionStatus;
   matchedExpenseId?: number;
   matchedBillId?: number;
+  matchedProgramId?: number;
+  matchedProgramName?: string;
   notes?: string;
   importedAt: string;
 }
@@ -564,9 +566,10 @@ export interface ParseBankStatementBody {
 }
 
 export interface ParseBankStatementResponse {
+  /** Number of transactions imported into the bank ledger. */
   createdCount: number;
   skippedCount: number;
-  expenses: Expense[];
+  transactions: Transaction[];
 }
 
 export type FinancialSummaryReportExpenseTotalsByStatusItem = {
@@ -609,6 +612,40 @@ export type FinancialSummaryReportBankReconciliation = {
   netCashFlow: number;
 };
 
+export type FinancialSummaryReportProfitAndLossIncomeByProgramItem = {
+  programId?: number;
+  programName: string;
+  amount: number;
+};
+
+export type FinancialSummaryReportProfitAndLossExpensesByProgramItem = {
+  programId?: number;
+  programName: string;
+  amount: number;
+};
+
+export type FinancialSummaryReportProfitAndLoss = {
+  incomeByProgram: FinancialSummaryReportProfitAndLossIncomeByProgramItem[];
+  uncategorizedIncome: number;
+  totalIncome: number;
+  expensesByProgram: FinancialSummaryReportProfitAndLossExpensesByProgramItem[];
+  uncategorizedExpenses: number;
+  totalExpenses: number;
+  netIncome: number;
+};
+
+export type FinancialSummaryReportBalanceSheet = {
+  /** Net of reconciled credits minus reconciled debits. */
+  cashOnHand: number;
+  /** Matched-but-not-yet-reconciled credits. */
+  outstandingReceivables: number;
+  unpaidBills: number;
+  unreimbursedExpenses: number;
+  totalAssets: number;
+  totalLiabilities: number;
+  equity: number;
+};
+
 export interface FinancialSummaryReport {
   generatedAt: string;
   fromDate?: string;
@@ -621,6 +658,8 @@ export interface FinancialSummaryReport {
   missingReceiptAmount: number;
   missingReceipts: MissingReceiptItem[];
   bankReconciliation: FinancialSummaryReportBankReconciliation;
+  profitAndLoss: FinancialSummaryReportProfitAndLoss;
+  balanceSheet: FinancialSummaryReportBalanceSheet;
 }
 
 export type UpdateMonthEndChecklistBodyStatus =
@@ -722,6 +761,44 @@ export const ListTransactionsStatus = {
   matched: "matched",
   reconciled: "reconciled",
 } as const;
+
+export type ConvertTransactionToExpenseBodyPaymentMethod =
+  (typeof ConvertTransactionToExpenseBodyPaymentMethod)[keyof typeof ConvertTransactionToExpenseBodyPaymentMethod];
+
+export const ConvertTransactionToExpenseBodyPaymentMethod = {
+  cash: "cash",
+  check: "check",
+  credit_card: "credit_card",
+  debit_card: "debit_card",
+  bank_transfer: "bank_transfer",
+  other: "other",
+} as const;
+
+export type ConvertTransactionToExpenseBody = {
+  programId?: number;
+  paymentMethod?: ConvertTransactionToExpenseBodyPaymentMethod;
+  submittedBy?: string;
+};
+
+export type ConvertTransactionToExpense200 = {
+  expense: Expense;
+  transaction: Transaction;
+};
+
+export type ConvertTransactionToBillBody = {
+  vendorId: number;
+  programId?: number;
+  dueDate?: string;
+};
+
+export type ConvertTransactionToBill200 = {
+  bill: Bill;
+  transaction: Transaction;
+};
+
+export type LinkTransactionToProgramBody = {
+  programId: number;
+};
 
 export type GetReconciliationSummaryParams = {
   /**

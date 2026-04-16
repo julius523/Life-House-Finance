@@ -115,30 +115,191 @@ export default function ReportsPage() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <SummaryStat
-              label="Total expenses"
-              value={fmtMoney(
-                data.expenseTotalsByStatus.reduce((s, r) => s + r.amount, 0)
-              )}
+              label="Total income (P&L)"
+              value={fmtMoney(data.profitAndLoss.totalIncome)}
+              accent="ok"
             />
             <SummaryStat
-              label="Total bills"
-              value={fmtMoney(
-                data.billTotalsByStatus.reduce((s, r) => s + r.amount, 0)
-              )}
+              label="Total expenses (P&L)"
+              value={fmtMoney(data.profitAndLoss.totalExpenses)}
             />
             <SummaryStat
-              label="Missing receipts"
-              value={`${data.missingReceiptCount} (${fmtMoney(data.missingReceiptAmount)})`}
-              accent={data.missingReceiptCount > 0 ? "warn" : "ok"}
+              label="Net income"
+              value={fmtMoney(data.profitAndLoss.netIncome)}
+              accent={data.profitAndLoss.netIncome >= 0 ? "ok" : "warn"}
             />
             <SummaryStat
-              label="Net cash flow"
-              value={fmtMoney(data.bankReconciliation.netCashFlow)}
-              accent={
-                data.bankReconciliation.netCashFlow >= 0 ? "ok" : "warn"
-              }
+              label="Cash on hand"
+              value={fmtMoney(data.balanceSheet.cashOnHand)}
+              accent={data.balanceSheet.cashOnHand >= 0 ? "ok" : "warn"}
             />
           </div>
+
+          <Card className="print-page-break">
+            <CardHeader>
+              <CardTitle className="text-base">
+                Profit &amp; Loss Statement
+              </CardTitle>
+              <CardDescription>
+                Cash-basis income vs. committed spend for the selected period.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                <div>
+                  <div className="font-semibold text-success mb-2">Income</div>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {data.profitAndLoss.incomeByProgram.length === 0 &&
+                        data.profitAndLoss.uncategorizedIncome === 0 && (
+                          <tr>
+                            <td className="py-2 text-muted-foreground">
+                              No income recorded in this period.
+                            </td>
+                          </tr>
+                        )}
+                      {data.profitAndLoss.incomeByProgram.map((row) => (
+                        <tr key={row.programName} className="border-b last:border-0">
+                          <td className="py-2">{row.programName}</td>
+                          <td className="py-2 text-right font-medium">
+                            {fmtMoney(row.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                      {data.profitAndLoss.uncategorizedIncome > 0 && (
+                        <tr className="border-b last:border-0">
+                          <td className="py-2 italic text-muted-foreground">
+                            Unallocated deposits
+                          </td>
+                          <td className="py-2 text-right font-medium">
+                            {fmtMoney(data.profitAndLoss.uncategorizedIncome)}
+                          </td>
+                        </tr>
+                      )}
+                      <tr className="border-t-2 border-success/30">
+                        <td className="py-2 font-bold">Total income</td>
+                        <td className="py-2 text-right font-bold text-success">
+                          {fmtMoney(data.profitAndLoss.totalIncome)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div>
+                  <div className="font-semibold mb-2">Expenses</div>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {data.profitAndLoss.expensesByProgram.length === 0 &&
+                        data.profitAndLoss.uncategorizedExpenses === 0 && (
+                          <tr>
+                            <td className="py-2 text-muted-foreground">
+                              No expenses recorded in this period.
+                            </td>
+                          </tr>
+                        )}
+                      {data.profitAndLoss.expensesByProgram.map((row) => (
+                        <tr key={row.programName} className="border-b last:border-0">
+                          <td className="py-2">{row.programName}</td>
+                          <td className="py-2 text-right font-medium">
+                            {fmtMoney(row.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                      {data.profitAndLoss.uncategorizedExpenses > 0 && (
+                        <tr className="border-b last:border-0">
+                          <td className="py-2 italic text-muted-foreground">
+                            Unallocated
+                          </td>
+                          <td className="py-2 text-right font-medium">
+                            {fmtMoney(data.profitAndLoss.uncategorizedExpenses)}
+                          </td>
+                        </tr>
+                      )}
+                      <tr className="border-t-2 border-foreground/20">
+                        <td className="py-2 font-bold">Total expenses</td>
+                        <td className="py-2 text-right font-bold">
+                          {fmtMoney(data.profitAndLoss.totalExpenses)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex items-center justify-between border-t-2 pt-3">
+                  <div className="font-bold text-base">Net income</div>
+                  <div
+                    className={`font-bold text-lg ${
+                      data.profitAndLoss.netIncome >= 0
+                        ? "text-success"
+                        : "text-destructive"
+                    }`}
+                  >
+                    {fmtMoney(data.profitAndLoss.netIncome)}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Balance Sheet</CardTitle>
+              <CardDescription>
+                Snapshot as of {format(new Date(toDate), "MMM d, yyyy")}.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-6 md:grid-cols-2">
+                <div>
+                  <div className="font-semibold mb-2">Assets</div>
+                  <dl className="text-sm divide-y">
+                    <Row k="Cash on hand" v={fmtMoney(data.balanceSheet.cashOnHand)} />
+                    <Row
+                      k="Outstanding receivables"
+                      v={fmtMoney(data.balanceSheet.outstandingReceivables)}
+                    />
+                    <Row
+                      k="Total assets"
+                      v={fmtMoney(data.balanceSheet.totalAssets)}
+                      accent="ok"
+                    />
+                  </dl>
+                </div>
+                <div>
+                  <div className="font-semibold mb-2">Liabilities</div>
+                  <dl className="text-sm divide-y">
+                    <Row k="Unpaid bills" v={fmtMoney(data.balanceSheet.unpaidBills)} />
+                    <Row
+                      k="Unreimbursed expenses"
+                      v={fmtMoney(data.balanceSheet.unreimbursedExpenses)}
+                    />
+                    <Row
+                      k="Total liabilities"
+                      v={fmtMoney(data.balanceSheet.totalLiabilities)}
+                      accent={
+                        data.balanceSheet.totalLiabilities > 0 ? "warn" : undefined
+                      }
+                    />
+                  </dl>
+                </div>
+              </div>
+              <div className="mt-6 flex items-center justify-between border-t-2 pt-3">
+                <div className="font-bold text-base">Equity (Assets − Liabilities)</div>
+                <div
+                  className={`font-bold text-lg ${
+                    data.balanceSheet.equity >= 0
+                      ? "text-success"
+                      : "text-destructive"
+                  }`}
+                >
+                  {fmtMoney(data.balanceSheet.equity)}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="print-page-break" />
 
           <div className="grid gap-6 md:grid-cols-2">
             <Card>

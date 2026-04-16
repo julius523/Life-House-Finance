@@ -626,6 +626,114 @@ paths:
               schema:
                 $ref: "#/components/schemas/Transaction"
 
+  /transactions/{id}/convert-to-expense:
+    post:
+      operationId: convertTransactionToExpense
+      tags: [transactions]
+      summary: Create a draft expense from an unmatched debit and link them.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                programId:
+                  type: integer
+                paymentMethod:
+                  type: string
+                  enum: [cash, check, credit_card, debit_card, bank_transfer, other]
+                submittedBy:
+                  type: string
+      responses:
+        "200":
+          description: Created expense + updated transaction
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expense:
+                    $ref: "#/components/schemas/Expense"
+                  transaction:
+                    $ref: "#/components/schemas/Transaction"
+                required: [expense, transaction]
+
+  /transactions/{id}/convert-to-bill:
+    post:
+      operationId: convertTransactionToBill
+      tags: [transactions]
+      summary: Create a draft bill from an unmatched debit and link them.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                vendorId:
+                  type: integer
+                programId:
+                  type: integer
+                dueDate:
+                  type: string
+                  format: date
+              required: [vendorId]
+      responses:
+        "200":
+          description: Created bill + updated transaction
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bill:
+                    $ref: "#/components/schemas/Bill"
+                  transaction:
+                    $ref: "#/components/schemas/Transaction"
+                required: [bill, transaction]
+
+  /transactions/{id}/link-program:
+    post:
+      operationId: linkTransactionToProgram
+      tags: [transactions]
+      summary: Link a credit (deposit) transaction to a program / grant account.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                programId:
+                  type: integer
+              required: [programId]
+      responses:
+        "200":
+          description: Updated transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
+
   /transactions/{id}:
     get:
       operationId: getTransaction
@@ -1499,6 +1607,10 @@ components:
           type: integer
         matchedBillId:
           type: integer
+        matchedProgramId:
+          type: integer
+        matchedProgramName:
+          type: string
         notes:
           type: string
         importedAt:
@@ -1870,16 +1982,17 @@ components:
       properties:
         createdCount:
           type: integer
+          description: Number of transactions imported into the bank ledger.
         skippedCount:
           type: integer
-        expenses:
+        transactions:
           type: array
           items:
-            $ref: "#/components/schemas/Expense"
+            $ref: "#/components/schemas/Transaction"
       required:
         - createdCount
         - skippedCount
-        - expenses
+        - transactions
 
     FinancialSummaryReport:
       type: object
@@ -1998,6 +2111,72 @@ components:
             - totalDebits
             - totalCredits
             - netCashFlow
+        profitAndLoss:
+          type: object
+          properties:
+            incomeByProgram:
+              type: array
+              items:
+                type: object
+                properties:
+                  programId: { type: integer }
+                  programName: { type: string }
+                  amount: { type: number }
+                required: [programName, amount]
+            uncategorizedIncome:
+              type: number
+            totalIncome:
+              type: number
+            expensesByProgram:
+              type: array
+              items:
+                type: object
+                properties:
+                  programId: { type: integer }
+                  programName: { type: string }
+                  amount: { type: number }
+                required: [programName, amount]
+            uncategorizedExpenses:
+              type: number
+            totalExpenses:
+              type: number
+            netIncome:
+              type: number
+          required:
+            - incomeByProgram
+            - uncategorizedIncome
+            - totalIncome
+            - expensesByProgram
+            - uncategorizedExpenses
+            - totalExpenses
+            - netIncome
+        balanceSheet:
+          type: object
+          properties:
+            cashOnHand:
+              type: number
+              description: Net of reconciled credits minus reconciled debits.
+            outstandingReceivables:
+              type: number
+              description: Matched-but-not-yet-reconciled credits.
+            unpaidBills:
+              type: number
+            unreimbursedExpenses:
+              type: number
+            totalAssets:
+              type: number
+            totalLiabilities:
+              type: number
+            equity:
+              type: number
+          required:
+            - cashOnHand
+            - outstandingReceivables
+            - unpaidBills
+            - unreimbursedExpenses
+            - totalAssets
+            - totalLiabilities
+            - equity
       required:
         - generatedAt
         - expenseTotalsByStatus
@@ -2008,6 +2187,8 @@ components:
         - missingReceiptAmount
         - missingReceipts
         - bankReconciliation
+        - profitAndLoss
+        - balanceSheet
 
     UpdateMonthEndChecklistBody:
       type: object

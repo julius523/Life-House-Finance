@@ -5,9 +5,11 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { FinancialSummaryReportBalanceSheet } from "./financialSummaryReportBalanceSheet";
 import type { FinancialSummaryReportBankReconciliation } from "./financialSummaryReportBankReconciliation";
 import type { FinancialSummaryReportBillTotalsByStatusItem } from "./financialSummaryReportBillTotalsByStatusItem";
 import type { FinancialSummaryReportExpenseTotalsByStatusItem } from "./financialSummaryReportExpenseTotalsByStatusItem";
+import type { FinancialSummaryReportProfitAndLoss } from "./financialSummaryReportProfitAndLoss";
 import type { FinancialSummaryReportSpendByProgramItem } from "./financialSummaryReportSpendByProgramItem";
 import type { FinancialSummaryReportTopVendorsItem } from "./financialSummaryReportTopVendorsItem";
 import type { MissingReceiptItem } from "./missingReceiptItem";
@@ -24,4 +26,6 @@ export interface FinancialSummaryReport {
   missingReceiptAmount: number;
   missingReceipts: MissingReceiptItem[];
   bankReconciliation: FinancialSummaryReportBankReconciliation;
+  profitAndLoss: FinancialSummaryReportProfitAndLoss;
+  balanceSheet: FinancialSummaryReportBalanceSheet;
 }

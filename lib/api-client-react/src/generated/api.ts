@@ -21,6 +21,10 @@ import type {
   ApprovalActionBody,
   ApprovalQueueItem,
   Bill,
+  ConvertTransactionToBill200,
+  ConvertTransactionToBillBody,
+  ConvertTransactionToExpense200,
+  ConvertTransactionToExpenseBody,
   CreateBillBody,
   CreateExpenseBody,
   CreateMonthEndChecklistBody,
@@ -37,6 +41,7 @@ import type {
   GetRecentActivityParams,
   GetReconciliationSummaryParams,
   HealthStatus,
+  LinkTransactionToProgramBody,
   ListApprovalsParams,
   ListBillsParams,
   ListExpensesParams,
@@ -2563,6 +2568,276 @@ export const useCreateTransaction = <
   TContext
 > => {
   return useMutation(getCreateTransactionMutationOptions(options));
+};
+
+/**
+ * @summary Create a draft expense from an unmatched debit and link them.
+ */
+export const getConvertTransactionToExpenseUrl = (id: number) => {
+  return `/api/transactions/${id}/convert-to-expense`;
+};
+
+export const convertTransactionToExpense = async (
+  id: number,
+  convertTransactionToExpenseBody?: ConvertTransactionToExpenseBody,
+  options?: RequestInit,
+): Promise<ConvertTransactionToExpense200> => {
+  return customFetch<ConvertTransactionToExpense200>(
+    getConvertTransactionToExpenseUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(convertTransactionToExpenseBody),
+    },
+  );
+};
+
+export const getConvertTransactionToExpenseMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof convertTransactionToExpense>>,
+    TError,
+    { id: number; data: BodyType<ConvertTransactionToExpenseBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof convertTransactionToExpense>>,
+  TError,
+  { id: number; data: BodyType<ConvertTransactionToExpenseBody> },
+  TContext
+> => {
+  const mutationKey = ["convertTransactionToExpense"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof convertTransactionToExpense>>,
+    { id: number; data: BodyType<ConvertTransactionToExpenseBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return convertTransactionToExpense(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConvertTransactionToExpenseMutationResult = NonNullable<
+  Awaited<ReturnType<typeof convertTransactionToExpense>>
+>;
+export type ConvertTransactionToExpenseMutationBody =
+  BodyType<ConvertTransactionToExpenseBody>;
+export type ConvertTransactionToExpenseMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a draft expense from an unmatched debit and link them.
+ */
+export const useConvertTransactionToExpense = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof convertTransactionToExpense>>,
+    TError,
+    { id: number; data: BodyType<ConvertTransactionToExpenseBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof convertTransactionToExpense>>,
+  TError,
+  { id: number; data: BodyType<ConvertTransactionToExpenseBody> },
+  TContext
+> => {
+  return useMutation(getConvertTransactionToExpenseMutationOptions(options));
+};
+
+/**
+ * @summary Create a draft bill from an unmatched debit and link them.
+ */
+export const getConvertTransactionToBillUrl = (id: number) => {
+  return `/api/transactions/${id}/convert-to-bill`;
+};
+
+export const convertTransactionToBill = async (
+  id: number,
+  convertTransactionToBillBody: ConvertTransactionToBillBody,
+  options?: RequestInit,
+): Promise<ConvertTransactionToBill200> => {
+  return customFetch<ConvertTransactionToBill200>(
+    getConvertTransactionToBillUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(convertTransactionToBillBody),
+    },
+  );
+};
+
+export const getConvertTransactionToBillMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof convertTransactionToBill>>,
+    TError,
+    { id: number; data: BodyType<ConvertTransactionToBillBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof convertTransactionToBill>>,
+  TError,
+  { id: number; data: BodyType<ConvertTransactionToBillBody> },
+  TContext
+> => {
+  const mutationKey = ["convertTransactionToBill"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof convertTransactionToBill>>,
+    { id: number; data: BodyType<ConvertTransactionToBillBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return convertTransactionToBill(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConvertTransactionToBillMutationResult = NonNullable<
+  Awaited<ReturnType<typeof convertTransactionToBill>>
+>;
+export type ConvertTransactionToBillMutationBody =
+  BodyType<ConvertTransactionToBillBody>;
+export type ConvertTransactionToBillMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a draft bill from an unmatched debit and link them.
+ */
+export const useConvertTransactionToBill = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof convertTransactionToBill>>,
+    TError,
+    { id: number; data: BodyType<ConvertTransactionToBillBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof convertTransactionToBill>>,
+  TError,
+  { id: number; data: BodyType<ConvertTransactionToBillBody> },
+  TContext
+> => {
+  return useMutation(getConvertTransactionToBillMutationOptions(options));
+};
+
+/**
+ * @summary Link a credit (deposit) transaction to a program / grant account.
+ */
+export const getLinkTransactionToProgramUrl = (id: number) => {
+  return `/api/transactions/${id}/link-program`;
+};
+
+export const linkTransactionToProgram = async (
+  id: number,
+  linkTransactionToProgramBody: LinkTransactionToProgramBody,
+  options?: RequestInit,
+): Promise<Transaction> => {
+  return customFetch<Transaction>(getLinkTransactionToProgramUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(linkTransactionToProgramBody),
+  });
+};
+
+export const getLinkTransactionToProgramMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof linkTransactionToProgram>>,
+    TError,
+    { id: number; data: BodyType<LinkTransactionToProgramBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof linkTransactionToProgram>>,
+  TError,
+  { id: number; data: BodyType<LinkTransactionToProgramBody> },
+  TContext
+> => {
+  const mutationKey = ["linkTransactionToProgram"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof linkTransactionToProgram>>,
+    { id: number; data: BodyType<LinkTransactionToProgramBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return linkTransactionToProgram(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type LinkTransactionToProgramMutationResult = NonNullable<
+  Awaited<ReturnType<typeof linkTransactionToProgram>>
+>;
+export type LinkTransactionToProgramMutationBody =
+  BodyType<LinkTransactionToProgramBody>;
+export type LinkTransactionToProgramMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Link a credit (deposit) transaction to a program / grant account.
+ */
+export const useLinkTransactionToProgram = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof linkTransactionToProgram>>,
+    TError,
+    { id: number; data: BodyType<LinkTransactionToProgramBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof linkTransactionToProgram>>,
+  TError,
+  { id: number; data: BodyType<LinkTransactionToProgramBody> },
+  TContext
+> => {
+  return useMutation(getLinkTransactionToProgramMutationOptions(options));
 };
 
 /**
