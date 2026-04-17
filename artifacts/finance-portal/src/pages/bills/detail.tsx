@@ -271,6 +271,16 @@ export default function BillDetail() {
 
   const isAdmin = user?.role === "admin";
   const canDecide = isAdmin || user?.role === "approver";
+  const RECEIPT_DELETABLE_BILL_STATUSES = new Set([
+    "draft",
+    "submitted",
+    "needs_correction",
+  ]);
+  const canDeleteReceipt = (uploadedBy?: number): boolean => {
+    if (isAdmin) return true;
+    if (!user || uploadedBy !== user.id) return false;
+    return RECEIPT_DELETABLE_BILL_STATUSES.has(bill.status);
+  };
   const submitterName = user ? `${user.firstName} ${user.lastName}` : "";
   // Match the backend: prefer the immutable email captured at submission
   // time, and only fall back to display-name matching for legacy bills
@@ -601,16 +611,18 @@ export default function BillDetail() {
                       {r.fileName}
                     </div>
                   </button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleDeleteReceipt(r.id)}
-                    className="h-7 w-7 absolute top-1 right-1 bg-background/80 backdrop-blur opacity-0 group-hover:opacity-100 transition-opacity text-destructive"
-                    title="Remove attachment"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+                  {canDeleteReceipt(r.uploadedBy) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDeleteReceipt(r.id)}
+                      className="h-7 w-7 absolute top-1 right-1 bg-background/80 backdrop-blur opacity-0 group-hover:opacity-100 transition-opacity text-destructive"
+                      title="Remove attachment"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>

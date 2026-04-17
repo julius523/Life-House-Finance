@@ -14,6 +14,7 @@ export const receiptsTable = pgTable("receipts", {
   tags: text("tags").array(),
   linkedExpenseId: integer("linked_expense_id"),
   linkedBillId: integer("linked_bill_id"),
+  uploadedBy: integer("uploaded_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

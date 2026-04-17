@@ -891,6 +891,7 @@ export const ListReceiptsResponse = zod.object({
       tags: zod.array(zod.string()).optional(),
       linkedExpenseId: zod.number().optional(),
       linkedBillId: zod.number().optional(),
+      uploadedBy: zod.number().optional().describe("User id of the uploader"),
       createdAt: zod.coerce.date(),
     }),
   ),
@@ -934,6 +935,7 @@ export const GetReceiptResponse = zod.object({
   tags: zod.array(zod.string()).optional(),
   linkedExpenseId: zod.number().optional(),
   linkedBillId: zod.number().optional(),
+  uploadedBy: zod.number().optional().describe("User id of the uploader"),
   createdAt: zod.coerce.date(),
 });
 

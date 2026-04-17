@@ -1637,6 +1637,9 @@ components:
           type: integer
         linkedBillId:
           type: integer
+        uploadedBy:
+          type: integer
+          description: User id of the uploader
         createdAt:
           type: string
           format: date-time

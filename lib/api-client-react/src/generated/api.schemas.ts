@@ -284,6 +284,8 @@ export interface Receipt {
   tags?: string[];
   linkedExpenseId?: number;
   linkedBillId?: number;
+  /** User id of the uploader */
+  uploadedBy?: number;
   createdAt: string;
 }
 

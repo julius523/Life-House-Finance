@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { requireRole } from "../lib/auth";
 import { db } from "@workspace/db";
-import { receiptsTable, vendorsTable, expensesTable } from "@workspace/db";
+import { receiptsTable, vendorsTable, expensesTable, billsTable } from "@workspace/db";
 import { eq, and, desc, count, sql, ilike, or } from "drizzle-orm";
 import {
   ListReceiptsQueryParams,
@@ -35,9 +35,18 @@ function formatReceipt(r: typeof receiptsTable.$inferSelect, vendorName?: string
     tags: r.tags ?? undefined,
     linkedExpenseId: r.linkedExpenseId ?? undefined,
     linkedBillId: r.linkedBillId ?? undefined,
+    uploadedBy: r.uploadedBy ?? undefined,
     createdAt: r.createdAt.toISOString(),
   };
 }
+
+// Statuses where the linked expense/bill is still mutable enough that the
+// uploader is allowed to remove their own attachment.
+const MUTABLE_STATUSES = new Set([
+  "draft",
+  "submitted",
+  "needs_correction",
+]);
 
 router.get("/receipts", async (req, res): Promise<void> => {
   const parsed = ListReceiptsQueryParams.safeParse(req.query);
@@ -112,6 +121,7 @@ router.post("/receipts", requireRole("admin", "approver", "submitter"), async (r
       tags: data.tags,
       linkedExpenseId: data.linkedExpenseId,
       linkedBillId: data.linkedBillId,
+      uploadedBy: req.authUser?.id,
     })
     .returning();
 
@@ -184,10 +194,15 @@ router.get("/receipts/:id", async (req, res): Promise<void> => {
   res.json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName)));
 });
 
-router.delete("/receipts/:id", requireRole("admin", "approver"), async (req, res): Promise<void> => {
+router.delete("/receipts/:id", async (req, res): Promise<void> => {
   const parsed = DeleteReceiptParams.safeParse({ id: Number(req.params["id"]) });
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const user = req.authUser;
+  if (!user) {
+    res.status(401).json({ error: "Not authenticated" });
     return;
   }
   const [existing] = await db
@@ -198,6 +213,37 @@ router.delete("/receipts/:id", requireRole("admin", "approver"), async (req, res
     res.status(204).send();
     return;
   }
+
+  // Permission model: admins can always delete. Otherwise, the uploader of the
+  // receipt may delete it as long as it is unlinked or the linked
+  // expense/bill is still in a mutable state (draft / submitted /
+  // needs_correction). Approvers without those criteria are not granted
+  // blanket delete rights anymore — deletion is ownership-based.
+  const isAdmin = user.role === "admin";
+  let allowed = isAdmin;
+  if (!allowed && existing.uploadedBy === user.id) {
+    if (existing.linkedExpenseId) {
+      const [exp] = await db
+        .select({ status: expensesTable.status })
+        .from(expensesTable)
+        .where(eq(expensesTable.id, existing.linkedExpenseId));
+      allowed = !!exp && MUTABLE_STATUSES.has(exp.status);
+    } else if (existing.linkedBillId) {
+      const [bill] = await db
+        .select({ status: billsTable.status })
+        .from(billsTable)
+        .where(eq(billsTable.id, existing.linkedBillId));
+      allowed = !!bill && MUTABLE_STATUSES.has(bill.status);
+    } else {
+      // Unlinked receipt — uploader can clean up their own upload.
+      allowed = true;
+    }
+  }
+  if (!allowed) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
   await db.delete(receiptsTable).where(eq(receiptsTable.id, parsed.data.id));
   // Remove the receipt id from any linked expense's receiptIds array so it
   // disappears from the attached-receipts list immediately.

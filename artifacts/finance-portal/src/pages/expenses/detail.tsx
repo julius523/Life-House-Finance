@@ -46,6 +46,13 @@ import { ReceiptUploader, type PendingReceipt } from "@/components/receipt-uploa
 import { ReceiptViewer, type ReceiptViewerFile } from "@/components/receipt-viewer";
 import { LinkedTransactions } from "@/components/linked-transactions";
 import { FileBox } from "lucide-react";
+import { useAuth } from "@/lib/auth";
+
+const RECEIPT_DELETABLE_EXPENSE_STATUSES = new Set([
+  "draft",
+  "submitted",
+  "needs_correction",
+]);
 
 export default function ExpenseDetail() {
   const [, params] = useRoute("/expenses/:id");
@@ -53,6 +60,7 @@ export default function ExpenseDetail() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [resubmitReceipts, setResubmitReceipts] = useState<PendingReceipt[]>([]);
   const [viewerFile, setViewerFile] = useState<ReceiptViewerFile | null>(null);
+  const { user } = useAuth();
 
   const { data: expense, isLoading } = useGetExpense(id, {
     query: { enabled: !!id, queryKey: getGetExpenseQueryKey(id) },
@@ -255,6 +263,12 @@ export default function ExpenseDetail() {
   const isNeedsCorrection = expense.status === "needs_correction";
   const isSubmitted = expense.status === "submitted";
   const isDraft = expense.status === "draft";
+  const isAdmin = user?.role === "admin";
+  const canDeleteReceipt = (uploadedBy?: number): boolean => {
+    if (isAdmin) return true;
+    if (!user || uploadedBy !== user.id) return false;
+    return RECEIPT_DELETABLE_EXPENSE_STATUSES.has(expense.status);
+  };
 
   const handleDismissDuplicate = async () => {
     try {
@@ -604,25 +618,27 @@ export default function ExpenseDetail() {
                       {r.fileName}
                     </div>
                   </button>
-                  <div className="border-t flex">
-                    <button
-                      type="button"
-                      onClick={() => handleReplaceClick(r.id)}
-                      className="flex-1 px-2 py-1.5 text-xs hover:bg-muted flex items-center justify-center gap-1"
-                    >
-                      <Replace className="h-3 w-3" />
-                      Replace
-                    </button>
-                    <div className="w-px bg-border" />
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteReceipt(r.id)}
-                      className="flex-1 px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                      Delete
-                    </button>
-                  </div>
+                  {canDeleteReceipt(r.uploadedBy) && (
+                    <div className="border-t flex">
+                      <button
+                        type="button"
+                        onClick={() => handleReplaceClick(r.id)}
+                        className="flex-1 px-2 py-1.5 text-xs hover:bg-muted flex items-center justify-center gap-1"
+                      >
+                        <Replace className="h-3 w-3" />
+                        Replace
+                      </button>
+                      <div className="w-px bg-border" />
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteReceipt(r.id)}
+                        className="flex-1 px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
