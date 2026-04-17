@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { RejectDialog } from "@/components/reject-dialog";
 import { 
   useListApprovals, 
   useApproveExpense, 
@@ -30,6 +31,12 @@ export default function Approvals() {
   const rejectExpense = useRejectExpense();
   const approveBill = useApproveBill();
 
+  const [rejectTarget, setRejectTarget] = useState<{
+    type: "expense" | "bill";
+    referenceId: number;
+  } | null>(null);
+  const [rejectBusy, setRejectBusy] = useState(false);
+
   const handleApprove = async (item: any) => {
     try {
       if (item.type === "expense") {
@@ -50,24 +57,35 @@ export default function Approvals() {
     }
   };
 
-  const handleReject = async (item: any) => {
-    const reason = window.prompt(
-      `Reason for rejecting this ${item.type}? (sent back for correction)`,
-    );
-    if (!reason || reason.trim().length < 3) return;
+  const handleRejectConfirm = async (data: {
+    reason: string;
+    action: "send_back" | "close";
+  }) => {
+    if (!rejectTarget) return;
+    setRejectBusy(true);
     try {
-      if (item.type === "expense") {
+      if (rejectTarget.type === "expense") {
         await rejectExpense.mutateAsync({
-          id: item.referenceId,
-          data: { rejectedBy: "Finance User", reason: reason.trim(), action: "send_back" },
+          id: rejectTarget.referenceId,
+          data: {
+            rejectedBy: "Finance User",
+            reason: data.reason,
+            action: data.action,
+          },
         });
       } else {
-        await apiJson(`/bills/${item.referenceId}/reject`, {
+        await apiJson(`/bills/${rejectTarget.referenceId}/reject`, {
           method: "POST",
-          body: { reason: reason.trim(), action: "send_back" },
+          body: data,
         });
       }
-      toast({ title: "Item sent back for correction" });
+      toast({
+        title:
+          data.action === "send_back"
+            ? "Item sent back for correction"
+            : "Item rejected",
+      });
+      setRejectTarget(null);
       queryClient.invalidateQueries({ queryKey: getListApprovalsQueryKey() });
     } catch (e) {
       toast({
@@ -75,6 +93,8 @@ export default function Approvals() {
         description: e instanceof Error ? e.message : undefined,
         variant: "destructive",
       });
+    } finally {
+      setRejectBusy(false);
     }
   };
 
@@ -173,7 +193,7 @@ export default function Approvals() {
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     )}
-                    <Button variant="outline" size="sm" className="text-destructive border-destructive hover:bg-destructive/10" onClick={() => handleReject(item)}>
+                    <Button variant="outline" size="sm" className="text-destructive border-destructive hover:bg-destructive/10" onClick={() => setRejectTarget({ type: item.type, referenceId: item.referenceId })}>
                       <X className="mr-2 h-4 w-4" />
                       Reject
                     </Button>
@@ -194,6 +214,15 @@ export default function Approvals() {
           )}
         </CardContent>
       </Card>
+
+      <RejectDialog
+        open={rejectTarget !== null}
+        onOpenChange={(o) => {
+          if (!o) setRejectTarget(null);
+        }}
+        onConfirm={handleRejectConfirm}
+        isSubmitting={rejectBusy}
+      />
     </div>
   );
 }

@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
 import { requireRole } from "../lib/auth";
 import { db } from "@workspace/db";
-import { billsTable, vendorsTable, programsTable, activityLogTable } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
+import { billsTable, vendorsTable, programsTable, activityLogTable, transactionsTable } from "@workspace/db";
+import { eq, and, desc, isNull, sql } from "drizzle-orm";
 import {
   ListBillsQueryParams,
   ListBillsResponse,
@@ -269,11 +269,41 @@ router.delete("/bills/:id", requireRole("admin"), async (req, res): Promise<void
     res.status(400).json({ error: "Invalid id" });
     return;
   }
+  // Unlink any bank transactions pointing at this bill so we don't leave
+  // dangling matchedBillId references after delete. Reset status to
+  // "unmatched" only for transactions that have no other link (no matched
+  // expense), otherwise keep them as "matched" via the expense link.
+  await db
+    .update(transactionsTable)
+    .set({ matchedBillId: null, status: "unmatched" })
+    .where(
+      and(
+        eq(transactionsTable.matchedBillId, id),
+        isNull(transactionsTable.matchedExpenseId),
+      ),
+    );
+  await db
+    .update(transactionsTable)
+    .set({ matchedBillId: null })
+    .where(eq(transactionsTable.matchedBillId, id));
+
   const [deleted] = await db.delete(billsTable).where(eq(billsTable.id, id)).returning();
   if (!deleted) {
     res.status(404).json({ error: "Not found" });
     return;
   }
+
+  await db.insert(activityLogTable).values({
+    type: "bill_created",
+    description: `Bill #${id} deleted`,
+    actor: req.authUser
+      ? `${req.authUser.firstName} ${req.authUser.lastName}`
+      : "Finance User",
+    amount: String(deleted.amount),
+    referenceId: id,
+    referenceType: "bill",
+  });
+
   res.json({ ok: true });
 });
 

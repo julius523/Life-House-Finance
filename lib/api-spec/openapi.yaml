@@ -1677,6 +1677,9 @@ components:
           format: date
         daysSinceSubmission:
           type: integer
+        status:
+          type: string
+          enum: [draft, submitted, approved, reimbursed, rejected, needs_correction]
       required:
         - expenseId
         - submittedBy

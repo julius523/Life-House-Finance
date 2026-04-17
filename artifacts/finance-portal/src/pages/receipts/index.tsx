@@ -36,6 +36,23 @@ export default function ReceiptsList() {
   );
   const { data: missingReceipts, isLoading: missingLoading } = useGetMissingReceiptsReport();
 
+  const statusColor = (status: string) => {
+    switch (status) {
+      case "approved":
+      case "reimbursed":
+        return "bg-success text-success-foreground";
+      case "rejected":
+        return "bg-destructive text-destructive-foreground";
+      case "needs_correction":
+        return "bg-warning text-warning-foreground";
+      case "submitted":
+        return "bg-primary text-primary-foreground";
+      case "draft":
+      default:
+        return "bg-secondary text-secondary-foreground";
+    }
+  };
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: getListReceiptsQueryKey() });
     queryClient.invalidateQueries({ queryKey: getGetMissingReceiptsReportQueryKey() });
@@ -290,6 +307,11 @@ export default function ReceiptsList() {
                             <span className="font-semibold text-foreground">
                               {item.merchant}
                             </span>
+                            {item.status && (
+                              <Badge className={statusColor(item.status)}>
+                                {item.status.replace("_", " ")}
+                              </Badge>
+                            )}
                           </div>
                           <div className="text-sm text-muted-foreground">
                             Expense #{item.expenseId} submitted by {item.submittedBy}

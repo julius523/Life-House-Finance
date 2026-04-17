@@ -66,6 +66,7 @@ export * from "./listTransactionsParams";
 export * from "./listTransactionsStatus";
 export * from "./listVendorsParams";
 export * from "./missingReceiptItem";
+export * from "./missingReceiptItemStatus";
 export * from "./monthEndChecklist";
 export * from "./monthEndChecklistStatus";
 export * from "./parseBankStatementBody";

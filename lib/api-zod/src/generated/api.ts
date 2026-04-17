@@ -911,6 +911,16 @@ export const GetMissingReceiptsReportResponseItem = zod.object({
   amount: zod.number(),
   expenseDate: zod.coerce.date(),
   daysSinceSubmission: zod.number(),
+  status: zod
+    .enum([
+      "draft",
+      "submitted",
+      "approved",
+      "reimbursed",
+      "rejected",
+      "needs_correction",
+    ])
+    .optional(),
 });
 export const GetMissingReceiptsReportResponse = zod.array(
   GetMissingReceiptsReportResponseItem,
@@ -1534,6 +1544,16 @@ export const GetFinancialSummaryReportResponse = zod.object({
       amount: zod.number(),
       expenseDate: zod.coerce.date(),
       daysSinceSubmission: zod.number(),
+      status: zod
+        .enum([
+          "draft",
+          "submitted",
+          "approved",
+          "reimbursed",
+          "rejected",
+          "needs_correction",
+        ])
+        .optional(),
     }),
   ),
   bankReconciliation: zod.object({

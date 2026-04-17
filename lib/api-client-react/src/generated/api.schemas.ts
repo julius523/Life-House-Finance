@@ -305,6 +305,18 @@ export interface CreateReceiptBody {
   linkedBillId?: number;
 }
 
+export type MissingReceiptItemStatus =
+  (typeof MissingReceiptItemStatus)[keyof typeof MissingReceiptItemStatus];
+
+export const MissingReceiptItemStatus = {
+  draft: "draft",
+  submitted: "submitted",
+  approved: "approved",
+  reimbursed: "reimbursed",
+  rejected: "rejected",
+  needs_correction: "needs_correction",
+} as const;
+
 export interface MissingReceiptItem {
   expenseId: number;
   submittedBy: string;
@@ -312,6 +324,7 @@ export interface MissingReceiptItem {
   amount: number;
   expenseDate: string;
   daysSinceSubmission: number;
+  status?: MissingReceiptItemStatus;
 }
 
 export type TransactionType =

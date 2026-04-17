@@ -17,12 +17,19 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { RejectDialog } from "@/components/reject-dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft,
@@ -51,8 +58,11 @@ export default function BillDetail() {
 
   const [viewerFile, setViewerFile] = useState<ReceiptViewerFile | null>(null);
   const [pendingReceipts, setPendingReceipts] = useState<PendingReceipt[]>([]);
-  const [selectedTxId, setSelectedTxId] = useState<string>("");
+  const [selectedTxId, setSelectedTxId] = useState<number | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [linkBusy, setLinkBusy] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectBusy, setRejectBusy] = useState(false);
 
   const { data: bill, isLoading } = useGetBill(id, {
     query: { enabled: !!id, queryKey: getGetBillQueryKey(id) },
@@ -98,15 +108,23 @@ export default function BillDetail() {
     }
   };
 
-  const handleReject = async () => {
-    const reason = window.prompt("Reason for rejecting this bill? (sent back for correction)");
-    if (!reason || reason.trim().length < 3) return;
+  const handleReject = async (data: {
+    reason: string;
+    action: "send_back" | "close";
+  }) => {
+    setRejectBusy(true);
     try {
       await apiJson(`/bills/${id}/reject`, {
         method: "POST",
-        body: { reason: reason.trim(), action: "send_back" },
+        body: data,
       });
-      toast({ title: "Bill sent back for correction" });
+      toast({
+        title:
+          data.action === "send_back"
+            ? "Bill sent back for correction"
+            : "Bill rejected",
+      });
+      setRejectOpen(false);
       refresh();
     } catch (e) {
       toast({
@@ -114,6 +132,8 @@ export default function BillDetail() {
         description: e instanceof Error ? e.message : undefined,
         variant: "destructive",
       });
+    } finally {
+      setRejectBusy(false);
     }
   };
 
@@ -177,16 +197,15 @@ export default function BillDetail() {
   };
 
   const handleLinkTransaction = async () => {
-    const txId = parseInt(selectedTxId);
-    if (!Number.isInteger(txId) || txId <= 0) return;
+    if (!selectedTxId) return;
     setLinkBusy(true);
     try {
-      await apiJson(`/transactions/${txId}/link-bill`, {
+      await apiJson(`/transactions/${selectedTxId}/link-bill`, {
         method: "POST",
         body: { billId: id },
       });
       toast({ title: "Transaction linked to bill" });
-      setSelectedTxId("");
+      setSelectedTxId(null);
       refresh();
     } catch (e) {
       toast({
@@ -233,10 +252,13 @@ export default function BillDetail() {
   const isAdmin = user?.role === "admin";
   const canDecide = isAdmin || user?.role === "approver";
 
-  // Filter unmatched transactions to debits with similar amount (within $0.01).
+  // Only debit transactions are eligible to be linked to a bill (a bill is
+  // money going out). The user can search/filter by date, amount, or
+  // description in the picker below.
   const candidateTxs = (unmatchedTxs?.items ?? []).filter(
     (t) => t.type === "debit",
   );
+  const selectedTx = candidateTxs.find((t) => t.id === selectedTxId);
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -266,7 +288,7 @@ export default function BillDetail() {
               <Button
                 variant="outline"
                 className="text-destructive border-destructive hover:bg-destructive/10"
-                onClick={handleReject}
+                onClick={() => setRejectOpen(true)}
               >
                 <X className="mr-2 h-4 w-4" /> Reject
               </Button>
@@ -400,25 +422,67 @@ export default function BillDetail() {
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col sm:flex-row gap-3">
-          <Select value={selectedTxId} onValueChange={setSelectedTxId}>
-            <SelectTrigger className="flex-1">
-              <SelectValue placeholder="Select an unmatched transaction…" />
-            </SelectTrigger>
-            <SelectContent>
-              {candidateTxs.length === 0 ? (
-                <div className="px-3 py-2 text-sm text-muted-foreground">
-                  No unmatched debit transactions
-                </div>
-              ) : (
-                candidateTxs.map((t) => (
-                  <SelectItem key={t.id} value={String(t.id)}>
-                    {format(new Date(t.transactionDate), "MMM d")} · ${t.amount.toFixed(2)} ·{" "}
-                    {t.description}
-                  </SelectItem>
-                ))
-              )}
-            </SelectContent>
-          </Select>
+          <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={pickerOpen}
+                className="flex-1 justify-between font-normal"
+              >
+                {selectedTx ? (
+                  <span className="truncate">
+                    {format(new Date(selectedTx.transactionDate), "MMM d")} · $
+                    {selectedTx.amount.toFixed(2)} · {selectedTx.description}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">
+                    Search unmatched transactions by date, amount, or description…
+                  </span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+              <Command
+                filter={(value, search) => {
+                  if (!search) return 1;
+                  return value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0;
+                }}
+              >
+                <CommandInput placeholder="Type a date (MMM d), amount, or description…" />
+                <CommandList>
+                  <CommandEmpty>
+                    {candidateTxs.length === 0
+                      ? "No unmatched debit transactions."
+                      : "No transactions match your search."}
+                  </CommandEmpty>
+                  <CommandGroup>
+                    {candidateTxs.map((t) => {
+                      const label = `${format(new Date(t.transactionDate), "MMM d, yyyy")} $${t.amount.toFixed(2)} ${t.description}`;
+                      return (
+                        <CommandItem
+                          key={t.id}
+                          value={label}
+                          onSelect={() => {
+                            setSelectedTxId(t.id);
+                            setPickerOpen(false);
+                          }}
+                        >
+                          <div className="flex w-full items-center justify-between gap-2">
+                            <div className="flex-1 truncate">{t.description}</div>
+                            <div className="text-xs text-muted-foreground whitespace-nowrap">
+                              {format(new Date(t.transactionDate), "MMM d")} · $
+                              {t.amount.toFixed(2)}
+                            </div>
+                          </div>
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
           <Button
             onClick={handleLinkTransaction}
             disabled={!selectedTxId || linkBusy}
@@ -502,6 +566,13 @@ export default function BillDetail() {
           )}
         </CardContent>
       </Card>
+
+      <RejectDialog
+        open={rejectOpen}
+        onOpenChange={setRejectOpen}
+        onConfirm={handleReject}
+        isSubmitting={rejectBusy}
+      />
 
       <ReceiptViewer
         file={viewerFile}

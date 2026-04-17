@@ -156,6 +156,13 @@ router.get("/receipts/missing-report", async (_req, res): Promise<void> => {
       amount: parseFloat(e.amount),
       expenseDate: e.expenseDate,
       daysSinceSubmission,
+      status: e.status as
+        | "draft"
+        | "submitted"
+        | "approved"
+        | "reimbursed"
+        | "rejected"
+        | "needs_correction",
     };
   });
 

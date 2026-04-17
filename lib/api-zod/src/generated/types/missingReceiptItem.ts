@@ -5,6 +5,7 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { MissingReceiptItemStatus } from "./missingReceiptItemStatus";
 
 export interface MissingReceiptItem {
   expenseId: number;
@@ -13,4 +14,5 @@ export interface MissingReceiptItem {
   amount: number;
   expenseDate: Date;
   daysSinceSubmission: number;
+  status?: MissingReceiptItemStatus;
 }
