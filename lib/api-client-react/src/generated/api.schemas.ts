@@ -234,6 +234,8 @@ export const BillStatus = {
   approved: "approved",
   paid: "paid",
   overdue: "overdue",
+  rejected: "rejected",
+  needs_correction: "needs_correction",
 } as const;
 
 export interface Bill {
@@ -249,6 +251,7 @@ export interface Bill {
   programName?: string;
   status: BillStatus;
   approvedBy?: string;
+  rejectionReason?: string;
   paidDate?: string;
   receiptIds?: number[];
   submittedBy?: string;
@@ -729,7 +732,22 @@ export const ListBillsStatus = {
   approved: "approved",
   paid: "paid",
   overdue: "overdue",
+  rejected: "rejected",
+  needs_correction: "needs_correction",
 } as const;
+
+export type RejectBillBodyAction =
+  (typeof RejectBillBodyAction)[keyof typeof RejectBillBodyAction];
+
+export const RejectBillBodyAction = {
+  send_back: "send_back",
+  close: "close",
+} as const;
+
+export type RejectBillBody = {
+  reason: string;
+  action?: RejectBillBodyAction;
+};
 
 export type ListReceiptsParams = {
   search?: string;

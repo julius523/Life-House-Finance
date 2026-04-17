@@ -1,14 +1,23 @@
-import { useListTransactions } from "@workspace/api-client-react";
+import {
+  useListTransactions,
+  getListTransactionsQueryKey,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
-import { Landmark } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Landmark, CheckCircle2 } from "lucide-react";
 import { format } from "date-fns";
+import { useState } from "react";
+import { apiJson } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 type Props = {
   expenseId?: number;
   billId?: number;
+  enableReconcile?: boolean;
 };
 
-export function LinkedTransactions({ expenseId, billId }: Props) {
+export function LinkedTransactions({ expenseId, billId, enableReconcile }: Props) {
   const params =
     expenseId !== undefined
       ? { matchedExpenseId: expenseId }
@@ -18,10 +27,36 @@ export function LinkedTransactions({ expenseId, billId }: Props) {
   const { data, isLoading } = useListTransactions(params, {
     query: { enabled: params !== undefined },
   });
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [busyId, setBusyId] = useState<number | null>(null);
 
   if (isLoading) return null;
 
   const items = data?.items ?? [];
+
+  const reconcile = async (txId: number) => {
+    setBusyId(txId);
+    try {
+      await apiJson(`/transactions/${txId}`, {
+        method: "PUT",
+        body: { status: "reconciled" },
+      });
+      toast({ title: "Transaction reconciled" });
+      if (params)
+        queryClient.invalidateQueries({
+          queryKey: getListTransactionsQueryKey(params),
+        });
+    } catch (e) {
+      toast({
+        title: "Could not reconcile",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   return (
     <div className="rounded-md border bg-muted/30 p-4">
@@ -59,6 +94,17 @@ export function LinkedTransactions({ expenseId, billId }: Props) {
                 >
                   {t.type === "credit" ? "+" : "-"}${t.amount.toFixed(2)}
                 </div>
+                {enableReconcile && t.status !== "reconciled" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busyId === t.id}
+                    onClick={() => reconcile(t.id)}
+                  >
+                    <CheckCircle2 className="mr-1 h-3 w-3" />
+                    {busyId === t.id ? "Reconciling…" : "Reconcile"}
+                  </Button>
+                )}
               </div>
             </div>
           ))}

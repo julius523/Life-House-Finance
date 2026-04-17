@@ -79,6 +79,8 @@ export * from "./programType";
 export * from "./receipt";
 export * from "./receiptListResponse";
 export * from "./reconciliationSummary";
+export * from "./rejectBillBody";
+export * from "./rejectBillBodyAction";
 export * from "./rejectionBody";
 export * from "./rejectionBodyAction";
 export * from "./requestUploadUrlBody";

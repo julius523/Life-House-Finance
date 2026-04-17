@@ -14,6 +14,7 @@ export const billsTable = pgTable("bills", {
   programId: integer("program_id"),
   status: text("status").notNull().default("draft"),
   approvedBy: text("approved_by"),
+  rejectionReason: text("rejection_reason"),
   paidDate: date("paid_date"),
   receiptIds: integer("receipt_ids").array(),
   createdAt: timestamp("created_at").notNull().defaultNow(),

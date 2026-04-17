@@ -372,7 +372,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [draft, submitted, approved, paid, overdue]
+            enum: [draft, submitted, approved, paid, overdue, rejected, needs_correction]
         - name: vendorId
           in: query
           schema:
@@ -442,6 +442,40 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateBillBody"
+      responses:
+        "200":
+          description: Updated bill
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bill"
+
+  /bills/{id}/reject:
+    post:
+      operationId: rejectBill
+      tags: [bills]
+      summary: Reject a bill
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                action:
+                  type: string
+                  enum: [send_back, close]
+                  default: close
+              required:
+                - reason
       responses:
         "200":
           description: Updated bill
@@ -1488,8 +1522,10 @@ components:
           type: string
         status:
           type: string
-          enum: [draft, submitted, approved, paid, overdue]
+          enum: [draft, submitted, approved, paid, overdue, rejected, needs_correction]
         approvedBy:
+          type: string
+        rejectionReason:
           type: string
         paidDate:
           type: string

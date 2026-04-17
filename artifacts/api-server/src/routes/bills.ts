@@ -42,8 +42,9 @@ function formatBill(b: typeof billsTable.$inferSelect, vendorName: string, progr
     description: b.description ?? undefined,
     programId: b.programId ?? undefined,
     programName,
-    status: b.status as "draft" | "submitted" | "approved" | "paid" | "overdue",
+    status: b.status as "draft" | "submitted" | "approved" | "paid" | "overdue" | "rejected" | "needs_correction",
     approvedBy: b.approvedBy ?? undefined,
+    rejectionReason: b.rejectionReason ?? undefined,
     paidDate: b.paidDate ?? undefined,
     receiptIds: b.receiptIds ?? undefined,
     submittedBy: b.submittedBy ?? undefined,
@@ -216,6 +217,50 @@ router.post("/bills/:id/approve", requireRole("admin", "approver"), async (req, 
 
   const programName = await getProgramName(bill.programId);
   res.json(ApproveBillResponse.parse(formatBill(bill, vendorName, programName)));
+});
+
+router.post("/bills/:id/reject", requireRole("admin", "approver"), async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+  const action = req.body?.action === "send_back" ? "send_back" : "close";
+  if (reason.length < 3) {
+    res.status(400).json({ error: "Rejection reason is required" });
+    return;
+  }
+  const newStatus = action === "send_back" ? "needs_correction" : "rejected";
+  const rejectedBy = req.authUser
+    ? `${req.authUser.firstName} ${req.authUser.lastName}`
+    : "Finance User";
+
+  const [bill] = await db
+    .update(billsTable)
+    .set({ status: newStatus, rejectionReason: reason })
+    .where(eq(billsTable.id, id))
+    .returning();
+  if (!bill) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  await db.insert(activityLogTable).values({
+    type: "bill_created",
+    description:
+      action === "send_back"
+        ? `Bill sent back for correction: ${reason}`
+        : `Bill rejected: ${reason}`,
+    actor: rejectedBy,
+    amount: String(bill.amount),
+    referenceId: bill.id,
+    referenceType: "bill",
+  });
+
+  const vendorName = await getVendorName(bill.vendorId);
+  const programName = await getProgramName(bill.programId);
+  res.json(formatBill(bill, vendorName, programName));
 });
 
 router.delete("/bills/:id", requireRole("admin"), async (req, res): Promise<void> => {

@@ -51,17 +51,30 @@ export default function Approvals() {
   };
 
   const handleReject = async (item: any) => {
+    const reason = window.prompt(
+      `Reason for rejecting this ${item.type}? (sent back for correction)`,
+    );
+    if (!reason || reason.trim().length < 3) return;
     try {
       if (item.type === "expense") {
-        await rejectExpense.mutateAsync({ 
-          id: item.referenceId, 
-          data: { rejectedBy: "Finance User", reason: "Rejected from queue" } 
+        await rejectExpense.mutateAsync({
+          id: item.referenceId,
+          data: { rejectedBy: "Finance User", reason: reason.trim(), action: "send_back" },
         });
-        toast({ title: "Item rejected", variant: "default" });
-        queryClient.invalidateQueries({ queryKey: getListApprovalsQueryKey() });
+      } else {
+        await apiJson(`/bills/${item.referenceId}/reject`, {
+          method: "POST",
+          body: { reason: reason.trim(), action: "send_back" },
+        });
       }
+      toast({ title: "Item sent back for correction" });
+      queryClient.invalidateQueries({ queryKey: getListApprovalsQueryKey() });
     } catch (e) {
-      toast({ title: "Failed to reject", variant: "destructive" });
+      toast({
+        title: "Failed to reject",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
     }
   };
 
@@ -160,12 +173,10 @@ export default function Approvals() {
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     )}
-                    {item.type === "expense" && (
-                      <Button variant="outline" size="sm" className="text-destructive border-destructive hover:bg-destructive/10" onClick={() => handleReject(item)}>
-                        <X className="mr-2 h-4 w-4" />
-                        Reject
-                      </Button>
-                    )}
+                    <Button variant="outline" size="sm" className="text-destructive border-destructive hover:bg-destructive/10" onClick={() => handleReject(item)}>
+                      <X className="mr-2 h-4 w-4" />
+                      Reject
+                    </Button>
                     <Button variant="default" size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => handleApprove(item)}>
                       <Check className="mr-2 h-4 w-4" />
                       Approve

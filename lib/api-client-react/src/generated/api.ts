@@ -61,6 +61,7 @@ import type {
   Receipt,
   ReceiptListResponse,
   ReconciliationSummary,
+  RejectBillBody,
   RejectionBody,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
@@ -1873,6 +1874,93 @@ export const useUpdateBill = <
   TContext
 > => {
   return useMutation(getUpdateBillMutationOptions(options));
+};
+
+/**
+ * @summary Reject a bill
+ */
+export const getRejectBillUrl = (id: number) => {
+  return `/api/bills/${id}/reject`;
+};
+
+export const rejectBill = async (
+  id: number,
+  rejectBillBody: RejectBillBody,
+  options?: RequestInit,
+): Promise<Bill> => {
+  return customFetch<Bill>(getRejectBillUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(rejectBillBody),
+  });
+};
+
+export const getRejectBillMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof rejectBill>>,
+    TError,
+    { id: number; data: BodyType<RejectBillBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof rejectBill>>,
+  TError,
+  { id: number; data: BodyType<RejectBillBody> },
+  TContext
+> => {
+  const mutationKey = ["rejectBill"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof rejectBill>>,
+    { id: number; data: BodyType<RejectBillBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return rejectBill(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RejectBillMutationResult = NonNullable<
+  Awaited<ReturnType<typeof rejectBill>>
+>;
+export type RejectBillMutationBody = BodyType<RejectBillBody>;
+export type RejectBillMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Reject a bill
+ */
+export const useRejectBill = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof rejectBill>>,
+    TError,
+    { id: number; data: BodyType<RejectBillBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof rejectBill>>,
+  TError,
+  { id: number; data: BodyType<RejectBillBody> },
+  TContext
+> => {
+  return useMutation(getRejectBillMutationOptions(options));
 };
 
 /**

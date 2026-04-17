@@ -14,4 +14,6 @@ export const BillStatus = {
   approved: "approved",
   paid: "paid",
   overdue: "overdue",
+  rejected: "rejected",
+  needs_correction: "needs_correction",
 } as const;

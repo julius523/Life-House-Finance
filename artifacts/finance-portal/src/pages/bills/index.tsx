@@ -21,7 +21,10 @@ export default function BillsList() {
     switch (status) {
       case 'approved': return 'bg-info text-info-foreground';
       case 'paid': return 'bg-success text-success-foreground';
-      case 'overdue': return 'bg-destructive text-destructive-foreground';
+      case 'overdue':
+      case 'rejected':
+        return 'bg-destructive text-destructive-foreground';
+      case 'needs_correction': return 'bg-warning text-warning-foreground';
       case 'submitted': return 'bg-primary text-primary-foreground';
       default: return 'bg-secondary text-secondary-foreground';
     }
@@ -60,6 +63,8 @@ export default function BillsList() {
                   <SelectItem value="approved">Approved</SelectItem>
                   <SelectItem value="paid">Paid</SelectItem>
                   <SelectItem value="overdue">Overdue</SelectItem>
+                  <SelectItem value="needs_correction">Needs Correction</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
                 </SelectContent>
               </Select>
             </div>

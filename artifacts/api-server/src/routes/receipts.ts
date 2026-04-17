@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { requireRole } from "../lib/auth";
 import { db } from "@workspace/db";
 import { receiptsTable, vendorsTable, expensesTable } from "@workspace/db";
 import { eq, and, desc, count, sql, ilike, or } from "drizzle-orm";
@@ -91,7 +92,7 @@ router.get("/receipts", async (req, res): Promise<void> => {
   res.json(ListReceiptsResponse.parse({ items, total: totalResult[0]?.cnt ?? 0, page }));
 });
 
-router.post("/receipts", async (req, res): Promise<void> => {
+router.post("/receipts", requireRole("admin", "approver", "submitter"), async (req, res): Promise<void> => {
   const parsed = CreateReceiptBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid body" });
@@ -141,7 +142,7 @@ router.get("/receipts/missing-report", async (_req, res): Promise<void> => {
     .select()
     .from(expensesTable)
     .where(
-      sql`(${expensesTable.receiptIds} is null or array_length(${expensesTable.receiptIds}, 1) is null) and ${expensesTable.status} in ('submitted', 'approved', 'needs_correction')`
+      sql`(${expensesTable.receiptIds} is null or array_length(${expensesTable.receiptIds}, 1) is null)`
     );
 
   const items = expenses.map((e) => {
@@ -176,7 +177,7 @@ router.get("/receipts/:id", async (req, res): Promise<void> => {
   res.json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName)));
 });
 
-router.delete("/receipts/:id", async (req, res): Promise<void> => {
+router.delete("/receipts/:id", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const parsed = DeleteReceiptParams.safeParse({ id: Number(req.params["id"]) });
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid id" });

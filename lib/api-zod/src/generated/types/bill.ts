@@ -20,6 +20,7 @@ export interface Bill {
   programName?: string;
   status: BillStatus;
   approvedBy?: string;
+  rejectionReason?: string;
   paidDate?: Date;
   receiptIds?: number[];
   submittedBy?: string;
