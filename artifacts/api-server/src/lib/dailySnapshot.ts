@@ -143,11 +143,9 @@ export async function restoreTodaySnapshot(): Promise<{
   for (const { name } of TABLES) {
     try {
       await db.execute(
-        sql.raw(
-          `SELECT setval(pg_get_serial_sequence('${name}', 'id'),
-            COALESCE((SELECT MAX(id) FROM "${name}"), 1),
-            (SELECT MAX(id) IS NOT NULL FROM "${name}"))`,
-        ),
+        sql`SELECT setval(pg_get_serial_sequence(${name}, 'id'),
+            COALESCE((SELECT MAX(id) FROM ${sql.identifier(name)}), 1),
+            (SELECT MAX(id) IS NOT NULL FROM ${sql.identifier(name)}))`,
       );
     } catch (err) {
       logger.warn({ err, table: name }, "Could not reset sequence");
