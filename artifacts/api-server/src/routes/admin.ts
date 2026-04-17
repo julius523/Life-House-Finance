@@ -12,7 +12,7 @@ import {
   activityLogTable,
   monthEndChecklistsTable,
 } from "@workspace/db";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, isNull, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth, requireRole, toAuthUser } from "../lib/auth";
 import {
@@ -158,6 +158,113 @@ router.post("/admin/restore-day", async (req, res): Promise<void> => {
       error: err instanceof Error ? err.message : "Restore failed",
     });
   }
+});
+
+// --- Backfill receipts.uploaded_by from linked expense/bill submitter ---
+
+router.post("/admin/backfill-receipt-uploaders", async (_req, res): Promise<void> => {
+  const orphanReceipts = await db
+    .select()
+    .from(receiptsTable)
+    .where(isNull(receiptsTable.uploadedBy));
+
+  if (orphanReceipts.length === 0) {
+    res.json({ ok: true, scanned: 0, updated: 0, unresolved: 0 });
+    return;
+  }
+
+  const expenseIds = Array.from(
+    new Set(
+      orphanReceipts
+        .map((r) => r.linkedExpenseId)
+        .filter((id): id is number => typeof id === "number"),
+    ),
+  );
+  const billIds = Array.from(
+    new Set(
+      orphanReceipts
+        .map((r) => r.linkedBillId)
+        .filter((id): id is number => typeof id === "number"),
+    ),
+  );
+
+  const expenseRows = expenseIds.length
+    ? await db
+        .select({
+          id: expensesTable.id,
+          submittedBy: expensesTable.submittedBy,
+          submittedByEmail: expensesTable.submittedByEmail,
+        })
+        .from(expensesTable)
+        .where(inArray(expensesTable.id, expenseIds))
+    : [];
+  const billRows = billIds.length
+    ? await db
+        .select({
+          id: billsTable.id,
+          submittedBy: billsTable.submittedBy,
+          submittedByEmail: billsTable.submittedByEmail,
+        })
+        .from(billsTable)
+        .where(inArray(billsTable.id, billIds))
+    : [];
+
+  const expenseById = new Map(expenseRows.map((e) => [e.id, e]));
+  const billById = new Map(billRows.map((b) => [b.id, b]));
+
+  const users = await db.select().from(usersTable);
+  const userByEmail = new Map<string, number>();
+  const userByName = new Map<string, number>();
+  for (const u of users) {
+    userByEmail.set(u.email.toLowerCase().trim(), u.id);
+    const fullName = `${u.firstName} ${u.lastName}`.toLowerCase().trim();
+    userByName.set(fullName, u.id);
+  }
+
+  const resolveUserId = (
+    email: string | null | undefined,
+    displayName: string | null | undefined,
+  ): number | null => {
+    if (email) {
+      const hit = userByEmail.get(email.toLowerCase().trim());
+      if (hit) return hit;
+    }
+    if (displayName) {
+      const hit = userByName.get(displayName.toLowerCase().trim());
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  let updated = 0;
+  let unresolved = 0;
+  for (const receipt of orphanReceipts) {
+    let userId: number | null = null;
+    if (receipt.linkedExpenseId != null) {
+      const exp = expenseById.get(receipt.linkedExpenseId);
+      if (exp) userId = resolveUserId(exp.submittedByEmail, exp.submittedBy);
+    }
+    if (userId == null && receipt.linkedBillId != null) {
+      const bill = billById.get(receipt.linkedBillId);
+      if (bill) userId = resolveUserId(bill.submittedByEmail, bill.submittedBy);
+    }
+    if (userId == null) {
+      unresolved += 1;
+      continue;
+    }
+    await db
+      .update(receiptsTable)
+      .set({ uploadedBy: userId })
+      .where(eq(receiptsTable.id, receipt.id));
+    updated += 1;
+  }
+
+  res.json({
+    ok: true,
+    scanned: orphanReceipts.length,
+    updated,
+    unresolved,
+  });
 });
 
 export default router;
