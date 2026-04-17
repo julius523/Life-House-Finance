@@ -600,6 +600,8 @@ export const ListBillsQueryParams = zod.object({
     .optional(),
   vendorId: zod.coerce.number().optional(),
   programId: zod.coerce.number().optional(),
+  submittedBy: zod.coerce.string().optional(),
+  submittedByEmail: zod.coerce.string().optional(),
 });
 
 export const ListBillsResponseItem = zod.object({
@@ -627,6 +629,7 @@ export const ListBillsResponseItem = zod.object({
   paidDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
+  submittedByEmail: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
 export const ListBillsResponse = zod.array(ListBillsResponseItem);
@@ -678,6 +681,7 @@ export const GetBillResponse = zod.object({
   paidDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
+  submittedByEmail: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
 
@@ -725,6 +729,7 @@ export const UpdateBillResponse = zod.object({
   paidDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
+  submittedByEmail: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
 
@@ -767,6 +772,43 @@ export const RejectBillResponse = zod.object({
   paidDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
+  submittedByEmail: zod.string().optional(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Resubmit a bill that was sent back for correction
+ */
+export const ResubmitBillParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ResubmitBillResponse = zod.object({
+  id: zod.number(),
+  vendorId: zod.number(),
+  vendorName: zod.string(),
+  invoiceNumber: zod.string().optional(),
+  invoiceDate: zod.coerce.date().optional(),
+  dueDate: zod.coerce.date(),
+  amount: zod.number(),
+  description: zod.string().optional(),
+  programId: zod.number().optional(),
+  programName: zod.string().optional(),
+  status: zod.enum([
+    "draft",
+    "submitted",
+    "approved",
+    "paid",
+    "overdue",
+    "rejected",
+    "needs_correction",
+  ]),
+  approvedBy: zod.string().optional(),
+  rejectionReason: zod.string().optional(),
+  paidDate: zod.coerce.date().optional(),
+  receiptIds: zod.array(zod.number()).optional(),
+  submittedBy: zod.string().optional(),
+  submittedByEmail: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
 
@@ -807,6 +849,7 @@ export const ApproveBillResponse = zod.object({
   paidDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
+  submittedByEmail: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
 
@@ -1100,6 +1143,7 @@ export const ConvertTransactionToBillResponse = zod.object({
     paidDate: zod.coerce.date().optional(),
     receiptIds: zod.array(zod.number()).optional(),
     submittedBy: zod.string().optional(),
+    submittedByEmail: zod.string().optional(),
     createdAt: zod.coerce.date(),
   }),
   transaction: zod.object({

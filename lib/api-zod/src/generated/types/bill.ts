@@ -24,5 +24,6 @@ export interface Bill {
   paidDate?: Date;
   receiptIds?: number[];
   submittedBy?: string;
+  submittedByEmail?: string;
   createdAt: Date;
 }

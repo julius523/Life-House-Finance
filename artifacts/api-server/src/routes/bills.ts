@@ -48,6 +48,7 @@ function formatBill(b: typeof billsTable.$inferSelect, vendorName: string, progr
     paidDate: b.paidDate ?? undefined,
     receiptIds: b.receiptIds ?? undefined,
     submittedBy: b.submittedBy ?? undefined,
+    submittedByEmail: b.submittedByEmail ?? undefined,
     createdAt: b.createdAt.toISOString(),
   };
 }
@@ -58,12 +59,15 @@ router.get("/bills", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Invalid query params" });
     return;
   }
-  const { status, vendorId, programId } = parsed.data;
+  const { status, vendorId, programId, submittedBy, submittedByEmail } = parsed.data;
 
   const conditions = [];
   if (status) conditions.push(eq(billsTable.status, status));
   if (vendorId) conditions.push(eq(billsTable.vendorId, vendorId));
   if (programId) conditions.push(eq(billsTable.programId, programId));
+  if (submittedBy) conditions.push(eq(billsTable.submittedBy, submittedBy));
+  if (submittedByEmail)
+    conditions.push(eq(billsTable.submittedByEmail, submittedByEmail));
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -94,6 +98,7 @@ router.post("/bills", async (req, res): Promise<void> => {
     (req.authUser
       ? `${req.authUser.firstName} ${req.authUser.lastName}`
       : "Unknown");
+  const submittedByEmail = req.authUser?.email ?? null;
   const [bill] = await db
     .insert(billsTable)
     .values({
@@ -107,6 +112,7 @@ router.post("/bills", async (req, res): Promise<void> => {
       receiptIds: data.receiptIds,
       status: "submitted",
       submittedBy,
+      submittedByEmail,
     })
     .returning();
 
@@ -261,6 +267,67 @@ router.post("/bills/:id/reject", requireRole("admin", "approver"), async (req, r
   const vendorName = await getVendorName(bill.vendorId);
   const programName = await getProgramName(bill.programId);
   res.json(formatBill(bill, vendorName, programName));
+});
+
+router.post("/bills/:id/resubmit", async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [existing] = await db.select().from(billsTable).where(eq(billsTable.id, id));
+  if (!existing) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (existing.status !== "needs_correction") {
+    res.status(409).json({ error: "Only bills needing correction can be resubmitted" });
+    return;
+  }
+  const isAdmin = req.authUser?.role === "admin";
+  const callerEmail = req.authUser?.email?.toLowerCase() ?? null;
+  const ownerEmail = existing.submittedByEmail?.toLowerCase() ?? null;
+  // Prefer matching on the immutable email captured at submission time. For
+  // legacy bills that pre-date the email column, fall back to the display
+  // name match so they can still be resubmitted.
+  const isOwnerByEmail =
+    callerEmail !== null && ownerEmail !== null && callerEmail === ownerEmail;
+  const submitterName = req.authUser
+    ? `${req.authUser.firstName} ${req.authUser.lastName}`
+    : null;
+  const isOwnerByName =
+    ownerEmail === null &&
+    submitterName !== null &&
+    existing.submittedBy === submitterName;
+  if (!isAdmin && !isOwnerByEmail && !isOwnerByName) {
+    res.status(403).json({ error: "Only the original submitter can resubmit this bill" });
+    return;
+  }
+  const actorName =
+    submitterName ?? existing.submittedBy ?? "Submitter";
+
+  const [bill] = await db
+    .update(billsTable)
+    .set({ status: "submitted", rejectionReason: null })
+    .where(eq(billsTable.id, id))
+    .returning();
+  if (!bill) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  const vendorName = await getVendorName(bill.vendorId);
+  await db.insert(activityLogTable).values({
+    type: "bill_created",
+    description: `Bill resubmitted for ${vendorName}`,
+    actor: actorName,
+    amount: String(bill.amount),
+    referenceId: bill.id,
+    referenceType: "bill",
+  });
+
+  const programName = await getProgramName(bill.programId);
+  res.json(GetBillResponse.parse(formatBill(bill, vendorName, programName)));
 });
 
 router.delete("/bills/:id", requireRole("admin"), async (req, res): Promise<void> => {

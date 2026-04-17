@@ -11,4 +11,6 @@ export type ListBillsParams = {
   status?: ListBillsStatus;
   vendorId?: number;
   programId?: number;
+  submittedBy?: string;
+  submittedByEmail?: string;
 };

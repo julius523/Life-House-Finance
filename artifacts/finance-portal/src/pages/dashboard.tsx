@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { useGetDashboardSummary, useGetSpendingByProgram, useGetRecentActivity } from "@workspace/api-client-react";
+import {
+  useGetDashboardSummary,
+  useGetSpendingByProgram,
+  useGetRecentActivity,
+  useListBills,
+} from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -17,8 +22,61 @@ import {
   Legend
 } from "recharts";
 import { format } from "date-fns";
-import { DollarSign, Clock, AlertCircle, CheckSquare, Receipt, FileText, FileBox } from "lucide-react";
+import { DollarSign, Clock, AlertCircle, CheckSquare, Receipt, FileText, FileBox, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+
+function SubmitterNeedsAttention() {
+  const { user } = useAuth();
+  const email = user?.email ?? "";
+  const { data, isLoading } = useListBills(
+    { status: "needs_correction", submittedByEmail: email },
+    { query: { enabled: !!email } },
+  );
+
+  if (isLoading || !user) return null;
+  const items = data ?? [];
+  if (items.length === 0) return null;
+
+  return (
+    <Card className="border-warning/40 bg-warning/5">
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-5 w-5 text-warning" />
+          <CardTitle>Needs your attention</CardTitle>
+        </div>
+        <CardDescription>
+          {items.length === 1
+            ? "1 bill was sent back to you for correction. Update it and resubmit."
+            : `${items.length} bills were sent back to you for correction. Update them and resubmit.`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="divide-y">
+        {items.map((b) => (
+          <Link key={b.id} href={`/bills/${b.id}`}>
+            <div className="flex items-start justify-between gap-4 py-3 hover:bg-muted/30 -mx-2 px-2 rounded transition-colors cursor-pointer">
+              <div className="min-w-0">
+                <div className="font-semibold truncate">
+                  Bill #{b.id} · {b.vendorName}
+                </div>
+                {b.rejectionReason && (
+                  <div className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                    {b.rejectionReason}
+                  </div>
+                )}
+              </div>
+              <div className="text-right shrink-0">
+                <div className="font-semibold">${b.amount.toFixed(2)}</div>
+                <div className="text-xs text-muted-foreground">
+                  Due {format(new Date(b.dueDate), "MMM d, yyyy")}
+                </div>
+              </div>
+            </div>
+          </Link>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
 
 function SubmitterDashboard() {
   const { user } = useAuth();
@@ -33,6 +91,7 @@ function SubmitterDashboard() {
           approve it.
         </p>
       </div>
+      <SubmitterNeedsAttention />
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="hover-elevate">
           <CardHeader>

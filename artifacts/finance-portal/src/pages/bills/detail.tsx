@@ -3,10 +3,12 @@ import { useRoute, Link, useLocation } from "wouter";
 import {
   useGetBill,
   useApproveBill,
+  useResubmitBill,
   useListReceipts,
   useCreateReceipt,
   useListTransactions,
   getGetBillQueryKey,
+  getListBillsQueryKey,
   getListReceiptsQueryKey,
   getListTransactionsQueryKey,
 } from "@workspace/api-client-react";
@@ -42,6 +44,8 @@ import {
   Trash2,
   X,
   Link2,
+  Pencil,
+  RotateCcw,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReceiptViewer, type ReceiptViewerFile } from "@/components/receipt-viewer";
@@ -80,10 +84,12 @@ export default function BillDetail() {
   const { toast } = useToast();
 
   const approveBill = useApproveBill();
+  const resubmitBill = useResubmitBill();
   const createReceipt = useCreateReceipt();
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: getGetBillQueryKey(id) });
+    queryClient.invalidateQueries({ queryKey: getListBillsQueryKey() });
     queryClient.invalidateQueries({
       queryKey: getListReceiptsQueryKey({ linkedBillId: id }),
     });
@@ -93,6 +99,20 @@ export default function BillDetail() {
     queryClient.invalidateQueries({
       queryKey: getListTransactionsQueryKey({ status: "unmatched" }),
     });
+  };
+
+  const handleResubmit = async () => {
+    try {
+      await resubmitBill.mutateAsync({ id });
+      toast({ title: "Bill resubmitted for approval" });
+      refresh();
+    } catch (e) {
+      toast({
+        title: "Failed to resubmit",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    }
   };
 
   const handleApprove = async () => {
@@ -251,6 +271,16 @@ export default function BillDetail() {
 
   const isAdmin = user?.role === "admin";
   const canDecide = isAdmin || user?.role === "approver";
+  const submitterName = user ? `${user.firstName} ${user.lastName}` : "";
+  // Match the backend: prefer the immutable email captured at submission
+  // time, and only fall back to display-name matching for legacy bills
+  // that were created before the email column existed.
+  const isOwner = bill.submittedByEmail
+    ? !!user?.email &&
+      user.email.toLowerCase() === bill.submittedByEmail.toLowerCase()
+    : !!bill.submittedBy && bill.submittedBy === submitterName;
+  const isNeedsCorrection = bill.status === "needs_correction";
+  const canResubmit = isNeedsCorrection && (isOwner || isAdmin);
 
   // Only debit transactions are eligible to be linked to a bill (a bill is
   // money going out). The user can search/filter by date, amount, or
@@ -282,7 +312,24 @@ export default function BillDetail() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {canResubmit && (
+            <>
+              <Link href={`/bills/${bill.id}/edit`}>
+                <Button variant="outline">
+                  <Pencil className="mr-2 h-4 w-4" /> Edit
+                </Button>
+              </Link>
+              <Button
+                className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                onClick={handleResubmit}
+                disabled={resubmitBill.isPending}
+              >
+                <RotateCcw className="mr-2 h-4 w-4" />
+                {resubmitBill.isPending ? "Resubmitting…" : "Resubmit for Approval"}
+              </Button>
+            </>
+          )}
           {bill.status === "submitted" && canDecide && (
             <>
               <Button
@@ -315,10 +362,32 @@ export default function BillDetail() {
       </div>
 
       {bill.rejectionReason && (
-        <Card className="border-destructive/40 bg-destructive/5">
+        <Card
+          className={
+            isNeedsCorrection
+              ? "border-warning/40 bg-warning/10"
+              : "border-destructive/40 bg-destructive/5"
+          }
+        >
           <CardContent className="py-4">
-            <div className="text-sm font-semibold text-destructive">Rejection reason</div>
+            <div
+              className={
+                isNeedsCorrection
+                  ? "text-sm font-semibold text-warning"
+                  : "text-sm font-semibold text-destructive"
+              }
+            >
+              {isNeedsCorrection
+                ? "Sent back for correction"
+                : "Rejection reason"}
+            </div>
             <div className="text-sm mt-1">{bill.rejectionReason}</div>
+            {canResubmit && (
+              <div className="text-xs text-muted-foreground mt-2">
+                Update the bill details or attachments below, then click
+                Resubmit for Approval.
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

@@ -17,6 +17,7 @@ import ExpenseDetail from "@/pages/expenses/detail";
 import ExpenseEdit from "@/pages/expenses/edit";
 import BillsList from "@/pages/bills/index";
 import BillNew from "@/pages/bills/new";
+import BillEdit from "@/pages/bills/edit";
 import BillDetail from "@/pages/bills/detail";
 import ReceiptsList from "@/pages/receipts/index";
 import TransactionsList from "@/pages/transactions/index";
@@ -76,6 +77,7 @@ function AppRoutes() {
 
         {route("/bills", "bills", BillsList)}
         {route("/bills/new", "bills", BillNew)}
+        {route("/bills/:id/edit", "bills", BillEdit)}
         {route("/bills/:id", "bills", BillDetail)}
 
         {route("/receipts", "receipts", ReceiptsList)}

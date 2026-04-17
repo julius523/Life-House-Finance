@@ -1964,6 +1964,90 @@ export const useRejectBill = <
 };
 
 /**
+ * @summary Resubmit a bill that was sent back for correction
+ */
+export const getResubmitBillUrl = (id: number) => {
+  return `/api/bills/${id}/resubmit`;
+};
+
+export const resubmitBill = async (
+  id: number,
+  options?: RequestInit,
+): Promise<Bill> => {
+  return customFetch<Bill>(getResubmitBillUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getResubmitBillMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resubmitBill>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resubmitBill>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["resubmitBill"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resubmitBill>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return resubmitBill(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResubmitBillMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resubmitBill>>
+>;
+
+export type ResubmitBillMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Resubmit a bill that was sent back for correction
+ */
+export const useResubmitBill = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resubmitBill>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resubmitBill>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getResubmitBillMutationOptions(options));
+};
+
+/**
  * @summary Approve a bill
  */
 export const getApproveBillUrl = (id: number) => {

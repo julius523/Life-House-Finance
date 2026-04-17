@@ -255,6 +255,7 @@ export interface Bill {
   paidDate?: string;
   receiptIds?: number[];
   submittedBy?: string;
+  submittedByEmail?: string;
   createdAt: string;
 }
 
@@ -734,6 +735,8 @@ export type ListBillsParams = {
   status?: ListBillsStatus;
   vendorId?: number;
   programId?: number;
+  submittedBy?: string;
+  submittedByEmail?: string;
 };
 
 export type ListBillsStatus =
