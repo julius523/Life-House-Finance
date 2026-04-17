@@ -286,6 +286,8 @@ export interface Receipt {
   linkedBillId?: number;
   /** User id of the uploader */
   uploadedBy?: number;
+  /** Display name of the uploader, or "Unknown" for legacy receipts */
+  uploadedByName?: string;
   createdAt: string;
 }
 

@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { requireRole } from "../lib/auth";
 import { db } from "@workspace/db";
-import { receiptsTable, vendorsTable, expensesTable, billsTable } from "@workspace/db";
+import { receiptsTable, vendorsTable, expensesTable, billsTable, usersTable } from "@workspace/db";
 import { eq, and, desc, count, sql, ilike, or } from "drizzle-orm";
 import {
   ListReceiptsQueryParams,
@@ -21,7 +21,21 @@ async function getVendorName(vendorId: number | null | undefined): Promise<strin
   return v?.name;
 }
 
-function formatReceipt(r: typeof receiptsTable.$inferSelect, vendorName?: string) {
+async function getUploaderName(uploadedBy: number | null | undefined): Promise<string> {
+  if (!uploadedBy) return "Unknown";
+  const [u] = await db
+    .select({ firstName: usersTable.firstName, lastName: usersTable.lastName })
+    .from(usersTable)
+    .where(eq(usersTable.id, uploadedBy));
+  if (!u) return "Unknown";
+  return `${u.firstName} ${u.lastName}`.trim() || "Unknown";
+}
+
+function formatReceipt(
+  r: typeof receiptsTable.$inferSelect,
+  vendorName?: string,
+  uploadedByName?: string,
+) {
   return {
     id: r.id,
     fileName: r.fileName,
@@ -36,6 +50,7 @@ function formatReceipt(r: typeof receiptsTable.$inferSelect, vendorName?: string
     linkedExpenseId: r.linkedExpenseId ?? undefined,
     linkedBillId: r.linkedBillId ?? undefined,
     uploadedBy: r.uploadedBy ?? undefined,
+    uploadedByName: uploadedByName ?? "Unknown",
     createdAt: r.createdAt.toISOString(),
   };
 }
@@ -86,17 +101,30 @@ router.get("/receipts", async (req, res): Promise<void> => {
   const where = conditions.length > 0 ? and(...conditions) : undefined;
   const offset = (page - 1) * pageSize;
 
-  const [receipts, totalResult] = await Promise.all([
-    db.select().from(receiptsTable).where(where).orderBy(desc(receiptsTable.createdAt)).limit(pageSize).offset(offset),
+  const [rows, totalResult] = await Promise.all([
+    db
+      .select({
+        receipt: receiptsTable,
+        vendorName: vendorsTable.name,
+        uploaderFirst: usersTable.firstName,
+        uploaderLast: usersTable.lastName,
+      })
+      .from(receiptsTable)
+      .leftJoin(vendorsTable, eq(vendorsTable.id, receiptsTable.vendorId))
+      .leftJoin(usersTable, eq(usersTable.id, receiptsTable.uploadedBy))
+      .where(where)
+      .orderBy(desc(receiptsTable.createdAt))
+      .limit(pageSize)
+      .offset(offset),
     db.select({ cnt: count() }).from(receiptsTable).where(where),
   ]);
 
-  const items = await Promise.all(
-    receipts.map(async (r) => {
-      const vendorName = await getVendorName(r.vendorId);
-      return formatReceipt(r, vendorName);
-    })
-  );
+  const items = rows.map(({ receipt, vendorName, uploaderFirst, uploaderLast }) => {
+    const uploadedByName = uploaderFirst || uploaderLast
+      ? `${uploaderFirst ?? ""} ${uploaderLast ?? ""}`.trim()
+      : "Unknown";
+    return formatReceipt(receipt, vendorName ?? undefined, uploadedByName);
+  });
 
   res.json(ListReceiptsResponse.parse({ items, total: totalResult[0]?.cnt ?? 0, page }));
 });
@@ -142,8 +170,11 @@ router.post("/receipts", requireRole("admin", "approver", "submitter"), async (r
       .where(eq(expensesTable.id, data.linkedExpenseId));
   }
 
-  const vendorName = await getVendorName(receipt.vendorId);
-  res.status(201).json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName)));
+  const [vendorName, uploadedByName] = await Promise.all([
+    getVendorName(receipt.vendorId),
+    getUploaderName(receipt.uploadedBy),
+  ]);
+  res.status(201).json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName, uploadedByName)));
 });
 
 router.get("/receipts/missing-report", async (_req, res): Promise<void> => {
@@ -190,8 +221,11 @@ router.get("/receipts/:id", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Not found" });
     return;
   }
-  const vendorName = await getVendorName(receipt.vendorId);
-  res.json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName)));
+  const [vendorName, uploadedByName] = await Promise.all([
+    getVendorName(receipt.vendorId),
+    getUploaderName(receipt.uploadedBy),
+  ]);
+  res.json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName, uploadedByName)));
 });
 
 router.delete("/receipts/:id", async (req, res): Promise<void> => {

@@ -642,8 +642,17 @@ export default function BillDetail() {
                         <FileBox className="h-8 w-8 text-muted-foreground/40" />
                       )}
                     </div>
-                    <div className="p-2 text-xs truncate" title={r.fileName}>
-                      {r.fileName}
+                    <div className="p-2 space-y-0.5">
+                      <div className="text-xs truncate" title={r.fileName}>
+                        {r.fileName}
+                      </div>
+                      <div
+                        className="text-[10px] text-muted-foreground truncate"
+                        title={`Uploaded by ${r.uploadedByName ?? "Unknown"} on ${format(new Date(r.createdAt), "MMM d, yyyy")}`}
+                      >
+                        By {r.uploadedByName ?? "Unknown"} ·{" "}
+                        {format(new Date(r.createdAt), "MMM d, yyyy")}
+                      </div>
                     </div>
                   </button>
                   {canDeleteReceipt(r.uploadedBy) && (

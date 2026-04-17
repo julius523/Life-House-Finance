@@ -892,6 +892,12 @@ export const ListReceiptsResponse = zod.object({
       linkedExpenseId: zod.number().optional(),
       linkedBillId: zod.number().optional(),
       uploadedBy: zod.number().optional().describe("User id of the uploader"),
+      uploadedByName: zod
+        .string()
+        .optional()
+        .describe(
+          'Display name of the uploader, or \"Unknown\" for legacy receipts',
+        ),
       createdAt: zod.coerce.date(),
     }),
   ),
@@ -936,6 +942,12 @@ export const GetReceiptResponse = zod.object({
   linkedExpenseId: zod.number().optional(),
   linkedBillId: zod.number().optional(),
   uploadedBy: zod.number().optional().describe("User id of the uploader"),
+  uploadedByName: zod
+    .string()
+    .optional()
+    .describe(
+      'Display name of the uploader, or \"Unknown\" for legacy receipts',
+    ),
   createdAt: zod.coerce.date(),
 });
 

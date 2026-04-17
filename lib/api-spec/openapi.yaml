@@ -1697,6 +1697,9 @@ components:
         uploadedBy:
           type: integer
           description: User id of the uploader
+        uploadedByName:
+          type: string
+          description: Display name of the uploader, or "Unknown" for legacy receipts
         createdAt:
           type: string
           format: date-time

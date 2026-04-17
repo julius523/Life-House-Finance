@@ -237,6 +237,13 @@ export default function ReceiptsList() {
                             </span>
                           )}
                         </div>
+                        <div
+                          className="text-xs text-muted-foreground truncate"
+                          title={`Uploaded by ${receipt.uploadedByName ?? "Unknown"} on ${format(new Date(receipt.createdAt), "MMM d, yyyy")}`}
+                        >
+                          Uploaded by {receipt.uploadedByName ?? "Unknown"} ·{" "}
+                          {format(new Date(receipt.createdAt), "MMM d, yyyy")}
+                        </div>
                         <div className="flex flex-wrap gap-1 mt-2">
                           {receipt.vendorName && (
                             <Badge variant="secondary" className="text-[10px] font-normal truncate max-w-full">
