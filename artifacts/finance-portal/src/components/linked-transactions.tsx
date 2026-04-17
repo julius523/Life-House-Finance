@@ -86,7 +86,17 @@ export function LinkedTransactions({ expenseId, billId, enableReconcile }: Props
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <Badge variant="secondary">{t.status}</Badge>
+                <Badge
+                  className={
+                    t.status === "reconciled"
+                      ? "bg-success text-success-foreground"
+                      : t.status === "matched"
+                        ? "bg-info text-info-foreground"
+                        : "bg-secondary text-secondary-foreground"
+                  }
+                >
+                  {t.status === "reconciled" ? "Reconciled" : t.status}
+                </Badge>
                 <div
                   className={`text-sm font-semibold ${
                     t.type === "credit" ? "text-success" : ""

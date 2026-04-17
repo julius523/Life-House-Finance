@@ -413,8 +413,9 @@ export default function BillDetail() {
         </div>
       </div>
 
-      <LinkedTransactions billId={id} enableReconcile />
+      <LinkedTransactions billId={id} enableReconcile={canDecide} />
 
+      {canDecide && (
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
@@ -491,6 +492,7 @@ export default function BillDetail() {
           </Button>
         </CardContent>
       </Card>
+      )}
 
       <Card>
         <CardHeader>
