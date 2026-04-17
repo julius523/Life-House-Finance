@@ -102,9 +102,25 @@ export default function BillDetail() {
   };
 
   const handleResubmit = async () => {
+    if (!bill) return;
     try {
+      // Attach any newly uploaded invoices/receipts before flipping the bill
+      // back to submitted, mirroring the expense resubmit flow.
+      for (const r of pendingReceipts) {
+        await createReceipt.mutateAsync({
+          data: {
+            fileName: r.file.name,
+            fileType: r.contentType,
+            fileUrl: r.objectPath,
+            linkedBillId: id,
+            amount: bill.amount,
+            receiptDate: bill.invoiceDate || bill.dueDate,
+          },
+        });
+      }
       await resubmitBill.mutateAsync({ id });
       toast({ title: "Bill resubmitted for approval" });
+      setPendingReceipts([]);
       refresh();
     } catch (e) {
       toast({
@@ -333,10 +349,12 @@ export default function BillDetail() {
               <Button
                 className="bg-primary hover:bg-primary/90 text-primary-foreground"
                 onClick={handleResubmit}
-                disabled={resubmitBill.isPending}
+                disabled={resubmitBill.isPending || createReceipt.isPending}
               >
                 <RotateCcw className="mr-2 h-4 w-4" />
-                {resubmitBill.isPending ? "Resubmitting…" : "Resubmit for Approval"}
+                {resubmitBill.isPending || createReceipt.isPending
+                  ? "Resubmitting…"
+                  : "Resubmit for Approval"}
               </Button>
             </>
           )}
@@ -393,9 +411,26 @@ export default function BillDetail() {
             </div>
             <div className="text-sm mt-1">{bill.rejectionReason}</div>
             {canResubmit && (
-              <div className="text-xs text-muted-foreground mt-2">
-                Update the bill details or attachments below, then click
-                Resubmit for Approval.
+              <div className="mt-4 space-y-3">
+                <div className="text-sm font-medium">
+                  Add a fixed invoice or supporting document and resubmit
+                </div>
+                <ReceiptUploader
+                  value={pendingReceipts}
+                  onChange={setPendingReceipts}
+                  label=""
+                  hint="Optional — upload a corrected invoice or receipt before resubmitting."
+                />
+                <Button
+                  onClick={handleResubmit}
+                  disabled={resubmitBill.isPending || createReceipt.isPending}
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  {resubmitBill.isPending || createReceipt.isPending
+                    ? "Resubmitting…"
+                    : "Resubmit for Approval"}
+                </Button>
               </div>
             )}
           </CardContent>
@@ -630,22 +665,36 @@ export default function BillDetail() {
             <p className="text-sm text-muted-foreground">No attachments yet.</p>
           )}
 
-          <Separator />
+          {!canResubmit && (
+            <>
+              <Separator />
 
-          <ReceiptUploader
-            value={pendingReceipts}
-            onChange={setPendingReceipts}
-            label="Add invoice / supporting documents"
-            hint="Attach an invoice PDF or photo of the bill."
-          />
-          {pendingReceipts.length > 0 && (
-            <div className="flex justify-end">
-              <Button onClick={handleUpload} disabled={createReceipt.isPending}>
-                {createReceipt.isPending
-                  ? "Uploading…"
-                  : `Attach ${pendingReceipts.length} file${pendingReceipts.length === 1 ? "" : "s"}`}
-              </Button>
-            </div>
+              <ReceiptUploader
+                value={pendingReceipts}
+                onChange={setPendingReceipts}
+                label="Add invoice / supporting documents"
+                hint="Attach an invoice PDF or photo of the bill."
+              />
+              {pendingReceipts.length > 0 && (
+                <div className="flex justify-end">
+                  <Button
+                    onClick={handleUpload}
+                    disabled={createReceipt.isPending}
+                  >
+                    {createReceipt.isPending
+                      ? "Uploading…"
+                      : `Attach ${pendingReceipts.length} file${pendingReceipts.length === 1 ? "" : "s"}`}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+          {canResubmit && (
+            <p className="text-xs text-muted-foreground">
+              To add a new invoice or receipt, use the upload area in the
+              "Sent back for correction" notice above. Your file will be
+              attached when you resubmit.
+            </p>
           )}
         </CardContent>
       </Card>
