@@ -3,6 +3,7 @@ import { requireRole } from "../lib/auth";
 import { db } from "@workspace/db";
 import { billsTable, vendorsTable, programsTable, activityLogTable, transactionsTable } from "@workspace/db";
 import { eq, and, desc, isNull, sql } from "drizzle-orm";
+import { createNotification, findUserByEmail } from "../lib/notifications";
 import {
   ListBillsQueryParams,
   ListBillsResponse,
@@ -265,6 +266,22 @@ router.post("/bills/:id/reject", requireRole("admin", "approver"), async (req, r
   });
 
   const vendorName = await getVendorName(bill.vendorId);
+
+  if (action === "send_back" && bill.submittedByEmail) {
+    const submitter = await findUserByEmail(bill.submittedByEmail);
+    if (submitter) {
+      await createNotification({
+        userId: submitter.id,
+        type: "bill_needs_correction",
+        title: `Bill #${bill.id} needs your attention`,
+        body: `Your bill for ${vendorName} ($${Number(bill.amount).toFixed(2)}) was sent back by ${rejectedBy}. Reason: ${reason}`,
+        link: `/bills/${bill.id}`,
+        referenceType: "bill",
+        referenceId: bill.id,
+      });
+    }
+  }
+
   const programName = await getProgramName(bill.programId);
   res.json(formatBill(bill, vendorName, programName));
 });

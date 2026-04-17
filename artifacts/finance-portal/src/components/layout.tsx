@@ -19,6 +19,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth, canAccess, type Section } from "@/lib/auth";
+import { NotificationBell } from "@/components/notification-bell";
 
 const NAV_ITEMS: Array<{
   href: string;
@@ -84,16 +85,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </nav>
       {user && (
         <div className="p-4 border-t border-sidebar-border/50 space-y-2">
-          <div className="text-sm">
-            <p className="font-semibold text-sidebar-foreground truncate">
-              {user.firstName} {user.lastName}
-            </p>
-            <p className="text-xs text-sidebar-foreground/70 truncate">
-              {user.email}
-            </p>
-            <p className="text-[10px] uppercase tracking-wide text-sidebar-foreground/60 mt-0.5">
-              {user.role}
-            </p>
+          <div className="flex items-start justify-between gap-2">
+            <div className="text-sm min-w-0">
+              <p className="font-semibold text-sidebar-foreground truncate">
+                {user.firstName} {user.lastName}
+              </p>
+              <p className="text-xs text-sidebar-foreground/70 truncate">
+                {user.email}
+              </p>
+              <p className="text-[10px] uppercase tracking-wide text-sidebar-foreground/60 mt-0.5">
+                {user.role}
+              </p>
+            </div>
+            <NotificationBell />
           </div>
           <Button
             variant="ghost"

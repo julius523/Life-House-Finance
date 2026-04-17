@@ -1759,3 +1759,57 @@ export const UpdateMonthEndChecklistResponse = zod.object({
   createdAt: zod.coerce.date(),
   closedAt: zod.coerce.date().optional(),
 });
+
+/**
+ * @summary List notifications for the current user
+ */
+export const listNotificationsQueryUnreadOnlyDefault = false;
+
+export const ListNotificationsQueryParams = zod.object({
+  unreadOnly: zod.coerce
+    .boolean()
+    .default(listNotificationsQueryUnreadOnlyDefault),
+});
+
+export const ListNotificationsResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      type: zod.string(),
+      title: zod.string(),
+      body: zod.string(),
+      link: zod.string().optional(),
+      referenceType: zod.string().optional(),
+      referenceId: zod.number().optional(),
+      readAt: zod.coerce.date().optional(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+  unreadCount: zod.number(),
+});
+
+/**
+ * @summary Mark a notification as read
+ */
+export const MarkNotificationReadParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const MarkNotificationReadResponse = zod.object({
+  id: zod.number(),
+  type: zod.string(),
+  title: zod.string(),
+  body: zod.string(),
+  link: zod.string().optional(),
+  referenceType: zod.string().optional(),
+  referenceId: zod.number().optional(),
+  readAt: zod.coerce.date().optional(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Mark every unread notification as read
+ */
+export const MarkAllNotificationsReadResponse = zod.object({
+  ok: zod.boolean(),
+});

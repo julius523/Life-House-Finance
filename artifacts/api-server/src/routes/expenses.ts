@@ -3,6 +3,7 @@ import { requireRole } from "../lib/auth";
 import { db } from "@workspace/db";
 import { expensesTable, programsTable, activityLogTable } from "@workspace/db";
 import { eq, and, desc, count, sql, ne } from "drizzle-orm";
+import { createNotification, findUserByEmail } from "../lib/notifications";
 import {
   ListExpensesQueryParams,
   ListExpensesResponse,
@@ -332,6 +333,21 @@ router.post("/expenses/:id/reject", requireRole("admin", "approver"), async (req
     referenceId: expense.id,
     referenceType: "expense",
   });
+
+  if (action === "send_back" && expense.submittedByEmail) {
+    const submitter = await findUserByEmail(expense.submittedByEmail);
+    if (submitter) {
+      await createNotification({
+        userId: submitter.id,
+        type: "expense_needs_correction",
+        title: `Expense #${expense.id} needs your attention`,
+        body: `Your expense at ${expense.merchant} ($${Number(expense.amount).toFixed(2)}) was sent back by ${bodyParsed.data.rejectedBy}. Reason: ${bodyParsed.data.reason}`,
+        link: `/expenses/${expense.id}`,
+        referenceType: "expense",
+        referenceId: expense.id,
+      });
+    }
+  }
 
   const programName = await getProgramName(expense.programId);
   res.json(RejectExpenseResponse.parse(formatExpense(expense, programName)));

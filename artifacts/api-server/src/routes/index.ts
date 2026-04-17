@@ -15,6 +15,7 @@ import storageRouter from "./storage";
 import aiRouter from "./ai";
 import reportsRouter from "./reports";
 import creditsRouter from "./credits";
+import notificationsRouter from "./notifications";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,6 @@ router.use(storageRouter);
 router.use(aiRouter);
 router.use(reportsRouter);
 router.use(creditsRouter);
+router.use(notificationsRouter);
 
 export default router;

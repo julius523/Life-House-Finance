@@ -705,6 +705,23 @@ export interface UpdateMonthEndChecklistBody {
   items?: UpdateMonthEndChecklistBodyItemsItem[];
 }
 
+export interface Notification {
+  id: number;
+  type: string;
+  title: string;
+  body: string;
+  link?: string;
+  referenceType?: string;
+  referenceId?: number;
+  readAt?: string;
+  createdAt: string;
+}
+
+export interface NotificationListResponse {
+  items: Notification[];
+  unreadCount: number;
+}
+
 export type GetRecentActivityParams = {
   limit?: number;
 };
@@ -890,4 +907,12 @@ export const ListApprovalsType = {
 export type GetFinancialSummaryReportParams = {
   fromDate?: string;
   toDate?: string;
+};
+
+export type ListNotificationsParams = {
+  unreadOnly?: boolean;
+};
+
+export type MarkAllNotificationsRead200 = {
+  ok: boolean;
 };
