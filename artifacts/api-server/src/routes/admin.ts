@@ -15,7 +15,7 @@ import {
   emailSettingsTable,
   emailTemplatesTable,
 } from "@workspace/db";
-import { eq, asc, desc, isNull, inArray } from "drizzle-orm";
+import { eq, asc, desc, isNull, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth, requireRole, toAuthUser } from "../lib/auth";
 import {
@@ -173,14 +173,27 @@ router.post("/admin/restore-day", async (req, res): Promise<void> => {
 
 // --- Backfill receipts.uploaded_by from linked expense/bill submitter ---
 
-router.post("/admin/backfill-receipt-uploaders", async (_req, res): Promise<void> => {
+const BackfillReceiptsBody = z
+  .object({
+    deleteUnresolved: z.boolean().optional(),
+  })
+  .optional();
+
+router.post("/admin/backfill-receipt-uploaders", async (req, res): Promise<void> => {
+  const parsed = BackfillReceiptsBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid body" });
+    return;
+  }
+  const deleteUnresolved = parsed.data?.deleteUnresolved ?? false;
+
   const orphanReceipts = await db
     .select()
     .from(receiptsTable)
     .where(isNull(receiptsTable.uploadedBy));
 
   if (orphanReceipts.length === 0) {
-    res.json({ ok: true, scanned: 0, updated: 0, unresolved: 0 });
+    res.json({ ok: true, scanned: 0, updated: 0, unresolved: 0, deleted: 0 });
     return;
   }
 
@@ -249,6 +262,7 @@ router.post("/admin/backfill-receipt-uploaders", async (_req, res): Promise<void
 
   let updated = 0;
   let unresolved = 0;
+  let deleted = 0;
   for (const receipt of orphanReceipts) {
     let userId: number | null = null;
     if (receipt.linkedExpenseId != null) {
@@ -260,6 +274,23 @@ router.post("/admin/backfill-receipt-uploaders", async (_req, res): Promise<void
       if (bill) userId = resolveUserId(bill.submittedByEmail, bill.submittedBy);
     }
     if (userId == null) {
+      if (deleteUnresolved) {
+        // Mirror the user-facing delete: remove the receipt row and detach it
+        // from any linked expense's receiptIds array so it stops appearing in
+        // the attached-receipts list.
+        await db.delete(receiptsTable).where(eq(receiptsTable.id, receipt.id));
+        if (receipt.linkedExpenseId != null) {
+          await db
+            .update(expensesTable)
+            .set({
+              receiptIds: sql`array_remove(${expensesTable.receiptIds}, ${receipt.id})`,
+              updatedAt: new Date(),
+            })
+            .where(eq(expensesTable.id, receipt.linkedExpenseId));
+        }
+        deleted += 1;
+        continue;
+      }
       unresolved += 1;
       continue;
     }
@@ -275,6 +306,7 @@ router.post("/admin/backfill-receipt-uploaders", async (_req, res): Promise<void
     scanned: orphanReceipts.length,
     updated,
     unresolved,
+    deleted,
   });
 });
 
