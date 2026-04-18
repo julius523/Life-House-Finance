@@ -32,6 +32,122 @@ import {
 const MAX_TOOL_ITERATIONS = 5;
 const MAX_TOTAL_TOOL_CALLS = 12;
 
+// ---------------------------------------------------------------------------
+// Step 7: per-request cost / usage tracking.
+//
+// Pricing table is in USD per 1M tokens. Numbers are kept here (not in env)
+// so cost attribution is reproducible from a code commit. Update when models
+// or list prices change.
+//
+// If a model is not in this table, token counts are still recorded but
+// `costUsdMicros` is left null — never silently zeroed.
+// ---------------------------------------------------------------------------
+const MODEL_PRICING_USD_PER_1M_TOKENS: Readonly<
+  Record<string, { input: number; output: number }>
+> = {
+  "gpt-5.4": { input: 2.5, output: 10.0 },
+  "gpt-5-mini": { input: 0.25, output: 2.0 },
+  "gpt-4o": { input: 2.5, output: 10.0 },
+  "gpt-4o-mini": { input: 0.15, output: 0.6 },
+};
+
+type LlmTurnUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  llmCallCount: number;
+};
+
+function emptyUsage(): LlmTurnUsage {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    llmCallCount: 0,
+  };
+}
+
+function accumulateUsage(
+  acc: LlmTurnUsage,
+  resp: { usage?: unknown } | null | undefined,
+): void {
+  acc.llmCallCount += 1;
+  const u = (resp?.usage ?? null) as
+    | {
+        input_tokens?: number;
+        output_tokens?: number;
+        total_tokens?: number;
+        prompt_tokens?: number;
+        completion_tokens?: number;
+      }
+    | null;
+  if (!u) return;
+  // The Responses API returns input_tokens/output_tokens/total_tokens.
+  // Fall back to chat-completions field names for safety in case OpenAI
+  // ever returns the legacy shape.
+  const input = u.input_tokens ?? u.prompt_tokens ?? 0;
+  const output = u.output_tokens ?? u.completion_tokens ?? 0;
+  const total = u.total_tokens ?? input + output;
+  acc.inputTokens += Number.isFinite(input) ? input : 0;
+  acc.outputTokens += Number.isFinite(output) ? output : 0;
+  acc.totalTokens += Number.isFinite(total) ? total : 0;
+}
+
+function lookupPricing(
+  modelName: string,
+): { input: number; output: number } | null {
+  // Exact match first (canonical names like "gpt-5.4").
+  const exact = MODEL_PRICING_USD_PER_1M_TOKENS[modelName];
+  if (exact) return exact;
+  // OpenAI returns date-stamped variants like "gpt-5.4-2026-03-05".
+  // Prefix-match against the longest known base id so a stamped model
+  // inherits its base's pricing without a separate table entry.
+  const keys = Object.keys(MODEL_PRICING_USD_PER_1M_TOKENS).sort(
+    (a, b) => b.length - a.length,
+  );
+  for (const k of keys) {
+    if (modelName === k || modelName.startsWith(k + "-")) {
+      return MODEL_PRICING_USD_PER_1M_TOKENS[k] ?? null;
+    }
+  }
+  return null;
+}
+
+function computeCostUsdMicros(
+  modelName: string | null | undefined,
+  usage: LlmTurnUsage,
+): number | null {
+  if (!modelName) return null;
+  const price = lookupPricing(modelName);
+  if (!price) return null;
+  // micros == USD * 1_000_000. Per-token price is (USD/1M tokens) so:
+  //   tokens * (USD per 1M) = tokens * price  → divide by 1M to get USD,
+  //   then multiply by 1M to get micros — i.e. multiply tokens * price * 1.
+  // Round to nearest integer micro.
+  const micros =
+    usage.inputTokens * price.input + usage.outputTokens * price.output;
+  return Math.round(micros);
+}
+
+function usageColumns(
+  modelName: string | null | undefined,
+  usage: LlmTurnUsage,
+): {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  costUsdMicros: number | null;
+  llmCallCount: number;
+} {
+  return {
+    inputTokens: usage.llmCallCount > 0 ? usage.inputTokens : null,
+    outputTokens: usage.llmCallCount > 0 ? usage.outputTokens : null,
+    totalTokens: usage.llmCallCount > 0 ? usage.totalTokens : null,
+    costUsdMicros: computeCostUsdMicros(modelName, usage),
+    llmCallCount: usage.llmCallCount,
+  };
+}
+
 const router: IRouter = Router();
 
 router.use("/accounting", requireAuth);
@@ -232,6 +348,12 @@ function serializeMessage(m: CopilotMessageRow) {
     modelName: m.modelName,
     latencyMs: m.latencyMs,
     errorCode: m.errorCode,
+    // Step 7: per-turn cost/usage attribution.
+    inputTokens: m.inputTokens,
+    outputTokens: m.outputTokens,
+    totalTokens: m.totalTokens,
+    costUsdMicros: m.costUsdMicros,
+    llmCallCount: m.llmCallCount,
     createdAt: m.createdAt,
   };
 }
@@ -411,6 +533,9 @@ function serializeToolCall(t: CopilotToolCallRow): Record<string, unknown> {
     result: t.result,
     status: t.status,
     errorMessage: t.errorMessage,
+    // Step 7: surface the role-scope denial reason on the wire so the UI
+    // and tests can show it explicitly.
+    deniedReason: t.deniedReason,
     latencyMs: t.latencyMs,
     createdAt: t.createdAt,
   };
@@ -712,6 +837,7 @@ router.post(
     const toolCallLogIds: number[] = [];
     const agentActionIds: number[] = [];
     const retrievedSnippets = new Map<string, RetrievedSnippet>();
+    const turnUsage = emptyUsage();
     const toolCtx: CopilotToolContext = {
       user: req.authUser!,
       pageContext: (pageContext ?? null) as PageContextLike | null,
@@ -741,6 +867,7 @@ router.post(
           thread_id: String(threadId),
         },
       });
+      accumulateUsage(turnUsage, response as { usage?: unknown });
 
       let totalToolCalls = 0;
       for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
@@ -771,6 +898,18 @@ router.post(
           const toolResult = await runTool(name, parsedArgs, toolCtx);
           const latency = Date.now() - t0;
 
+          // Step 7: classify the outcome for status + denied_reason. A
+          // denied tool call is NOT an exec failure — the tool body never
+          // ran. We persist the row so the audit trail has the attempt,
+          // and we feed a structured denial back to the model so it can
+          // surface the denial to the user instead of silently retrying.
+          const isDenied = !toolResult.ok && toolResult.denied === true;
+          const status: "ok" | "error" | "denied" = toolResult.ok
+            ? "ok"
+            : isDenied
+              ? "denied"
+              : "error";
+
           const [logRow] = await db
             .insert(copilotToolCallsTable)
             .values({
@@ -780,9 +919,12 @@ router.post(
               arguments: parsedArgs as Record<string, unknown>,
               result: toolResult.ok
                 ? (toolResult.data as Record<string, unknown>)
-                : { error: toolResult.error },
-              status: toolResult.ok ? "ok" : "error",
+                : isDenied
+                  ? { denied: true, error: toolResult.error }
+                  : { error: toolResult.error },
+              status,
               errorMessage: toolResult.ok ? null : toolResult.error,
+              deniedReason: isDenied ? toolResult.error : null,
               latencyMs: latency,
             })
             .returning({ id: copilotToolCallsTable.id });
@@ -792,7 +934,11 @@ router.post(
             type: "function_call_output",
             call_id: callId,
             output: JSON.stringify(
-              toolResult.ok ? toolResult.data : { error: toolResult.error },
+              toolResult.ok
+                ? toolResult.data
+                : isDenied
+                  ? { denied: true, error: toolResult.error }
+                  : { error: toolResult.error },
             ),
           });
         }
@@ -819,6 +965,7 @@ router.post(
             iteration: String(iter + 1),
           },
         });
+        accumulateUsage(turnUsage, response as { usage?: unknown });
       }
 
       const latencyMs = Date.now() - startedAt;
@@ -840,6 +987,7 @@ router.post(
             errorCode: "schema_violation",
             modelName: response.model ?? AGENT_MODEL,
             latencyMs,
+            ...usageColumns(response.model ?? AGENT_MODEL, turnUsage),
           })
           .returning();
         await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
@@ -887,6 +1035,7 @@ router.post(
             modelName: response.model ?? AGENT_MODEL,
             latencyMs,
             rawResponseJson: parsedJson as Record<string, unknown>,
+            ...usageColumns(response.model ?? AGENT_MODEL, turnUsage),
           })
           .returning();
         await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
@@ -928,6 +1077,7 @@ router.post(
             modelName: response.model ?? AGENT_MODEL,
             latencyMs,
             rawResponseJson: parsedJson as Record<string, unknown>,
+            ...usageColumns(response.model ?? AGENT_MODEL, turnUsage),
           })
           .returning();
         await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
@@ -973,6 +1123,7 @@ router.post(
             rawResponseJson: parsedJson as Record<string, unknown>,
             modelName: response.model ?? AGENT_MODEL,
             latencyMs,
+            ...usageColumns(response.model ?? AGENT_MODEL, turnUsage),
           })
           .returning();
         if (dedupedSources.length > 0) {
@@ -1045,6 +1196,9 @@ router.post(
       req.log.error({ err }, "Accounting copilot run failed");
       const latencyMs = Date.now() - startedAt;
       const cls = classifyError(err);
+      // Step 7: even on the upstream/model-error catch path, persist any
+      // tokens/cost we accumulated before the failure so the per-LLM-turn
+      // cost ledger is not silently dropped on partial failures.
       const [assistantRow] = await db
         .insert(copilotMessagesTable)
         .values({
@@ -1054,6 +1208,7 @@ router.post(
           errorCode: cls.code,
           modelName: AGENT_MODEL,
           latencyMs,
+          ...usageColumns(AGENT_MODEL, turnUsage),
         })
         .returning();
       await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
@@ -1428,6 +1583,15 @@ router.post(
       dryRun: true,
     });
     const latencyMs = Date.now() - t0;
+    // Step 7: even though this endpoint requires admin, runTool still goes
+    // through the role-scope check; mirror the denied/error/preview classification
+    // so the audit trail is consistent with the chat path.
+    const isDenied = !result.ok && result.denied === true;
+    const status: "preview" | "denied" | "error" = result.ok
+      ? "preview"
+      : isDenied
+        ? "denied"
+        : "error";
     const [logRow] = await db
       .insert(copilotToolCallsTable)
       .values({
@@ -1437,9 +1601,12 @@ router.post(
         arguments: (args ?? {}) as Record<string, unknown>,
         result: result.ok
           ? (result.data as Record<string, unknown>)
-          : { error: result.error },
-        status: result.ok ? "preview" : "error",
+          : isDenied
+            ? { denied: true, error: result.error }
+            : { error: result.error },
+        status,
         errorMessage: result.ok ? null : result.error,
+        deniedReason: isDenied ? result.error : null,
         latencyMs,
       })
       .returning();

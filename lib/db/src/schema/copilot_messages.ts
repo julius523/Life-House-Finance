@@ -40,6 +40,18 @@ export const copilotMessagesTable = pgTable(
     pageContext: jsonb("page_context"),
     modelName: text("model_name"),
     latencyMs: integer("latency_ms"),
+    /**
+     * Step 7 cost/usage logging. Token counts are summed across every
+     * `openai.responses.create` call that took place during the turn
+     * (initial call + tool-loop iterations). `costUsdMicros` is in
+     * micros (1 USD = 1_000_000) — never floats. Null when the model
+     * is not in the pricing table; tokens still recorded.
+     */
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    totalTokens: integer("total_tokens"),
+    costUsdMicros: integer("cost_usd_micros"),
+    llmCallCount: integer("llm_call_count"),
     errorCode: text("error_code"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },

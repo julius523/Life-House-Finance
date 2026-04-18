@@ -10,7 +10,15 @@ import {
 import { copilotThreadsTable } from "./copilot_threads";
 import { copilotMessagesTable } from "./copilot_messages";
 
-export const COPILOT_TOOL_CALL_STATUSES = ["ok", "error"] as const;
+// Step 7: status was extended with "denied" (role-scope rejection) and
+// "preview" (admin-only diagnostics dry-run). Existing rows ("ok"/"error")
+// remain valid.
+export const COPILOT_TOOL_CALL_STATUSES = [
+  "ok",
+  "error",
+  "denied",
+  "preview",
+] as const;
 export type CopilotToolCallStatus = (typeof COPILOT_TOOL_CALL_STATUSES)[number];
 
 export const copilotToolCallsTable = pgTable(
@@ -30,6 +38,12 @@ export const copilotToolCallsTable = pgTable(
     result: jsonb("result"),
     status: text("status").notNull().default("ok"),
     errorMessage: text("error_message"),
+    /**
+     * Step 7: when status='denied', this records the role-scope reason
+     * (e.g. "Tool 'draft_journal_entry' is not available for role 'submitter'.").
+     * Always null for status='ok' and usually null for status='error'.
+     */
+    deniedReason: text("denied_reason"),
     latencyMs: integer("latency_ms"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },

@@ -52,7 +52,64 @@ export type PageContextLike = {
 
 type ToolResult =
   | { ok: true; data: unknown }
-  | { ok: false; error: string };
+  | { ok: false; error: string; denied?: boolean };
+
+// ---------------------------------------------------------------------------
+// Step 7: per-role tool scopes (server-side, fail closed).
+//
+// This is the authoritative access matrix for the GAAP Copilot tool surface.
+// It is enforced inside `runTool` BEFORE arg validation so that denials do
+// not leak schema information to the model or to a probing user.
+//
+// Closed-world policy: any tool name not present in this map is denied for
+// every role. Adding a new tool requires explicitly listing the roles that
+// may invoke it.
+// ---------------------------------------------------------------------------
+export type CopilotRole = AuthUser["role"];
+
+export const TOOL_ROLE_SCOPES: Readonly<Record<string, ReadonlyArray<CopilotRole>>> = {
+  // Read-only tools — available to every authenticated finance-portal role.
+  get_current_page_context: ["admin", "approver", "submitter"],
+  get_current_record: ["admin", "approver", "submitter"],
+  get_accounting_dimensions: ["admin", "approver", "submitter"],
+  get_open_tasks: ["admin", "approver", "submitter"],
+  get_missing_receipts: ["admin", "approver", "submitter"],
+  get_reconciliation_status: ["admin", "approver", "submitter"],
+  search_chart_of_accounts: ["admin", "approver", "submitter"],
+  search_internal_policies: ["admin", "approver", "submitter"],
+
+  // Drafting tools — restricted by role per the Step 7 access matrix.
+  // Memos are documentation; any staff member may propose one.
+  draft_memo: ["admin", "approver", "submitter"],
+  // Follow-up tasks assign work to other people; submitters cannot do this
+  // directly (they may escalate instead).
+  create_followup_task: ["admin", "approver"],
+  // Escalation is the safety valve; everyone must be able to call it.
+  escalate_to_human: ["admin", "approver", "submitter"],
+  // Journal-entry drafts touch GL semantics; only admins and approvers may
+  // propose them. (Posting still requires explicit approval — see Step 6.)
+  draft_journal_entry: ["admin", "approver"],
+};
+
+export function isToolAllowedForRole(
+  toolName: string,
+  role: CopilotRole,
+): { allowed: true } | { allowed: false; reason: string } {
+  const allowedRoles = TOOL_ROLE_SCOPES[toolName];
+  if (!allowedRoles) {
+    return {
+      allowed: false,
+      reason: `Tool '${toolName}' has no role scope configured and is denied by default. Contact an administrator if you believe this is wrong.`,
+    };
+  }
+  if (!allowedRoles.includes(role)) {
+    return {
+      allowed: false,
+      reason: `Tool '${toolName}' is not available for role '${role}'. Allowed roles: ${allowedRoles.join(", ")}.`,
+    };
+  }
+  return { allowed: true };
+}
 
 type ToolDefinition<TArgs> = {
   name: string;
@@ -1043,6 +1100,12 @@ export async function runTool(
     | undefined;
   if (!tool) {
     return { ok: false, error: `Unknown tool: ${name}` };
+  }
+  // Step 7: enforce per-role tool scope BEFORE arg validation.
+  // Fail closed — the caller is expected to log this as status='denied'.
+  const scope = isToolAllowedForRole(name, ctx.user.role);
+  if (!scope.allowed) {
+    return { ok: false, error: scope.reason, denied: true };
   }
   const parsed = tool.argsSchema.safeParse(rawArgs);
   if (!parsed.success) {
