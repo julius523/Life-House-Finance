@@ -1,0 +1,119 @@
+Approved. Step 5 live validation is complete. Begin Step 6 now.
+
+Scope for Step 6 is strict:
+
+Build drafting tools with a human-approval gate only. No ledger mutation of any kind.
+
+Required Step 6 deliverables:
+
+1. draft_journal_entry
+
+* Creates a draft only
+* Never posts to ledger
+* Stores:
+
+  * date
+  * memo
+  * debit lines
+  * credit lines
+  * amount totals
+  * proposed dimensions
+  * policy/evidence basis
+  * confidence
+  * risk flags
+  * requires_human_review=true
+
+2. draft_memo
+
+* Draft accounting memo only
+* Persist as reviewable draft artifact
+* Include evidence used and missing information
+
+3. create_followup_task
+
+* Convert to human-reviewed workflow where appropriate
+* Keep audit trail
+
+4. escalate_to_human
+
+* Keep explicit severity, reason, reference type/id, and audit trail
+
+5. New agent_actions table
+
+* Every draft/action goes here
+* status must include:
+
+  * pending_review
+  * approved
+  * rejected
+  * canceled
+* store:
+
+  * userId
+  * threadId
+  * assistantMessageId
+  * actionType
+  * payload JSON
+  * evidence JSON
+  * confidence
+  * riskFlags
+  * createdAt
+  * reviewedBy
+  * reviewedAt
+  * reviewNotes
+
+6. Approval UI
+
+* Admin/approver can review pending draft actions
+* Must show:
+
+  * proposed action
+  * evidence used
+  * sources
+  * why
+  * risk flags
+  * confidence
+  * approve / reject controls
+* Submitters cannot approve their own drafts unless explicitly allowed by role settings
+
+7. Hard guardrails
+
+* The copilot cannot:
+
+  * post entries
+  * edit balances
+  * approve expenses
+  * mark compliance final
+  * send external emails
+  * alter any financial record directly
+
+8. Auditability
+
+* Every draft creation, approval, rejection, and cancel event must be logged
+* Every approved action must be attributable to a human user
+
+9. UX
+
+* On assistant cards, show clearly when the output is:
+
+  * informational only
+  * draft created
+  * pending human review
+  * approved
+  * rejected
+
+10. Tests required before I approve Step 6
+
+* draft journal entry created and stored
+* unbalanced journal entry rejected as invalid draft
+* approval required before any downstream action
+* non-approver cannot approve
+* evidence and sources visible on draft review screen
+* rejected draft remains auditable
+* duplicate approval click is idempotent
+
+Do not add ERP posting yet.
+Do not add external email sending yet.
+Do not broaden scope.
+
+Build Step 6 as the draft-and-review layer only.

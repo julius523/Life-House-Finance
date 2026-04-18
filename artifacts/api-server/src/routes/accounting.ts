@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import OpenAI from "openai";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -10,10 +10,14 @@ import {
   copilotDocumentsTable,
   copilotDocumentChunksTable,
   copilotMessageSourcesTable,
+  agentActionsTable,
+  activityLogTable,
+  notificationsTable,
   type CopilotMessageRow,
   type CopilotThreadRow,
   type CopilotToolCallRow,
   type CopilotMessageSourceRow,
+  type AgentActionRow,
 } from "@workspace/db";
 import { requireAuth } from "../lib/auth";
 import {
@@ -62,7 +66,13 @@ Non-negotiable rules:
 12. For policy / procedure / memo questions, ALWAYS call search_internal_policies first. Cite the snippets you actually used in "sources". If nothing relevant comes back, say so in "missing_information" and do not pretend to have internal sources.
 13a. There is no formal chart of accounts integration yet. search_chart_of_accounts returns no_formal_chart_of_accounts=true with related internal mappings (programs) for context only. Programs are NOT GL accounts. State the limitation explicitly in "missing_information".
 13b. Use escalate_to_human only when human accountant judgment, oversight, or sign-off is genuinely required. Use create_followup_task to leave the current user an actionable reminder. Use draft_memo to produce a draft document the user can copy — never claim a memo was sent or saved.
-14. Tool side effects are limited to creating notification records (escalations / follow-ups). Tools cannot post journal entries, change balances, change approval status, send email externally, or alter any record.
+14. Hard tool boundaries (Step 6 — drafting only):
+    - You have FOUR drafting tools: draft_journal_entry, draft_memo, create_followup_task, escalate_to_human.
+    - Every draft is saved with status="pending_review" and requires a human reviewer to approve before any downstream effect occurs.
+    - You CANNOT post journal entries, change account balances, approve or reject expenses/bills, mark anything compliant, send external emails, or alter any financial record. The tools simply do not have those capabilities.
+    - draft_journal_entry validates that debits equal credits to the cent before saving; an unbalanced draft is rejected and you must fix it.
+    - When you draft an action, name it explicitly in your "answer" (e.g., "I drafted a journal entry for review") and put a high-level summary of the proposal in "recommended_next_step". Do not pretend a draft has been posted, sent, or approved.
+    - escalate_to_human additionally creates an admin notification immediately (because that IS the purpose of escalation) and is also recorded as an agent_action for acknowledgement.
 
 You MUST respond with a single JSON object that strictly matches the response schema. Use the literal string "None" in any narrative field that genuinely does not apply. Do not use Markdown headings inside fields — the UI provides the structure.`;
 
@@ -328,6 +338,35 @@ async function linkToolCallsToMessage(
     .where(inArray(copilotToolCallsTable.id, toolCallIds));
 }
 
+/**
+ * Back-fills agent_action rows created during the turn with the resulting
+ * assistant message id and (when available) the final cited evidence.
+ * Always runs — even on error paths — so drafts remain attributable.
+ */
+async function linkAgentActionsToMessage(
+  agentActionIds: number[],
+  assistantMessageId: number,
+  finalEvidence: Record<string, unknown> | null,
+): Promise<void> {
+  if (agentActionIds.length === 0) return;
+  if (finalEvidence) {
+    await db
+      .update(agentActionsTable)
+      .set({
+        assistantMessageId,
+        evidence: sql`COALESCE(${agentActionsTable.evidence}, '{}'::jsonb) || ${JSON.stringify(
+          { final: finalEvidence },
+        )}::jsonb`,
+      })
+      .where(inArray(agentActionsTable.id, agentActionIds));
+  } else {
+    await db
+      .update(agentActionsTable)
+      .set({ assistantMessageId })
+      .where(inArray(agentActionsTable.id, agentActionIds));
+  }
+}
+
 function serializeSource(s: CopilotMessageSourceRow): Record<string, unknown> {
   return {
     id: s.id,
@@ -338,6 +377,26 @@ function serializeSource(s: CopilotMessageSourceRow): Record<string, unknown> {
     rank: s.rank,
     whyRelevant: s.whyRelevant,
     createdAt: s.createdAt,
+  };
+}
+
+function serializeAgentAction(a: AgentActionRow): Record<string, unknown> {
+  return {
+    id: a.id,
+    userId: a.userId,
+    threadId: a.threadId,
+    assistantMessageId: a.assistantMessageId,
+    actionType: a.actionType,
+    payload: a.payload,
+    evidence: a.evidence,
+    confidence: a.confidence,
+    riskFlags: a.riskFlags,
+    requiresHumanReview: a.requiresHumanReview,
+    status: a.status,
+    createdAt: a.createdAt,
+    reviewedBy: a.reviewedBy,
+    reviewedAt: a.reviewedAt,
+    reviewNotes: a.reviewNotes,
   };
 }
 
@@ -447,7 +506,7 @@ router.get("/accounting/threads/:id", async (req, res): Promise<void> => {
   const assistantMsgIds = messages
     .filter((m) => m.role === "assistant")
     .map((m) => m.id);
-  const [toolCalls, sources] = await Promise.all([
+  const [toolCalls, sources, actions] = await Promise.all([
     db
       .select()
       .from(copilotToolCallsTable)
@@ -465,6 +524,11 @@ router.get("/accounting/threads/:id", async (req, res): Promise<void> => {
             ),
           )
           .orderBy(asc(copilotMessageSourcesTable.id)),
+    db
+      .select()
+      .from(agentActionsTable)
+      .where(eq(agentActionsTable.threadId, threadId))
+      .orderBy(asc(agentActionsTable.id)),
   ]);
   const callsByMsg = new Map<number, CopilotToolCallRow[]>();
   for (const c of toolCalls) {
@@ -479,12 +543,20 @@ router.get("/accounting/threads/:id", async (req, res): Promise<void> => {
     arr.push(s);
     sourcesByMsg.set(s.assistantMessageId, arr);
   }
+  const actionsByMsg = new Map<number, AgentActionRow[]>();
+  for (const a of actions) {
+    if (a.assistantMessageId == null) continue;
+    const arr = actionsByMsg.get(a.assistantMessageId) ?? [];
+    arr.push(a);
+    actionsByMsg.set(a.assistantMessageId, arr);
+  }
   res.json({
     thread: serializeThread(thread),
     messages: messages.map((m) => ({
       ...serializeMessage(m),
       toolCalls: (callsByMsg.get(m.id) ?? []).map(serializeToolCall),
       sources: (sourcesByMsg.get(m.id) ?? []).map(serializeSource),
+      agentActions: (actionsByMsg.get(m.id) ?? []).map(serializeAgentAction),
     })),
   });
 });
@@ -637,12 +709,14 @@ router.post(
 
     const startedAt = Date.now();
     const toolCallLogIds: number[] = [];
+    const agentActionIds: number[] = [];
     const retrievedSnippets = new Map<string, RetrievedSnippet>();
     const toolCtx: CopilotToolContext = {
       user: req.authUser!,
       pageContext: (pageContext ?? null) as PageContextLike | null,
       threadId,
       retrievedSnippets,
+      agentActionIds,
     };
     try {
       let response = await openai.responses.create({
@@ -768,6 +842,9 @@ router.post(
           })
           .returning();
         await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
+        await linkAgentActionsToMessage(agentActionIds, assistantRow!.id, {
+          turn_status: "schema_violation_unparseable",
+        });
         res.status(502).json({
           userMessage: serializeMessage(userMessage!),
           assistantMessage: serializeMessage(assistantRow!),
@@ -812,6 +889,9 @@ router.post(
           })
           .returning();
         await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
+        await linkAgentActionsToMessage(agentActionIds, assistantRow!.id, {
+          turn_status: "schema_violation",
+        });
         res.status(502).json({
           userMessage: serializeMessage(userMessage!),
           assistantMessage: serializeMessage(assistantRow!),
@@ -850,6 +930,10 @@ router.post(
           })
           .returning();
         await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
+        await linkAgentActionsToMessage(agentActionIds, assistantRow!.id, {
+          turn_status: "fabricated_citation_rejected",
+          fabricated_snippet_ids: fabricated,
+        });
         res.status(502).json({
           userMessage: serializeMessage(userMessage!),
           assistantMessage: serializeMessage(assistantRow!),
@@ -911,8 +995,18 @@ router.post(
       });
 
       await linkToolCallsToMessage(toolCallLogIds, assistantRow.id);
+      await linkAgentActionsToMessage(agentActionIds, assistantRow.id, {
+        turn_status: "ok",
+        sources: dedupedSources,
+        why: shaped.data.why,
+        missing_information: shaped.data.missing_information,
+        recommended_next_step: shaped.data.recommended_next_step,
+        human_review_needed: shaped.data.human_review_needed,
+        confidence: shaped.data.confidence,
+        risk_flags: shaped.data.risk_flags,
+      });
 
-      const [linkedToolCalls, linkedSources] = await Promise.all([
+      const [linkedToolCalls, linkedSources, linkedAgentActions] = await Promise.all([
         db
           .select()
           .from(copilotToolCallsTable)
@@ -925,6 +1019,11 @@ router.post(
             eq(copilotMessageSourcesTable.assistantMessageId, assistantRow.id),
           )
           .orderBy(asc(copilotMessageSourcesTable.id)),
+        db
+          .select()
+          .from(agentActionsTable)
+          .where(eq(agentActionsTable.assistantMessageId, assistantRow.id))
+          .orderBy(asc(agentActionsTable.id)),
       ]);
 
       await db
@@ -938,6 +1037,7 @@ router.post(
           ...serializeMessage(assistantRow),
           toolCalls: linkedToolCalls.map(serializeToolCall),
           sources: linkedSources.map(serializeSource),
+          agentActions: linkedAgentActions.map(serializeAgentAction),
         },
       });
     } catch (err) {
@@ -956,12 +1056,331 @@ router.post(
         })
         .returning();
       await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
+      await linkAgentActionsToMessage(agentActionIds, assistantRow!.id, {
+        turn_status: "model_error",
+        error_code: cls.code,
+      });
       res.status(cls.status).json({
         userMessage: serializeMessage(userMessage!),
         assistantMessage: serializeMessage(assistantRow!),
         error: cls.user,
       });
     }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Step 6 — agent_actions (drafts) review/approval endpoints
+//
+// Hard rules enforced here:
+//   * The submitter (the user whose copilot turn produced the draft) cannot
+//     approve or reject their own draft. They CAN cancel it while it is still
+//     pending. This is the "submitters cannot self-approve" guardrail.
+//   * Approve and reject are idempotent: once a row reaches a terminal state
+//     (approved/rejected/canceled) further approve/reject calls return the
+//     current state with HTTP 200 and do NOT re-run any side effect.
+//   * Approving a create_followup_task is the ONLY action that creates a
+//     downstream record (the notification). draft_journal_entry approval does
+//     NOT post to any ledger — that capability does not exist in Step 6.
+//   * Every state change (create / approve / reject / cancel) is also logged
+//     to activity_log for an immutable audit trail outside this table.
+// ---------------------------------------------------------------------------
+
+const SELF_APPROVAL_ALLOWED_ROLES: ReadonlyArray<string> = [];
+
+function canApproveAgentAction(
+  reviewer: { id: number; role: string },
+  action: AgentActionRow,
+): { ok: true } | { ok: false; reason: string } {
+  if (reviewer.id === action.userId) {
+    if (!SELF_APPROVAL_ALLOWED_ROLES.includes(reviewer.role)) {
+      return {
+        ok: false,
+        reason:
+          "You cannot approve or reject a draft you submitted yourself. Ask another reviewer.",
+      };
+    }
+  }
+  return { ok: true };
+}
+
+router.get("/accounting/agent-actions", async (req, res): Promise<void> => {
+  const status = String(req.query["status"] ?? "pending_review");
+  const mineParam = String(req.query["mine"] ?? "false") === "true";
+  const conds = [eq(agentActionsTable.status, status)];
+  if (mineParam) {
+    conds.push(eq(agentActionsTable.userId, req.authUser!.id));
+  }
+  const rows = await db
+    .select()
+    .from(agentActionsTable)
+    .where(and(...conds))
+    .orderBy(desc(agentActionsTable.createdAt))
+    .limit(200);
+  // Enrich with submitter + reviewer + linked sources.
+  const userIds = new Set<number>();
+  const msgIds = new Set<number>();
+  for (const r of rows) {
+    userIds.add(r.userId);
+    if (r.reviewedBy) userIds.add(r.reviewedBy);
+    if (r.assistantMessageId) msgIds.add(r.assistantMessageId);
+  }
+  const [users, sources] = await Promise.all([
+    userIds.size === 0
+      ? Promise.resolve([] as Array<{ id: number; firstName: string; lastName: string; email: string }>)
+      : db
+          .select({
+            id: usersTable.id,
+            firstName: usersTable.firstName,
+            lastName: usersTable.lastName,
+            email: usersTable.email,
+          })
+          .from(usersTable)
+          .where(inArray(usersTable.id, Array.from(userIds))),
+    msgIds.size === 0
+      ? Promise.resolve([] as CopilotMessageSourceRow[])
+      : db
+          .select()
+          .from(copilotMessageSourcesTable)
+          .where(
+            inArray(
+              copilotMessageSourcesTable.assistantMessageId,
+              Array.from(msgIds),
+            ),
+          ),
+  ]);
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const sourcesByMsg = new Map<number, CopilotMessageSourceRow[]>();
+  for (const s of sources) {
+    const arr = sourcesByMsg.get(s.assistantMessageId) ?? [];
+    arr.push(s);
+    sourcesByMsg.set(s.assistantMessageId, arr);
+  }
+  res.json({
+    actions: rows.map((r) => ({
+      ...serializeAgentAction(r),
+      submitter: userById.get(r.userId) ?? null,
+      reviewer: r.reviewedBy ? userById.get(r.reviewedBy) ?? null : null,
+      sources:
+        r.assistantMessageId != null
+          ? (sourcesByMsg.get(r.assistantMessageId) ?? []).map(serializeSource)
+          : [],
+    })),
+    counts: { returned: rows.length, status },
+  });
+});
+
+router.get("/accounting/agent-actions/:id", async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [row] = await db
+    .select()
+    .from(agentActionsTable)
+    .where(eq(agentActionsTable.id, id));
+  if (!row) {
+    res.status(404).json({ error: "Agent action not found" });
+    return;
+  }
+  const userIds = [row.userId, ...(row.reviewedBy ? [row.reviewedBy] : [])];
+  const [users, sources] = await Promise.all([
+    db
+      .select({
+        id: usersTable.id,
+        firstName: usersTable.firstName,
+        lastName: usersTable.lastName,
+        email: usersTable.email,
+      })
+      .from(usersTable)
+      .where(inArray(usersTable.id, userIds)),
+    row.assistantMessageId == null
+      ? Promise.resolve([] as CopilotMessageSourceRow[])
+      : db
+          .select()
+          .from(copilotMessageSourcesTable)
+          .where(
+            eq(
+              copilotMessageSourcesTable.assistantMessageId,
+              row.assistantMessageId,
+            ),
+          ),
+  ]);
+  const userById = new Map(users.map((u) => [u.id, u]));
+  res.json({
+    action: {
+      ...serializeAgentAction(row),
+      submitter: userById.get(row.userId) ?? null,
+      reviewer: row.reviewedBy ? userById.get(row.reviewedBy) ?? null : null,
+      sources: sources.map(serializeSource),
+    },
+  });
+});
+
+const ReviewBody = z
+  .object({ notes: z.string().max(2000).optional() })
+  .strict();
+
+async function reviewAgentAction(
+  req: Request,
+  res: Response,
+  decision: "approved" | "rejected" | "canceled",
+): Promise<void> {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const parsedBody = ReviewBody.safeParse(req.body ?? {});
+  if (!parsedBody.success) {
+    res.status(400).json({
+      error: parsedBody.error.issues[0]?.message ?? "Invalid body",
+    });
+    return;
+  }
+  const reviewer = req.authUser!;
+  const notes = parsedBody.data.notes ?? null;
+
+  const result = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(agentActionsTable)
+      .where(eq(agentActionsTable.id, id))
+      .for("update");
+    if (!row) return { kind: "not_found" as const };
+
+    // Idempotency — already in a terminal state, return as-is.
+    if (row.status !== "pending_review") {
+      return { kind: "idempotent" as const, row };
+    }
+
+    // Permission checks per decision
+    if (decision === "canceled") {
+      if (row.userId !== reviewer.id && reviewer.role !== "admin") {
+        return {
+          kind: "forbidden" as const,
+          reason: "Only the submitter or an admin can cancel a draft.",
+        };
+      }
+    } else {
+      const guard = canApproveAgentAction(
+        { id: reviewer.id, role: reviewer.role },
+        row,
+      );
+      if (!guard.ok) {
+        return { kind: "forbidden" as const, reason: guard.reason };
+      }
+      if (decision === "rejected" && !notes) {
+        return {
+          kind: "bad_request" as const,
+          reason: "A rejection note is required.",
+        };
+      }
+    }
+
+    // For approve, perform the (single) downstream side-effect for tasks.
+    let downstream: Record<string, unknown> = {};
+    if (decision === "approved" && row.actionType === "create_followup_task") {
+      const payload = (row.payload ?? {}) as Record<string, unknown>;
+      const title = String(payload["title"] ?? "Follow-up");
+      const body = String(payload["body"] ?? "");
+      const assignedToUserId = Number(
+        payload["assigned_to_user_id"] ?? row.userId,
+      );
+      const [n] = await tx
+        .insert(notificationsTable)
+        .values({
+          userId: assignedToUserId,
+          type: "copilot_followup",
+          title: `Follow-up: ${title}`,
+          body,
+          link: `/accounting`,
+          referenceType: "copilot_thread",
+          referenceId: row.threadId,
+          emailTo: null,
+        })
+        .returning({ id: notificationsTable.id });
+      downstream = { notification_id: n?.id, assigned_to_user_id: assignedToUserId };
+    }
+
+    const updatedPayload = {
+      ...((row.payload ?? {}) as Record<string, unknown>),
+      ...(decision === "approved" &&
+      row.actionType === "create_followup_task"
+        ? { notification_created: true, ...downstream }
+        : {}),
+      ...(decision === "approved" && row.actionType === "draft_journal_entry"
+        ? {
+            ledger_posted: false,
+            posting_outcome:
+              "Approved for posting, but ledger posting is not implemented in Step 6. No financial record was modified.",
+          }
+        : {}),
+    };
+
+    const [updated] = await tx
+      .update(agentActionsTable)
+      .set({
+        status: decision,
+        reviewedBy: reviewer.id,
+        reviewedAt: new Date(),
+        reviewNotes: notes,
+        payload: updatedPayload,
+      })
+      .where(eq(agentActionsTable.id, id))
+      .returning();
+
+    await tx.insert(activityLogTable).values({
+      type: `copilot_draft_${decision}`,
+      description: `${reviewer.firstName} ${reviewer.lastName} ${decision} ${row.actionType} draft #${row.id}`,
+      actor: `${reviewer.firstName} ${reviewer.lastName}`,
+      referenceId: row.id,
+      referenceType: "agent_action",
+    });
+
+    return { kind: "ok" as const, row: updated! };
+  });
+
+  if (result.kind === "not_found") {
+    res.status(404).json({ error: "Agent action not found" });
+    return;
+  }
+  if (result.kind === "forbidden") {
+    res.status(403).json({ error: result.reason });
+    return;
+  }
+  if (result.kind === "bad_request") {
+    res.status(400).json({ error: result.reason });
+    return;
+  }
+  if (result.kind === "idempotent") {
+    res.status(200).json({
+      action: serializeAgentAction(result.row),
+      idempotent: true,
+      note: `Action was already ${result.row.status}; no change made.`,
+    });
+    return;
+  }
+  res.status(200).json({ action: serializeAgentAction(result.row) });
+}
+
+router.post(
+  "/accounting/agent-actions/:id/approve",
+  async (req, res): Promise<void> => {
+    await reviewAgentAction(req, res, "approved");
+  },
+);
+router.post(
+  "/accounting/agent-actions/:id/reject",
+  async (req, res): Promise<void> => {
+    await reviewAgentAction(req, res, "rejected");
+  },
+);
+router.post(
+  "/accounting/agent-actions/:id/cancel",
+  async (req, res): Promise<void> => {
+    await reviewAgentAction(req, res, "canceled");
   },
 );
 

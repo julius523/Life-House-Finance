@@ -13,6 +13,8 @@ import {
   creditsTable,
   usersTable,
   copilotDocumentsTable,
+  agentActionsTable,
+  activityLogTable,
 } from "@workspace/db";
 import type { AuthUser } from "./auth";
 
@@ -31,6 +33,10 @@ export type CopilotToolContext = {
   threadId: number;
   // Mutated by retrieval tools so the route handler can validate citations.
   retrievedSnippets: Map<string, RetrievedSnippet>;
+  // Mutated by drafting tools (Step 6). The route handler back-fills the
+  // assistant_message_id and final evidence on these rows after the assistant
+  // message is persisted.
+  agentActionIds?: number[];
   // When true, side-effecting tools must short-circuit and return a structured
   // preview of what they WOULD do, without writing any rows.
   dryRun?: boolean;
@@ -537,7 +543,364 @@ const searchInternalPolicies: ToolDefinition<{
 };
 
 // ---------------------------------------------------------------------------
-// 8. escalate_to_human
+// Step 6 — drafting & approval-gated tools
+//
+// All four tools below write a row into agent_actions with status =
+// pending_review. They never mutate the financial ledger directly. Only the
+// human approval workflow (POST /accounting/agent-actions/:id/approve) can
+// trigger any downstream effect, and even then ledger posting is OUT OF SCOPE
+// for Step 6 — drafts stay drafts until a future phase wires posting.
+// ---------------------------------------------------------------------------
+
+function snapshotEvidence(ctx: CopilotToolContext): Record<string, unknown> {
+  const snippets = Array.from(ctx.retrievedSnippets.values()).map((s) => ({
+    snippet_id: s.snippetId,
+    document_id: s.documentId,
+    document_title: s.documentTitle,
+    rank: s.rank,
+  }));
+  return {
+    snippets_available_at_draft_time: snippets,
+    page_context: ctx.pageContext,
+  };
+}
+
+async function persistAgentAction(
+  ctx: CopilotToolContext,
+  args: {
+    actionType: string;
+    payload: Record<string, unknown>;
+    confidence?: string | null;
+    riskFlags?: string | null;
+    policyEvidenceBasis?: string | null;
+  },
+): Promise<{ id: number; createdAt: Date }> {
+  const evidence = {
+    ...snapshotEvidence(ctx),
+    ...(args.policyEvidenceBasis
+      ? { policy_evidence_basis: args.policyEvidenceBasis }
+      : {}),
+  };
+  const [row] = await db
+    .insert(agentActionsTable)
+    .values({
+      userId: ctx.user.id,
+      threadId: ctx.threadId,
+      actionType: args.actionType,
+      payload: args.payload,
+      evidence,
+      confidence: args.confidence ?? null,
+      riskFlags: args.riskFlags ?? null,
+      requiresHumanReview: true,
+      status: "pending_review",
+    })
+    .returning({ id: agentActionsTable.id, createdAt: agentActionsTable.createdAt });
+  if (!row) throw new Error("Failed to persist agent_action");
+  if (!ctx.agentActionIds) ctx.agentActionIds = [];
+  ctx.agentActionIds.push(row.id);
+  await db.insert(activityLogTable).values({
+    type: "copilot_draft_created",
+    description: `Copilot drafted ${args.actionType} (pending review)`,
+    actor: `${ctx.user.firstName} ${ctx.user.lastName} (via copilot)`,
+    referenceId: row.id,
+    referenceType: "agent_action",
+  });
+  return row;
+}
+
+// ---------------------------------------------------------------------------
+// 8. draft_journal_entry  (NEW — Step 6)
+// ---------------------------------------------------------------------------
+const JournalLineSchema = z
+  .object({
+    type: z.enum(["debit", "credit"]),
+    amount: z.number().positive().max(1_000_000_000),
+    account: z.string().min(1).max(200),
+    dimension: z.string().max(200).optional(),
+    description: z.string().max(500).optional(),
+  })
+  .strict();
+
+const draftJournalEntry: ToolDefinition<{
+  date: string;
+  memo: string;
+  lines: Array<z.infer<typeof JournalLineSchema>>;
+  proposedDimensions?: Record<string, string>;
+  policyEvidenceBasis: string;
+  confidence: "low" | "medium" | "high";
+  riskFlags?: string;
+}> = {
+  name: "draft_journal_entry",
+  description:
+    "Drafts a proposed journal entry for human review. NEVER posts to the ledger. NEVER changes balances. NEVER marks anything compliant. The draft is stored in agent_actions with status=pending_review and surfaces in the approvals UI. Validates that debits and credits balance to the cent before persisting; an unbalanced entry is rejected with an error and not saved. Use this when the user asks for a journal entry suggestion.",
+  argsSchema: z
+    .object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
+      memo: z.string().min(3).max(500),
+      lines: z.array(JournalLineSchema).min(2).max(40),
+      proposedDimensions: z.record(z.string(), z.string()).optional(),
+      policyEvidenceBasis: z.string().min(3).max(2000),
+      confidence: z.enum(["low", "medium", "high"]),
+      riskFlags: z.string().max(2000).optional(),
+    })
+    .strict(),
+  parametersJsonSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["date", "memo", "lines", "policyEvidenceBasis", "confidence"],
+    properties: {
+      date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+      memo: { type: "string", minLength: 3, maxLength: 500 },
+      lines: {
+        type: "array",
+        minItems: 2,
+        maxItems: 40,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["type", "amount", "account"],
+          properties: {
+            type: { type: "string", enum: ["debit", "credit"] },
+            amount: { type: "number", exclusiveMinimum: 0, maximum: 1_000_000_000 },
+            account: { type: "string", minLength: 1, maxLength: 200 },
+            dimension: { type: "string", maxLength: 200 },
+            description: { type: "string", maxLength: 500 },
+          },
+        },
+      },
+      proposedDimensions: {
+        type: "object",
+        additionalProperties: { type: "string" },
+      },
+      policyEvidenceBasis: { type: "string", minLength: 3, maxLength: 2000 },
+      confidence: { type: "string", enum: ["low", "medium", "high"] },
+      riskFlags: { type: "string", maxLength: 2000 },
+    },
+  },
+  async execute(args, ctx) {
+    // To-the-cent balance check using integer arithmetic to avoid float drift.
+    const cents = (n: number): number => Math.round(n * 100);
+    let debitsCents = 0;
+    let creditsCents = 0;
+    for (const l of args.lines) {
+      const c = cents(l.amount);
+      if (c <= 0) {
+        return {
+          ok: false,
+          error: `Invalid line amount ${l.amount} for ${l.account}; amounts must be > 0.`,
+        };
+      }
+      if (l.type === "debit") debitsCents += c;
+      else creditsCents += c;
+    }
+    if (debitsCents === 0 || creditsCents === 0) {
+      return {
+        ok: false,
+        error: "Journal entry must include at least one debit and one credit line.",
+      };
+    }
+    if (debitsCents !== creditsCents) {
+      return {
+        ok: false,
+        error: `Unbalanced journal entry: debits=${(debitsCents / 100).toFixed(2)} vs credits=${(creditsCents / 100).toFixed(2)}. Draft NOT saved. Fix the lines and try again.`,
+      };
+    }
+    const totalAmount = debitsCents / 100;
+    if (ctx.dryRun) {
+      return {
+        ok: true,
+        data: {
+          dry_run: true,
+          would_have_drafted: true,
+          totals: { debits: totalAmount, credits: totalAmount, balanced: true },
+          note: "Preview only — no agent_action row written.",
+        },
+      };
+    }
+    const payload = {
+      date: args.date,
+      memo: args.memo,
+      lines: args.lines,
+      totals: {
+        debits: Number((debitsCents / 100).toFixed(2)),
+        credits: Number((creditsCents / 100).toFixed(2)),
+        balanced: true,
+      },
+      proposed_dimensions: args.proposedDimensions ?? {},
+      policy_evidence_basis: args.policyEvidenceBasis,
+      ledger_posted: false,
+      ledger_posting_supported: false,
+    };
+    const row = await persistAgentAction(ctx, {
+      actionType: "draft_journal_entry",
+      payload,
+      confidence: args.confidence,
+      riskFlags: args.riskFlags ?? null,
+      policyEvidenceBasis: args.policyEvidenceBasis,
+    });
+    return {
+      ok: true,
+      data: {
+        agent_action_id: row.id,
+        action_type: "draft_journal_entry",
+        status: "pending_review",
+        ledger_posted: false,
+        requires_human_review: true,
+        totals: payload.totals,
+        note: "Draft saved for human review. Nothing was posted to any ledger and no balances changed.",
+      },
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// 9. draft_memo  (Step 6 — now persisted to agent_actions)
+// ---------------------------------------------------------------------------
+const draftMemo: ToolDefinition<{
+  topic: string;
+  audience: string;
+  body: string;
+  evidenceUsed?: string;
+  missingInformation?: string;
+}> = {
+  name: "draft_memo",
+  description:
+    "Drafts an accounting memo for human review. NEVER sends, emails, or distributes the memo. NEVER posts to any ledger. The draft is stored in agent_actions with status=pending_review. Use this when the user asks for a memo or written narrative.",
+  argsSchema: z
+    .object({
+      topic: z.string().min(2).max(200),
+      audience: z.string().min(2).max(200),
+      body: z.string().min(10).max(8000),
+      evidenceUsed: z.string().max(2000).optional(),
+      missingInformation: z.string().max(2000).optional(),
+    })
+    .strict(),
+  parametersJsonSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["topic", "audience", "body"],
+    properties: {
+      topic: { type: "string", minLength: 2, maxLength: 200 },
+      audience: { type: "string", minLength: 2, maxLength: 200 },
+      body: { type: "string", minLength: 10, maxLength: 8000 },
+      evidenceUsed: { type: "string", maxLength: 2000 },
+      missingInformation: { type: "string", maxLength: 2000 },
+    },
+  },
+  async execute(args, ctx) {
+    if (ctx.dryRun) {
+      return {
+        ok: true,
+        data: {
+          dry_run: true,
+          would_have_drafted: true,
+          topic: args.topic,
+          audience: args.audience,
+          note: "Preview only — no agent_action row written.",
+        },
+      };
+    }
+    const payload = {
+      topic: args.topic,
+      audience: args.audience,
+      body: args.body,
+      evidence_used: args.evidenceUsed ?? null,
+      missing_information: args.missingInformation ?? null,
+      delivered: false,
+    };
+    const row = await persistAgentAction(ctx, {
+      actionType: "draft_memo",
+      payload,
+      policyEvidenceBasis: args.evidenceUsed ?? null,
+    });
+    return {
+      ok: true,
+      data: {
+        agent_action_id: row.id,
+        action_type: "draft_memo",
+        status: "pending_review",
+        delivered: false,
+        requires_human_review: true,
+        note: "Memo draft saved for human review. Nothing was sent or distributed.",
+      },
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// 10. create_followup_task (Step 6 — now approval-gated)
+// ---------------------------------------------------------------------------
+const createFollowupTask: ToolDefinition<{
+  title: string;
+  body: string;
+  dueHint?: string;
+}> = {
+  name: "create_followup_task",
+  description:
+    "Drafts a follow-up reminder for the current user. The reminder notification is NOT created until a human reviewer approves the draft in the approvals UI. Use this to capture an action item that requires the user to take a follow-up step.",
+  argsSchema: z
+    .object({
+      title: z.string().min(3).max(200),
+      body: z.string().min(3).max(2000),
+      dueHint: z.string().max(200).optional(),
+    })
+    .strict(),
+  parametersJsonSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["title", "body"],
+    properties: {
+      title: { type: "string", minLength: 3, maxLength: 200 },
+      body: { type: "string", minLength: 3, maxLength: 2000 },
+      dueHint: { type: "string", maxLength: 200 },
+    },
+  },
+  async execute(args, ctx) {
+    if (ctx.dryRun) {
+      return {
+        ok: true,
+        data: {
+          dry_run: true,
+          would_have_drafted: true,
+          assigned_to_user_id: ctx.user.id,
+          note: "Preview only — no agent_action row written.",
+        },
+      };
+    }
+    const payload = {
+      title: args.title,
+      body: args.body,
+      due_hint: args.dueHint ?? null,
+      assigned_to_user_id: ctx.user.id,
+      assigned_to_email: ctx.user.email,
+      notification_created: false,
+    };
+    const row = await persistAgentAction(ctx, {
+      actionType: "create_followup_task",
+      payload,
+    });
+    return {
+      ok: true,
+      data: {
+        agent_action_id: row.id,
+        action_type: "create_followup_task",
+        status: "pending_review",
+        notification_created: false,
+        requires_human_review: true,
+        note: "Follow-up task draft saved for review. The reminder will only be sent after a human approves the draft.",
+      },
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// 11. escalate_to_human (Step 6 — also tracked in agent_actions)
+//
+// Escalation differs from the other three drafting tools: the entire purpose
+// of the call is to put a notification in front of an admin RIGHT NOW, so we
+// fire admin notifications immediately AND record an agent_action so the
+// escalation has the same audit/review surface as other drafts. The
+// "approve" action becomes "acknowledge"; "reject" becomes "dismiss".
 // ---------------------------------------------------------------------------
 const escalateToHuman: ToolDefinition<{
   reason: string;
@@ -547,7 +910,7 @@ const escalateToHuman: ToolDefinition<{
 }> = {
   name: "escalate_to_human",
   description:
-    "Escalates a question or situation to a human accountant by creating a notification for all admin users. Use only when the situation genuinely requires human judgment, accounting review, or oversight. Does NOT make any ledger or approval changes.",
+    "Escalates the current question to human accountants. Immediately creates a notification for all admin users AND records an entry in agent_actions for review/acknowledgement. Does NOT change any ledger, balance, approval, or compliance status. Use only when human judgment is genuinely required.",
   argsSchema: z
     .object({
       reason: z.string().min(10).max(2000),
@@ -576,7 +939,6 @@ const escalateToHuman: ToolDefinition<{
       return { ok: false, error: "No active admin users to escalate to." };
     }
     const title = `Copilot escalation (${args.severity}) from ${ctx.user.firstName} ${ctx.user.lastName}`;
-    const body = args.reason;
     if (ctx.dryRun) {
       return {
         ok: true,
@@ -597,131 +959,39 @@ const escalateToHuman: ToolDefinition<{
           userId: a.id,
           type: "copilot_escalation",
           title,
-          body,
-          link: `/accounting`,
+          body: args.reason,
+          link: `/approvals/copilot`,
           referenceType: args.referenceType ?? "copilot_thread",
           referenceId: args.referenceId ?? ctx.threadId,
           emailTo: a.email,
         })),
       )
       .returning({ id: notificationsTable.id, userId: notificationsTable.userId });
+    const payload = {
+      reason: args.reason,
+      severity: args.severity,
+      reference_type: args.referenceType ?? null,
+      reference_id: args.referenceId ?? null,
+      notified_user_ids: admins.map((a) => a.id),
+      notification_ids: inserted.map((r) => r.id),
+      acknowledged: false,
+    };
+    const row = await persistAgentAction(ctx, {
+      actionType: "escalate_to_human",
+      payload,
+      riskFlags: `severity:${args.severity}`,
+    });
     return {
       ok: true,
       data: {
+        agent_action_id: row.id,
+        action_type: "escalate_to_human",
+        status: "pending_review",
         escalated: true,
         severity: args.severity,
         recipient_count: admins.length,
         notification_ids: inserted.map((r) => r.id),
-      },
-    };
-  },
-};
-
-// ---------------------------------------------------------------------------
-// 9. create_followup_task
-// ---------------------------------------------------------------------------
-const createFollowupTask: ToolDefinition<{
-  title: string;
-  body: string;
-  assignToSelf?: boolean;
-}> = {
-  name: "create_followup_task",
-  description:
-    "Creates a follow-up reminder for the current user (or, if assignToSelf=false, defaults to the current user — assigning to others is not yet supported). The reminder is delivered as a notification. Does NOT make any ledger or approval changes.",
-  argsSchema: z
-    .object({
-      title: z.string().min(3).max(200),
-      body: z.string().min(3).max(2000),
-      assignToSelf: z.boolean().optional(),
-    })
-    .strict(),
-  parametersJsonSchema: {
-    type: "object",
-    additionalProperties: false,
-    required: ["title", "body"],
-    properties: {
-      title: { type: "string", minLength: 3, maxLength: 200 },
-      body: { type: "string", minLength: 3, maxLength: 2000 },
-      assignToSelf: { type: "boolean", default: true },
-    },
-  },
-  async execute(args, ctx) {
-    if (ctx.dryRun) {
-      return {
-        ok: true,
-        data: {
-          dry_run: true,
-          would_have_created: true,
-          would_have_assigned_to_user_id: ctx.user.id,
-          title: `Follow-up: ${args.title}`,
-          body: args.body,
-          note: "No notification was created because this call ran in preview mode.",
-        },
-      };
-    }
-    const [n] = await db
-      .insert(notificationsTable)
-      .values({
-        userId: ctx.user.id,
-        type: "copilot_followup",
-        title: `Follow-up: ${args.title}`,
-        body: args.body,
-        link: `/accounting`,
-        referenceType: "copilot_thread",
-        referenceId: ctx.threadId,
-        emailTo: null,
-      })
-      .returning({ id: notificationsTable.id });
-    return {
-      ok: true,
-      data: {
-        created: true,
-        notification_id: n?.id,
-        assigned_to_user_id: ctx.user.id,
-      },
-    };
-  },
-};
-
-// ---------------------------------------------------------------------------
-// 10. draft_memo
-// ---------------------------------------------------------------------------
-const draftMemo: ToolDefinition<{
-  topic: string;
-  audience: string;
-  body: string;
-}> = {
-  name: "draft_memo",
-  description:
-    "Records a draft memo for the user to review. The memo is returned to the assistant for confirmation and shown to the user as a draft artifact in the chat. NOT persisted to any ledger; NOT sent anywhere; the user must copy it themselves.",
-  argsSchema: z
-    .object({
-      topic: z.string().min(2).max(200),
-      audience: z.string().min(2).max(200),
-      body: z.string().min(10).max(8000),
-    })
-    .strict(),
-  parametersJsonSchema: {
-    type: "object",
-    additionalProperties: false,
-    required: ["topic", "audience", "body"],
-    properties: {
-      topic: { type: "string", minLength: 2, maxLength: 200 },
-      audience: { type: "string", minLength: 2, maxLength: 200 },
-      body: { type: "string", minLength: 10, maxLength: 8000 },
-    },
-  },
-  async execute(args) {
-    return {
-      ok: true,
-      data: {
-        artifact_type: "draft_memo",
-        topic: args.topic,
-        audience: args.audience,
-        body: args.body,
-        persisted: false,
-        delivered: false,
-        note: "Draft only. Not saved or sent. User must copy to use.",
+        note: "Admins were notified and an agent_action row was created for acknowledgement.",
       },
     };
   },
@@ -739,9 +1009,10 @@ const TOOLS = [
   getReconciliationStatus,
   searchChartOfAccounts,
   searchInternalPolicies,
-  escalateToHuman,
-  createFollowupTask,
+  draftJournalEntry,
   draftMemo,
+  createFollowupTask,
+  escalateToHuman,
 ] as const;
 
 export const TOOL_NAMES = TOOLS.map((t) => t.name);

@@ -11,6 +11,7 @@ import type { ComponentType, ReactNode } from "react";
 // Import pages
 import Dashboard from "@/pages/dashboard";
 import Approvals from "@/pages/approvals";
+import CopilotApprovalsPage from "@/pages/approvals-copilot";
 import ExpensesList from "@/pages/expenses/index";
 import ExpenseNew from "@/pages/expenses/new";
 import ExpenseDetail from "@/pages/expenses/detail";
@@ -70,6 +71,7 @@ function AppRoutes() {
       <Switch>
         {route("/", "dashboard", Dashboard)}
         {route("/approvals", "approvals", Approvals)}
+        {route("/approvals/copilot", "approvals", CopilotApprovalsPage)}
 
         {route("/expenses", "expenses", ExpensesList)}
         {route("/expenses/new", "expenses", ExpenseNew)}

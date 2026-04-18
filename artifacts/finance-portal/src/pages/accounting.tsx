@@ -61,6 +61,15 @@ type CopilotMessage = {
   createdAt: string;
   toolCalls?: ToolCall[];
   sources?: SourceCitation[];
+  agentActions?: AgentActionSummary[];
+};
+
+type AgentActionSummary = {
+  id: number;
+  actionType: string;
+  status: string;
+  confidence: string | null;
+  payload: Record<string, unknown> | null;
 };
 
 type SourceCitation = {
@@ -680,6 +689,45 @@ function AssistantCard({ m }: { m: CopilotMessage }) {
               </div>
             </CollapsibleContent>
           </Collapsible>
+        )}
+
+        {/* Agent actions (Step 6 — drafts pending review) */}
+        {m.agentActions && m.agentActions.length > 0 && (
+          <div className="mt-2 space-y-1.5 rounded border border-amber-200 bg-amber-50/60 p-2">
+            <div className="flex items-center justify-between text-xs font-medium text-amber-900">
+              <span>Drafts created ({m.agentActions.length})</span>
+              <a
+                href="/approvals/copilot"
+                className="text-amber-800 underline hover:text-amber-950"
+                data-testid="link-copilot-approvals"
+              >
+                Review in approvals →
+              </a>
+            </div>
+            <ul className="space-y-1">
+              {m.agentActions.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex items-center gap-2 text-xs text-amber-900"
+                  data-testid={`msg-action-${a.id}`}
+                >
+                  <span className="rounded bg-amber-200 px-1.5 py-0.5 font-mono text-[10px] uppercase">
+                    {a.status.replace("_", " ")}
+                  </span>
+                  <span className="font-medium">
+                    {a.actionType.replace(/_/g, " ")}
+                  </span>
+                  {a.confidence ? (
+                    <span className="text-amber-700">({a.confidence})</span>
+                  ) : null}
+                  <span className="ml-auto text-amber-700">#{a.id}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="text-[10px] text-amber-800">
+              No ledger posting, balance change, or external send occurred. Drafts only.
+            </div>
+          </div>
         )}
 
         {/* Tool calls */}
