@@ -195,7 +195,17 @@ export async function seedChartOfAccountsAndSettings(): Promise<{
       // postings cannot reference them — they exist purely to preserve
       // historical linkage.
       unmapped.add(raw);
-      const placeholderCode = `LEGACY-${raw.trim().slice(0, 32)}`;
+      // Deterministic, collision-resistant placeholder code: short prefix
+      // of the legacy string + 10-hex-char SHA-256 suffix so distinct
+      // legacy strings sharing the same first 32 chars get distinct CoA
+      // rows (and re-running the backfill is idempotent).
+      const { createHash } = await import("node:crypto");
+      const hash = createHash("sha256")
+        .update(raw)
+        .digest("hex")
+        .slice(0, 10);
+      const safePrefix = raw.trim().slice(0, 24).replace(/[^A-Za-z0-9._\- ]/g, "_");
+      const placeholderCode = `LEGACY-${safePrefix}-${hash}`;
       const [created] = await db
         .insert(chartOfAccountsTable)
         .values({

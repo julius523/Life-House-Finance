@@ -9,6 +9,7 @@ import {
   journalEntriesTable,
   journalEntryLinesTable,
   chartOfAccountsTable,
+  activityLogTable,
 } from "@workspace/db";
 import { sql, and, gte, lte, eq, asc } from "drizzle-orm";
 import { z } from "zod";
@@ -684,6 +685,24 @@ router.get("/reports/trial-balance", async (req, res): Promise<void> => {
     (s, r) => s + Math.round(parseFloat(r.credits) * 100),
     0,
   );
+
+  // Step 9 — audit-log every Trial Balance generation so reviewers can see
+  // who pulled which date range. Failures here must not break the report.
+  try {
+    const u = req.authUser;
+    const actor =
+      u && (u.firstName || u.lastName)
+        ? [u.firstName, u.lastName].filter(Boolean).join(" ").trim()
+        : (u?.email ?? "system");
+    await db.insert(activityLogTable).values({
+      type: "report.trial_balance",
+      description: `Generated Trial Balance for ${fromDate ?? "(beginning)"} → ${toDate ?? "(today)"} — ${rows.length} accounts, ${totalDebitsCents === totalCreditsCents ? "balanced" : `IMBALANCED by ${(totalDebitsCents - totalCreditsCents) / 100}`}`,
+      actor,
+      referenceType: "trial_balance",
+    });
+  } catch (err) {
+    req.log?.warn({ err }, "failed to audit-log trial balance");
+  }
 
   res.json({
     fromDate: fromDate ?? null,

@@ -16,13 +16,14 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
-import { and, asc, eq, ilike, or, sql, isNotNull } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, or, sql, isNotNull } from "drizzle-orm";
 import {
   db,
   chartOfAccountsTable,
   accountingSettingsTable,
   journalEntryLinesTable,
   activityLogTable,
+  agentActionsTable,
   ACCOUNT_TYPES,
   NORMAL_BALANCES,
   ACCOUNTING_METHODS,
@@ -298,6 +299,36 @@ router.patch(
     if (parsed.data.parentAccountId === id) {
       res.status(400).json({ error: "parentAccountId cannot equal id" });
       return;
+    }
+    // Step 9 — guard archive against accounts referenced by unposted /
+    // pending agent_action drafts. Posted JE lines are fine (archive only
+    // hides from future selection); but a pending draft about to be posted
+    // referencing a now-archived account would silently fail validation.
+    if (parsed.data.isActive === false && existing.isActive) {
+      const draftRows = await db
+        .select({ id: agentActionsTable.id })
+        .from(agentActionsTable)
+        .where(
+          and(
+            eq(agentActionsTable.actionType, "draft_journal_entry"),
+            inArray(agentActionsTable.status, [
+              "pending_review",
+              "approved",
+            ]),
+            sql`${agentActionsTable.payload}::text ILIKE ${
+              "%\"account_code\":\"" + existing.code + "\"%"
+            }`,
+          ),
+        )
+        .limit(5);
+      if (draftRows.length > 0) {
+        res.status(409).json({
+          error: `Cannot archive: account ${existing.code} is referenced by ${draftRows.length} pending journal-entry draft(s). Resolve or reject those drafts first.`,
+          code: "REFERENCED_BY_PENDING_DRAFT",
+          pendingDraftIds: draftRows.map((d) => d.id),
+        });
+        return;
+      }
     }
     if (parsed.data.parentAccountId) {
       const [parent] = await db
