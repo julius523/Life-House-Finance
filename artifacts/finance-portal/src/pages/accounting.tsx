@@ -59,6 +59,18 @@ type CopilotMessage = {
   latencyMs: number | null;
   errorCode: string | null;
   createdAt: string;
+  toolCalls?: ToolCall[];
+};
+
+type ToolCall = {
+  id: number;
+  toolName: string;
+  arguments: unknown;
+  result: unknown;
+  status: "ok" | "error";
+  errorMessage: string | null;
+  latencyMs: number | null;
+  createdAt: string;
 };
 
 type PageContext = {
@@ -639,12 +651,108 @@ function AssistantCard({ m }: { m: CopilotMessage }) {
           })}
         </div>
 
+        {/* Tool calls */}
+        {m.toolCalls && m.toolCalls.length > 0 && (
+          <Collapsible defaultOpen={false}>
+            <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground pt-1">
+              <ChevronDown className="h-3 w-3 transition-transform data-[state=closed]:-rotate-90" />
+              Tools used ({m.toolCalls.length})
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="space-y-1.5 mt-1 pl-4">
+                {m.toolCalls.map((tc) => (
+                  <ToolCallRow key={tc.id} tc={tc} />
+                ))}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+
         {/* Footer */}
         <div className="text-[10px] text-muted-foreground pt-1 border-t mt-2">
           {m.modelName ?? "model"}
           {m.latencyMs !== null && ` · ${m.latencyMs}ms`}
+          {m.toolCalls && m.toolCalls.length > 0 && ` · ${m.toolCalls.length} tool call${m.toolCalls.length === 1 ? "" : "s"}`}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ToolCallRow({ tc }: { tc: ToolCall }) {
+  const [open, setOpen] = useState(false);
+  const isMemo =
+    tc.toolName === "draft_memo" &&
+    tc.status === "ok" &&
+    tc.result !== null &&
+    typeof tc.result === "object" &&
+    "body" in (tc.result as Record<string, unknown>);
+  const isEscalation =
+    tc.toolName === "escalate_to_human" && tc.status === "ok";
+  const isFollowup =
+    tc.toolName === "create_followup_task" && tc.status === "ok";
+  return (
+    <div className="rounded border bg-muted/40 p-2 text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 w-full text-left"
+      >
+        <ChevronDown
+          className={`h-3 w-3 transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+        <span className="font-mono">{tc.toolName}</span>
+        {tc.status === "error" ? (
+          <Badge variant="destructive">error</Badge>
+        ) : isEscalation ? (
+          <Badge className="bg-red-100 text-red-800 border-red-300">
+            escalated
+          </Badge>
+        ) : isFollowup ? (
+          <Badge className="bg-blue-100 text-blue-800 border-blue-300">
+            follow-up created
+          </Badge>
+        ) : isMemo ? (
+          <Badge variant="secondary">draft memo</Badge>
+        ) : (
+          <Badge variant="outline">ok</Badge>
+        )}
+        <span className="text-muted-foreground ml-auto">
+          {tc.latencyMs ?? 0}ms
+        </span>
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          {isMemo && (
+            <div>
+              <div className="text-[10px] uppercase text-muted-foreground mb-1">
+                Memo body (draft only — not saved or sent)
+              </div>
+              <pre className="whitespace-pre-wrap break-words rounded border bg-background p-2 text-xs font-sans">
+                {String((tc.result as { body: string }).body)}
+              </pre>
+            </div>
+          )}
+          <div>
+            <div className="text-[10px] uppercase text-muted-foreground mb-1">
+              Arguments
+            </div>
+            <pre className="whitespace-pre-wrap break-words rounded border bg-background p-2 text-[11px] font-mono max-h-40 overflow-auto">
+              {JSON.stringify(tc.arguments, null, 2)}
+            </pre>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase text-muted-foreground mb-1">
+              Result {tc.status === "error" ? "(error)" : ""}
+            </div>
+            <pre className="whitespace-pre-wrap break-words rounded border bg-background p-2 text-[11px] font-mono max-h-60 overflow-auto">
+              {tc.status === "error"
+                ? tc.errorMessage ?? "(no message)"
+                : JSON.stringify(tc.result, null, 2)}
+            </pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

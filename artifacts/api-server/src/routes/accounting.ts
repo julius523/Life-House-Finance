@@ -6,10 +6,21 @@ import {
   db,
   copilotThreadsTable,
   copilotMessagesTable,
+  copilotToolCallsTable,
   type CopilotMessageRow,
   type CopilotThreadRow,
+  type CopilotToolCallRow,
 } from "@workspace/db";
 import { requireAuth } from "../lib/auth";
+import {
+  getOpenAIToolDefinitions,
+  runTool,
+  type CopilotToolContext,
+  type PageContextLike,
+} from "../lib/copilotTools";
+
+const MAX_TOOL_ITERATIONS = 5;
+const MAX_TOTAL_TOOL_CALLS = 12;
 
 const router: IRouter = Router();
 
@@ -37,6 +48,10 @@ Non-negotiable rules:
 8. Prefer internal consistency, documentation, and traceability over speed.
 9. Note when nonprofit treatment may differ from for-profit presentation.
 10. When the user provides page context describing what they are currently looking at, treat it as authoritative read-only background — do not invent details beyond what is provided.
+11. You have read-only tools to inspect Life House records (current page record, programs, vendors, open approvals, missing receipts, reconciliation status, search). Call them whenever the user's question depends on actual Life House data — do NOT guess at what records exist. Tool results are the only authoritative internal data source you currently have.
+12. There is no formal chart of accounts integration yet. If a question depends on a chart of accounts, call search_chart_of_accounts (which returns programs as a proxy) AND state the limitation explicitly in "missing_information".
+13. Use escalate_to_human only when human accountant judgment, oversight, or sign-off is genuinely required. Use create_followup_task to leave the current user an actionable reminder. Use draft_memo to produce a draft document the user can copy — never claim a memo was sent or saved.
+14. Tool side effects are limited to creating notification records (escalations / follow-ups). Tools cannot post journal entries, change balances, change approval status, send email externally, or alter any record.
 
 You MUST respond with a single JSON object that strictly matches the response schema. Use the literal string "None" in any narrative field that genuinely does not apply. Do not use Markdown headings inside fields — the UI provides the structure.`;
 
@@ -276,6 +291,32 @@ function deriveTitle(message: string): string {
   return flat.length <= 60 ? flat : `${flat.slice(0, 57)}…`;
 }
 
+async function linkToolCallsToMessage(
+  toolCallIds: number[],
+  assistantMessageId: number,
+): Promise<void> {
+  if (toolCallIds.length === 0) return;
+  await db
+    .update(copilotToolCallsTable)
+    .set({ assistantMessageId })
+    .where(sql`${copilotToolCallsTable.id} = ANY(${toolCallIds})`);
+}
+
+function serializeToolCall(t: CopilotToolCallRow): Record<string, unknown> {
+  return {
+    id: t.id,
+    threadId: t.threadId,
+    assistantMessageId: t.assistantMessageId,
+    toolName: t.toolName,
+    arguments: t.arguments,
+    result: t.result,
+    status: t.status,
+    errorMessage: t.errorMessage,
+    latencyMs: t.latencyMs,
+    createdAt: t.createdAt,
+  };
+}
+
 function classifyError(err: unknown): {
   status: number;
   code: string;
@@ -364,9 +405,24 @@ router.get("/accounting/threads/:id", async (req, res): Promise<void> => {
     .from(copilotMessagesTable)
     .where(eq(copilotMessagesTable.threadId, threadId))
     .orderBy(asc(copilotMessagesTable.id));
+  const toolCalls = await db
+    .select()
+    .from(copilotToolCallsTable)
+    .where(eq(copilotToolCallsTable.threadId, threadId))
+    .orderBy(asc(copilotToolCallsTable.id));
+  const callsByMsg = new Map<number, CopilotToolCallRow[]>();
+  for (const c of toolCalls) {
+    if (c.assistantMessageId == null) continue;
+    const arr = callsByMsg.get(c.assistantMessageId) ?? [];
+    arr.push(c);
+    callsByMsg.set(c.assistantMessageId, arr);
+  }
   res.json({
     thread: serializeThread(thread),
-    messages: messages.map(serializeMessage),
+    messages: messages.map((m) => ({
+      ...serializeMessage(m),
+      toolCalls: (callsByMsg.get(m.id) ?? []).map(serializeToolCall),
+    })),
   });
 });
 
@@ -517,11 +573,18 @@ router.post(
     input.push({ role: "user", content: message });
 
     const startedAt = Date.now();
+    const toolCallLogIds: number[] = [];
+    const toolCtx: CopilotToolContext = {
+      user: req.authUser!,
+      pageContext: (pageContext ?? null) as PageContextLike | null,
+      threadId,
+    };
     try {
-      const response = await openai.responses.create({
+      let response = await openai.responses.create({
         model: AGENT_MODEL,
         instructions: AGENT_INSTRUCTIONS,
-        input,
+        input: input as never,
+        tools: getOpenAIToolDefinitions() as never,
         reasoning: { effort: "low", summary: "auto" },
         text: {
           format: {
@@ -538,6 +601,85 @@ router.post(
           thread_id: String(threadId),
         },
       });
+
+      let totalToolCalls = 0;
+      for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+        const calls = ((response.output ?? []) as Array<Record<string, unknown>>).filter(
+          (o) => o["type"] === "function_call",
+        );
+        if (calls.length === 0) break;
+        if (totalToolCalls + calls.length > MAX_TOTAL_TOOL_CALLS) break;
+        totalToolCalls += calls.length;
+
+        const toolOutputs: Array<{
+          type: "function_call_output";
+          call_id: string;
+          output: string;
+        }> = [];
+
+        for (const call of calls) {
+          const name = String(call["name"]);
+          const callId = String(call["call_id"]);
+          const argsRaw = String(call["arguments"] ?? "{}");
+          let parsedArgs: unknown = {};
+          try {
+            parsedArgs = JSON.parse(argsRaw);
+          } catch {
+            parsedArgs = { __parse_error: true };
+          }
+          const t0 = Date.now();
+          const toolResult = await runTool(name, parsedArgs, toolCtx);
+          const latency = Date.now() - t0;
+
+          const [logRow] = await db
+            .insert(copilotToolCallsTable)
+            .values({
+              threadId,
+              userId,
+              toolName: name,
+              arguments: parsedArgs as Record<string, unknown>,
+              result: toolResult.ok
+                ? (toolResult.data as Record<string, unknown>)
+                : { error: toolResult.error },
+              status: toolResult.ok ? "ok" : "error",
+              errorMessage: toolResult.ok ? null : toolResult.error,
+              latencyMs: latency,
+            })
+            .returning({ id: copilotToolCallsTable.id });
+          if (logRow) toolCallLogIds.push(logRow.id);
+
+          toolOutputs.push({
+            type: "function_call_output",
+            call_id: callId,
+            output: JSON.stringify(
+              toolResult.ok ? toolResult.data : { error: toolResult.error },
+            ),
+          });
+        }
+
+        response = await openai.responses.create({
+          model: AGENT_MODEL,
+          tools: getOpenAIToolDefinitions() as never,
+          input: toolOutputs as never,
+          previous_response_id: response.id,
+          reasoning: { effort: "low", summary: "auto" },
+          text: {
+            format: {
+              type: "json_schema",
+              name: "gaap_copilot_reply",
+              strict: true,
+              schema: RESPONSE_SCHEMA,
+            },
+          },
+          store: true,
+          metadata: {
+            agent_name: "Life House GAAP Copilot",
+            user_id: String(userId),
+            thread_id: String(threadId),
+            iteration: String(iter + 1),
+          },
+        });
+      }
 
       const latencyMs = Date.now() - startedAt;
       const text = (response.output_text ?? "").trim();
@@ -560,6 +702,7 @@ router.post(
             latencyMs,
           })
           .returning();
+        await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
         res.status(502).json({
           userMessage: serializeMessage(userMessage!),
           assistantMessage: serializeMessage(assistantRow!),
@@ -595,6 +738,7 @@ router.post(
             rawResponseJson: parsedJson as Record<string, unknown>,
           })
           .returning();
+        await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
         res.status(502).json({
           userMessage: serializeMessage(userMessage!),
           assistantMessage: serializeMessage(assistantRow!),
@@ -622,6 +766,14 @@ router.post(
         })
         .returning();
 
+      await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
+
+      const linkedToolCalls = await db
+        .select()
+        .from(copilotToolCallsTable)
+        .where(eq(copilotToolCallsTable.assistantMessageId, assistantRow!.id))
+        .orderBy(asc(copilotToolCallsTable.id));
+
       await db
         .update(copilotThreadsTable)
         .set({ updatedAt: new Date() })
@@ -629,7 +781,10 @@ router.post(
 
       res.json({
         userMessage: serializeMessage(userMessage!),
-        assistantMessage: serializeMessage(assistantRow!),
+        assistantMessage: {
+          ...serializeMessage(assistantRow!),
+          toolCalls: linkedToolCalls.map(serializeToolCall),
+        },
       });
     } catch (err) {
       req.log.error({ err }, "Accounting copilot run failed");
@@ -646,12 +801,72 @@ router.post(
           latencyMs,
         })
         .returning();
+      await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
       res.status(cls.status).json({
         userMessage: serializeMessage(userMessage!),
         assistantMessage: serializeMessage(assistantRow!),
         error: cls.user,
       });
     }
+  },
+);
+
+// Admin diagnostics — exercise a single tool without invoking the model.
+// Useful when OpenAI billing is unavailable but you still want to verify the
+// tool registry, validation, and audit-log path. Tool side effects DO occur
+// (escalations / follow-ups will create real notification rows). The call is
+// logged to copilot_tool_calls just like any model-driven call.
+router.post(
+  "/accounting/diagnostics/tool-dry-run",
+  async (req, res): Promise<void> => {
+    if (req.authUser?.role !== "admin") {
+      res.status(403).json({ error: "Admins only" });
+      return;
+    }
+    const Body = z
+      .object({
+        threadId: z.number().int().positive(),
+        toolName: z.string().min(1),
+        arguments: z.unknown().optional(),
+        pageContext: PageContextSchema.optional(),
+      })
+      .strict();
+    const parsed = Body.safeParse(req.body);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ error: parsed.error.issues[0]?.message ?? "Invalid body" });
+      return;
+    }
+    const { threadId, toolName, arguments: args, pageContext } = parsed.data;
+    const thread = await loadOwnedThread(threadId, req.authUser!.id);
+    if (!thread) {
+      res.status(404).json({ error: "Thread not found" });
+      return;
+    }
+    const t0 = Date.now();
+    const result = await runTool(toolName, args ?? {}, {
+      user: req.authUser!,
+      pageContext: (pageContext ?? null) as PageContextLike | null,
+      threadId,
+    });
+    const latencyMs = Date.now() - t0;
+    const [logRow] = await db
+      .insert(copilotToolCallsTable)
+      .values({
+        threadId,
+        userId: req.authUser!.id,
+        toolName,
+        arguments: (args ?? {}) as Record<string, unknown>,
+        result: result.ok
+          ? (result.data as Record<string, unknown>)
+          : { error: result.error },
+        status: result.ok ? "ok" : "error",
+        errorMessage: result.ok ? null : result.error,
+        latencyMs,
+      })
+      .returning();
+    res.json({ result, logRow });
   },
 );
 

@@ -15,3 +15,4 @@ export * from "./notifications";
 export * from "./email_settings";
 export * from "./copilot_threads";
 export * from "./copilot_messages";
+export * from "./copilot_tool_calls";
