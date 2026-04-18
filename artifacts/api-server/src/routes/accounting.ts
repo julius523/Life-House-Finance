@@ -325,7 +325,7 @@ async function linkToolCallsToMessage(
   await db
     .update(copilotToolCallsTable)
     .set({ assistantMessageId })
-    .where(sql`${copilotToolCallsTable.id} = ANY(${toolCallIds})`);
+    .where(inArray(copilotToolCallsTable.id, toolCallIds));
 }
 
 function serializeSource(s: CopilotMessageSourceRow): Record<string, unknown> {
