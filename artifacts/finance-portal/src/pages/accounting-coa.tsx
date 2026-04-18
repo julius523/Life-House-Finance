@@ -28,7 +28,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { apiJson } from "@/lib/api";
-import { Plus, Pencil, Archive, ArchiveRestore } from "lucide-react";
+import { Plus, Pencil, Archive, ArchiveRestore, Eye } from "lucide-react";
+import { Link } from "wouter";
 
 type Account = {
   id: number;
@@ -314,6 +315,16 @@ export default function AccountingCoaPage() {
                         )}
                       </td>
                       <td className="p-2 text-right space-x-1">
+                        <Link href={`/accounting/coa/${a.id}`}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            title="View account detail"
+                            data-testid={`coa-view-${a.id}`}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </Link>
                         {isAdmin && (
                           <>
                             <Button

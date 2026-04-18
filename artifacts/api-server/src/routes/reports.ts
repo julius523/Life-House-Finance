@@ -265,7 +265,11 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
     // ----- Ledger-based P&L ------------------------------------------------
     // Sum activity per CoA row over [fromDate, toDate]; revenue accounts net
     // credits − debits, expense accounts net debits − credits.
-    const plConds = [eq(journalEntriesTable.status, "posted")];
+    // Include reversed-original entries so reversal pairs net to zero in the
+    // ledger view (the inverse JE is itself status='posted').
+    const plConds = [
+      sql`${journalEntriesTable.status} in ('posted', 'reversed')`,
+    ];
     if (fromDate) plConds.push(gte(journalEntriesTable.entryDate, fromDate));
     if (toDate) plConds.push(lte(journalEntriesTable.entryDate, toDate));
     const plRows = await db
@@ -298,7 +302,9 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
     totalExpenses = uncategorizedExpenses;
 
     // ----- Ledger-based Balance Sheet (as of toDate) ----------------------
-    const bsConds = [eq(journalEntriesTable.status, "posted")];
+    const bsConds = [
+      sql`${journalEntriesTable.status} in ('posted', 'reversed')`,
+    ];
     if (toDate) bsConds.push(lte(journalEntriesTable.entryDate, toDate));
     const bsRows = await db
       .select({
@@ -552,8 +558,11 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
 // — this should always hold for a valid double-entry ledger; if it does not,
 // the report shows the imbalance so the operator can investigate.
 //
-// Only journal_entries with status='posted' are included. Reversal entries
-// are themselves status='posted' so they correctly net out the original.
+// Includes journal_entries with status IN ('posted','reversed'). When a JE is
+// reversed in this codebase the original row is flipped to status='reversed'
+// and an inverse JE is created with status='posted'. Including both ensures
+// reversed pairs net to zero in the Trial Balance instead of leaving the
+// inverse hanging as a one-sided debit/credit.
 // ---------------------------------------------------------------------------
 router.get("/reports/trial-balance", async (req, res): Promise<void> => {
   // Step 9 — Trial Balance is admin/approver only.
@@ -571,7 +580,9 @@ router.get("/reports/trial-balance", async (req, res): Promise<void> => {
   }
   const { fromDate, toDate } = parsed.data;
 
-  const conds = [eq(journalEntriesTable.status, "posted")];
+  const conds = [
+    sql`${journalEntriesTable.status} in ('posted', 'reversed')`,
+  ];
   if (fromDate) conds.push(gte(journalEntriesTable.entryDate, fromDate));
   if (toDate) conds.push(lte(journalEntriesTable.entryDate, toDate));
 
