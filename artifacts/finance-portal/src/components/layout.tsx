@@ -40,6 +40,8 @@ const NAV_ITEMS: Array<{
   { href: "/month-end", label: "Month End", icon: CalendarCheck, section: "month-end" },
   { href: "/reports", label: "Reports", icon: BarChart3, section: "reports" },
   { href: "/accounting", label: "Accounting", icon: Calculator, section: "accounting" },
+  { href: "/accounting/coa", label: "Chart of Accounts", icon: Calculator, section: "accounting" },
+  { href: "/accounting/settings", label: "Accounting Settings", icon: Calculator, section: "accounting" },
   { href: "/admin", label: "Admin", icon: Shield, section: "admin" },
 ];
 

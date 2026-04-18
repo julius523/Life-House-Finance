@@ -22,18 +22,20 @@
  * each case to the right HTTP code without re-parsing strings.
  */
 
-import { sql, and, eq, lte, gte } from "drizzle-orm";
+import { sql, and, eq, lte, gte, inArray } from "drizzle-orm";
 import {
   db,
   agentActionsTable,
   accountingPeriodsTable,
   journalEntriesTable,
   journalEntryLinesTable,
+  chartOfAccountsTable,
   activityLogTable,
   type AgentActionRow,
   type JournalEntryRow,
   type JournalEntryLineRow,
 } from "@workspace/db";
+import { extractCodeFromLegacyAccountString } from "./seedChartOfAccounts";
 
 export type PostingActor = {
   id: number;
@@ -52,6 +54,17 @@ type JournalLineInput = {
   memo?: unknown;
 };
 
+type ResolvedJournalLine = {
+  type: "debit" | "credit";
+  amount: number;
+  account: string;
+  /** Step 9: resolved & validated CoA row for this line. */
+  accountId: number;
+  program: string | null;
+  fund: string | null;
+  memo: string | null;
+};
+
 export type PostJournalEntryResult =
   | {
       kind: "ok";
@@ -66,6 +79,15 @@ export type PostJournalEntryResult =
   | { kind: "forbidden"; reason: string }
   | { kind: "invalid_payload"; reason: string }
   | { kind: "unbalanced"; debitsCents: number; creditsCents: number }
+  | {
+      kind: "invalid_account";
+      lineNo: number;
+      account: string;
+      reason:
+        | "unknown_account"
+        | "archived_account"
+        | "manual_posting_disabled";
+    }
   | {
       kind: "period_locked";
       entryDate: string;
@@ -171,44 +193,135 @@ async function allocateEntryNo(
   return `${prefix}${String(next).padStart(6, "0")}`;
 }
 
-function sanitizeLines(rawLines: unknown):
-  | { ok: true; lines: Array<Required<JournalLineInput>> }
-  | { ok: false; reason: string } {
+type SanitizeResult =
+  | { ok: true; lines: ResolvedJournalLine[] }
+  | { ok: false; reason: string }
+  | {
+      ok: false;
+      kind: "invalid_account";
+      lineNo: number;
+      account: string;
+      accountReason:
+        | "unknown_account"
+        | "archived_account"
+        | "manual_posting_disabled";
+    };
+
+/**
+ * Step 9 — sanitize + resolve every line against the live Chart of Accounts.
+ * Loads each distinct account string in a single query and returns the
+ * resolved CoA id alongside the immutable `account` text. Rejects unknown
+ * accounts, archived accounts, and accounts with allow_manual_posting=false.
+ */
+async function sanitizeLines(
+  tx: typeof db,
+  rawLines: unknown,
+): Promise<SanitizeResult> {
   if (!Array.isArray(rawLines) || rawLines.length === 0) {
     return { ok: false, reason: "JE payload has no lines." };
   }
-  const out: Array<Required<JournalLineInput>> = [];
+  type Pending = {
+    lineNo: number;
+    type: "debit" | "credit";
+    cents: number;
+    accountRaw: string;
+    accountKey: string;
+    program: string | null;
+    fund: string | null;
+    memo: string | null;
+  };
+  const pending: Pending[] = [];
   for (let i = 0; i < rawLines.length; i++) {
     const raw = rawLines[i] as JournalLineInput;
+    const lineNo = i + 1;
     if (!raw || typeof raw !== "object") {
-      return { ok: false, reason: `Line ${i + 1} is not an object.` };
+      return { ok: false, reason: `Line ${lineNo} is not an object.` };
     }
     if (raw.type !== "debit" && raw.type !== "credit") {
-      return { ok: false, reason: `Line ${i + 1} has invalid type.` };
+      return { ok: false, reason: `Line ${lineNo} has invalid type.` };
     }
-    if (typeof raw.account !== "string" || raw.account.length === 0) {
+    if (typeof raw.account !== "string" || raw.account.trim().length === 0) {
       return {
         ok: false,
-        reason: `Line ${i + 1} is missing an account code.`,
+        reason: `Line ${lineNo} is missing an account code.`,
       };
     }
     const cents = toCents(raw.amount);
     if (cents === null || cents <= 0) {
       return {
         ok: false,
-        reason: `Line ${i + 1} has invalid amount; must be positive.`,
+        reason: `Line ${lineNo} has invalid amount; must be positive.`,
       };
     }
-    out.push({
+    const accountRaw = raw.account.trim();
+    const accountKey =
+      extractCodeFromLegacyAccountString(accountRaw) ?? accountRaw;
+    pending.push({
+      lineNo,
       type: raw.type,
-      amount: cents / 100,
-      account: raw.account,
+      cents,
+      accountRaw,
+      accountKey,
       program: typeof raw.program === "string" ? raw.program : null,
       fund: typeof raw.fund === "string" ? raw.fund : null,
       memo: typeof raw.memo === "string" ? raw.memo : null,
     });
   }
-  return { ok: true, lines: out };
+
+  // Bulk-lookup all distinct codes in one query.
+  const distinctCodes = Array.from(new Set(pending.map((p) => p.accountKey)));
+  const coaRows = await tx
+    .select({
+      id: chartOfAccountsTable.id,
+      code: chartOfAccountsTable.code,
+      isActive: chartOfAccountsTable.isActive,
+      allowManualPosting: chartOfAccountsTable.allowManualPosting,
+    })
+    .from(chartOfAccountsTable)
+    .where(inArray(chartOfAccountsTable.code, distinctCodes));
+  const byCode = new Map(coaRows.map((r) => [r.code, r]));
+
+  const resolved: ResolvedJournalLine[] = [];
+  for (const p of pending) {
+    const hit = byCode.get(p.accountKey);
+    if (!hit) {
+      return {
+        ok: false,
+        kind: "invalid_account",
+        lineNo: p.lineNo,
+        account: p.accountRaw,
+        accountReason: "unknown_account",
+      };
+    }
+    if (!hit.isActive) {
+      return {
+        ok: false,
+        kind: "invalid_account",
+        lineNo: p.lineNo,
+        account: p.accountRaw,
+        accountReason: "archived_account",
+      };
+    }
+    if (!hit.allowManualPosting) {
+      return {
+        ok: false,
+        kind: "invalid_account",
+        lineNo: p.lineNo,
+        account: p.accountRaw,
+        accountReason: "manual_posting_disabled",
+      };
+    }
+    resolved.push({
+      type: p.type,
+      amount: p.cents / 100,
+      account: p.accountRaw,
+      accountId: hit.id,
+      program: p.program,
+      fund: p.fund,
+      memo: p.memo,
+    });
+  }
+  return { ok: true, lines: resolved };
 }
 
 // ---------------------------------------------------------------------------
@@ -297,8 +410,19 @@ export async function postApprovedJournalEntry(
         reason: "Draft is missing a memo.",
       };
     }
-    const sanitized = sanitizeLines(payload["lines"]);
+    const sanitized = await sanitizeLines(
+      tx as unknown as typeof db,
+      payload["lines"],
+    );
     if (!sanitized.ok) {
+      if ("kind" in sanitized && sanitized.kind === "invalid_account") {
+        return {
+          kind: "invalid_account" as const,
+          lineNo: sanitized.lineNo,
+          account: sanitized.account,
+          reason: sanitized.accountReason,
+        };
+      }
       return { kind: "invalid_payload" as const, reason: sanitized.reason };
     }
     const lines = sanitized.lines;
@@ -383,6 +507,7 @@ export async function postApprovedJournalEntry(
           type: ln.type,
           amountCents: toCents(ln.amount)!,
           account: ln.account,
+          accountId: ln.accountId,
           program: ln.program,
           fund: ln.fund,
           memo: ln.memo,

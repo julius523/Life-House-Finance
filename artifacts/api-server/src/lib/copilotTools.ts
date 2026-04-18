@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   db,
   billsTable,
@@ -15,6 +15,7 @@ import {
   copilotDocumentsTable,
   agentActionsTable,
   activityLogTable,
+  chartOfAccountsTable,
 } from "@workspace/db";
 import type { AuthUser } from "./auth";
 
@@ -460,21 +461,59 @@ const getReconciliationStatus: ToolDefinition<{ month?: string }> = {
 };
 
 // ---------------------------------------------------------------------------
-// 7. search_chart_of_accounts (proxied to programs)
+// 7. search_chart_of_accounts — Step 9: queries the real CoA.
 // ---------------------------------------------------------------------------
-const searchChartOfAccounts: ToolDefinition<{ query: string }> = {
+const searchChartOfAccounts: ToolDefinition<{
+  query: string;
+  includeArchived?: boolean;
+}> = {
   name: "search_chart_of_accounts",
   description:
-    "Searches the chart of accounts. NOTE: a formal chart of accounts is not yet integrated; this currently searches programs (the closest available analog). Always disclose this limitation in any answer that depends on the result.",
-  argsSchema: z.object({ query: z.string().min(1).max(120) }).strict(),
+    "Searches the Life House Chart of Accounts (real, not a proxy). Returns canonical accounts with code, name, type, normal balance, and posting eligibility. Use this when you need to confirm a code exists, narrow by name keyword, or include archived rows for historical lookups. Drafts must use codes from this list.",
+  argsSchema: z
+    .object({
+      query: z.string().min(1).max(120),
+      includeArchived: z.boolean().optional(),
+    })
+    .strict(),
   parametersJsonSchema: {
     type: "object",
     additionalProperties: false,
     required: ["query"],
-    properties: { query: { type: "string", minLength: 1, maxLength: 120 } },
+    properties: {
+      query: { type: "string", minLength: 1, maxLength: 120 },
+      includeArchived: { type: "boolean" },
+    },
   },
   async execute(args) {
     const q = `%${args.query}%`;
+    const conds = [
+      or(
+        ilike(chartOfAccountsTable.code, q),
+        ilike(chartOfAccountsTable.name, q),
+      )!,
+    ];
+    if (!args.includeArchived) {
+      conds.push(eq(chartOfAccountsTable.isActive, true));
+    }
+    const matches = await db
+      .select({
+        id: chartOfAccountsTable.id,
+        code: chartOfAccountsTable.code,
+        name: chartOfAccountsTable.name,
+        type: chartOfAccountsTable.type,
+        subtype: chartOfAccountsTable.subtype,
+        normalBalance: chartOfAccountsTable.normalBalance,
+        isActive: chartOfAccountsTable.isActive,
+        allowManualPosting: chartOfAccountsTable.allowManualPosting,
+        isSystem: chartOfAccountsTable.isSystem,
+      })
+      .from(chartOfAccountsTable)
+      .where(and(...conds))
+      .orderBy(asc(chartOfAccountsTable.code))
+      .limit(40);
+    // Also attach related internal program mappings — these are dimensions,
+    // NOT GL accounts, and the prompt explicitly tells the model that.
     const programMatches = await db
       .select({
         id: programsTable.id,
@@ -485,19 +524,18 @@ const searchChartOfAccounts: ToolDefinition<{ query: string }> = {
       })
       .from(programsTable)
       .where(or(ilike(programsTable.name, q), ilike(programsTable.code, q)))
-      .limit(20);
+      .limit(10);
     return {
       ok: true,
       data: {
-        no_formal_chart_of_accounts: true,
-        official_matches: [],
+        query: args.query,
+        accounts: matches,
         related_internal_mappings: programMatches.map((p) => ({
           mapping_type: "program",
           ...p,
         })),
-        disclosure:
-          "No formal chart of accounts is configured yet. Programs are NOT a chart of accounts — they are internal cost-center / fund codes. Do not present them as official GL accounts.",
-        query: args.query,
+        notes:
+          "Programs listed under related_internal_mappings are NOT GL accounts — they are program/fund dimensions used to tag JE lines (line.program). The GL code lives in `account_code`.",
       },
     };
   },
@@ -672,11 +710,21 @@ const JournalLineSchema = z
   .object({
     type: z.enum(["debit", "credit"]),
     amount: z.number().positive().max(1_000_000_000),
-    account: z.string().min(1).max(200),
+    /**
+     * Step 9: account_code is the canonical Chart of Accounts code (e.g.
+     * "6210"). Validated against the active CoA below. The legacy free-text
+     * `account` field is also accepted as a fallback so older copilot
+     * messages keep working, but the new contract is `account_code`.
+     */
+    account_code: z.string().min(1).max(64).optional(),
+    account: z.string().min(1).max(200).optional(),
     dimension: z.string().max(200).optional(),
     description: z.string().max(500).optional(),
   })
-  .strict();
+  .strict()
+  .refine((v) => v.account_code || v.account, {
+    message: "Each line must include account_code (or legacy account string).",
+  });
 
 const draftJournalEntry: ToolDefinition<{
   date: string;
@@ -715,10 +763,17 @@ const draftJournalEntry: ToolDefinition<{
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["type", "amount", "account"],
+          required: ["type", "amount", "account_code"],
           properties: {
             type: { type: "string", enum: ["debit", "credit"] },
             amount: { type: "number", exclusiveMinimum: 0, maximum: 1_000_000_000 },
+            account_code: {
+              type: "string",
+              minLength: 1,
+              maxLength: 64,
+              description:
+                "Canonical Chart of Accounts code (e.g. '6210'). Must match an active, manually-postable CoA row exactly.",
+            },
             account: { type: "string", minLength: 1, maxLength: 200 },
             dimension: { type: "string", maxLength: 200 },
             description: { type: "string", maxLength: 500 },
@@ -744,7 +799,7 @@ const draftJournalEntry: ToolDefinition<{
       if (c <= 0) {
         return {
           ok: false,
-          error: `Invalid line amount ${l.amount} for ${l.account}; amounts must be > 0.`,
+          error: `Invalid line amount ${l.amount} for ${l.account_code ?? l.account}; amounts must be > 0.`,
         };
       }
       if (l.type === "debit") debitsCents += c;
@@ -761,6 +816,42 @@ const draftJournalEntry: ToolDefinition<{
         ok: false,
         error: `Unbalanced journal entry: debits=${(debitsCents / 100).toFixed(2)} vs credits=${(creditsCents / 100).toFixed(2)}. Draft NOT saved. Fix the lines and try again.`,
       };
+    }
+    // Step 9: validate every account_code against the active CoA. Lines
+    // without an account_code (legacy `account` only) are skipped here —
+    // postingService will still resolve them via extractCodeFromLegacyAccountString
+    // when a human approves the draft.
+    const requestedCodes = Array.from(
+      new Set(
+        args.lines
+          .map((l) => l.account_code?.trim())
+          .filter((c): c is string => !!c && c.length > 0),
+      ),
+    );
+    if (requestedCodes.length > 0) {
+      const found = await db
+        .select({
+          code: chartOfAccountsTable.code,
+          isActive: chartOfAccountsTable.isActive,
+          allowManualPosting: chartOfAccountsTable.allowManualPosting,
+        })
+        .from(chartOfAccountsTable)
+        .where(inArray(chartOfAccountsTable.code, requestedCodes));
+      const byCode = new Map(found.map((r) => [r.code, r]));
+      const problems: string[] = [];
+      for (const code of requestedCodes) {
+        const row = byCode.get(code);
+        if (!row) problems.push(`${code} (unknown — not in Chart of Accounts)`);
+        else if (!row.isActive) problems.push(`${code} (archived)`);
+        else if (!row.allowManualPosting)
+          problems.push(`${code} (header / parent — manual posting disabled)`);
+      }
+      if (problems.length > 0) {
+        return {
+          ok: false,
+          error: `Invalid account_code(s): ${problems.join(", ")}. Use search_chart_of_accounts to find a valid leaf account code. Draft NOT saved.`,
+        };
+      }
     }
     const totalAmount = debitsCents / 100;
     if (ctx.dryRun) {

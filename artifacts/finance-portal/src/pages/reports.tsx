@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useGetFinancialSummaryReport } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,11 +26,37 @@ type SectionKey =
   | "summary"
   | "pl"
   | "balance"
+  | "trialBalance"
   | "byStatus"
   | "spendByProgram"
   | "missingReceipts"
   | "topVendors"
   | "bank";
+
+type TrialBalanceRow = {
+  accountId: number | null;
+  code: string;
+  name: string;
+  type: string | null;
+  subtype: string | null;
+  normalBalance: "debit" | "credit" | null;
+  isActive: boolean;
+  debits: string;
+  credits: string;
+  balance: string;
+  balanceSide: "debit" | "credit" | null;
+};
+type TrialBalanceResponse = {
+  fromDate: string | null;
+  toDate: string | null;
+  rows: TrialBalanceRow[];
+  totals: {
+    debits: string;
+    credits: string;
+    balanced: boolean;
+    differenceCents: number;
+  };
+};
 
 export default function ReportsPage() {
   const today = new Date().toISOString().split("T")[0]!;
@@ -111,6 +137,7 @@ export default function ReportsPage() {
     { key: "summary", label: "Top summary stats" },
     { key: "pl", label: "Profit & Loss" },
     { key: "balance", label: "Balance Sheet" },
+    { key: "trialBalance", label: "Trial Balance (GL)" },
     { key: "byStatus", label: "Expenses & Bills by Status" },
     { key: "spendByProgram", label: "Spend by Program / Grant" },
     { key: "missingReceipts", label: "Missing receipts" },
@@ -121,6 +148,7 @@ export default function ReportsPage() {
     summary: true,
     pl: true,
     balance: true,
+    trialBalance: true,
     byStatus: true,
     spendByProgram: true,
     missingReceipts: true,
@@ -130,10 +158,139 @@ export default function ReportsPage() {
   const toggle = (k: SectionKey) =>
     setSelected((p) => ({ ...p, [k]: !p[k] }));
 
-  const { data, isLoading } = useGetFinancialSummaryReport({
+  // Step 9 — operational vs ledger source toggle for P&L / Balance Sheet.
+  const [source, setSource] = useState<"operational" | "ledger">("operational");
+  const { data: opData, isLoading: opLoading } = useGetFinancialSummaryReport({
     fromDate,
     toDate,
   });
+  // Ledger fetch (raw — typed hook does not yet accept the `source` param).
+  const [ledgerData, setLedgerData] = useState<typeof opData | null>(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerError, setLedgerError] = useState<string | null>(null);
+  useEffect(() => {
+    if (source !== "ledger") return;
+    let cancelled = false;
+    setLedgerLoading(true);
+    setLedgerError(null);
+    const params = new URLSearchParams({
+      fromDate,
+      toDate,
+      source: "ledger",
+    });
+    fetch(
+      `${import.meta.env.BASE_URL}api/reports/financial-summary?${params}`,
+      { credentials: "include" },
+    )
+      .then(async (r) => {
+        if (!r.ok) {
+          const text = await r.text().catch(() => "");
+          throw new Error(`Ledger fetch failed (${r.status}) ${text.slice(0, 200)}`);
+        }
+        return r.json();
+      })
+      .then((j) => {
+        if (!cancelled) setLedgerData(j);
+      })
+      .catch((err) => {
+        if (!cancelled) setLedgerError(String(err?.message ?? err));
+      })
+      .finally(() => {
+        if (!cancelled) setLedgerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source, fromDate, toDate]);
+  const data = source === "ledger" ? ledgerData ?? opData : opData;
+  const isLoading =
+    source === "ledger"
+      ? ledgerLoading && !ledgerData && !ledgerError
+      : opLoading;
+
+  // Step 9: Trial Balance is fetched directly because the typed client hasn't
+  // been regenerated yet — once the OpenAPI spec is bumped this can move
+  // behind a useGetTrialBalanceReport hook for parity with the others.
+  const [tb, setTb] = useState<TrialBalanceResponse | null>(null);
+  const [tbLoading, setTbLoading] = useState(false);
+  const [tbError, setTbError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setTbLoading(true);
+    setTbError(null);
+    const params = new URLSearchParams();
+    if (fromDate) params.set("fromDate", fromDate);
+    if (toDate) params.set("toDate", toDate);
+    fetch(`${import.meta.env.BASE_URL}api/reports/trial-balance?${params}`, {
+      credentials: "include",
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((j: TrialBalanceResponse) => {
+        if (!cancelled) setTb(j);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setTbError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setTbLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fromDate, toDate]);
+
+  const downloadTrialBalanceCsv = () => {
+    if (!tb) return;
+    const header = [
+      "code",
+      "name",
+      "type",
+      "subtype",
+      "normal_balance",
+      "debits",
+      "credits",
+      "balance",
+    ];
+    const escape = (v: string | number | null) => {
+      if (v === null || v === undefined) return "";
+      const s = String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [header.join(",")];
+    for (const r of tb.rows) {
+      lines.push(
+        [
+          r.code,
+          r.name,
+          r.type ?? "",
+          r.subtype ?? "",
+          r.normalBalance ?? "",
+          r.debits,
+          r.credits,
+          r.balance,
+        ]
+          .map(escape)
+          .join(","),
+      );
+    }
+    lines.push(
+      ["TOTALS", "", "", "", "", tb.totals.debits, tb.totals.credits, ""]
+        .map(escape)
+        .join(","),
+    );
+    const blob = new Blob([lines.join("\n")], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `trial-balance_${fromDate}_to_${toDate}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handlePrint = () => window.print();
 
@@ -209,6 +366,33 @@ export default function ReportsPage() {
             </div>
           </div>
           <div>
+            <div className="text-sm font-medium mb-2">
+              P&amp;L / Balance Sheet source
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={source === "operational" ? "default" : "outline"}
+                onClick={() => setSource("operational")}
+              >
+                Operational (cash basis)
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={source === "ledger" ? "default" : "outline"}
+                onClick={() => setSource("ledger")}
+              >
+                General Ledger (posted JEs)
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Operational sums approved/paid expenses, bills, and bank credits.
+              Ledger aggregates posted journal-entry lines by Chart-of-Accounts type.
+            </div>
+          </div>
+          <div>
             <div className="text-sm font-medium mb-2">Sections</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
               {SECTIONS.map((s) => (
@@ -256,6 +440,11 @@ export default function ReportsPage() {
         )}
       </div>
 
+      {source === "ledger" && ledgerError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+          Could not load General Ledger data: {ledgerError}. Falling back to operational figures.
+        </div>
+      )}
       {isLoading || !data ? (
         <div className="grid gap-4 md:grid-cols-2">
           <Skeleton className="h-48" />
@@ -455,6 +644,122 @@ export default function ReportsPage() {
               </div>
             </CardContent>
           </Card>
+          )}
+
+          {selected.trialBalance && <div className="print-page-break" />}
+
+          {selected.trialBalance && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <CardTitle className="text-base">
+                      Trial Balance (General Ledger)
+                    </CardTitle>
+                    <CardDescription>
+                      Sourced from posted journal entries (status='posted'),
+                      grouped by Chart of Accounts code. Debit-normal accounts
+                      net debits − credits; credit-normal accounts net credits − debits.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={downloadTrialBalanceCsv}
+                    disabled={!tb || tbLoading}
+                    className="no-print"
+                  >
+                    Export CSV
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {tbError && (
+                  <div className="text-sm text-destructive mb-3">
+                    Could not load trial balance: {tbError}
+                  </div>
+                )}
+                {tbLoading || !tb ? (
+                  <Skeleton className="h-32" />
+                ) : (
+                  <>
+                    <div
+                      className={`mb-3 text-sm rounded-md px-3 py-2 ${
+                        tb.totals.balanced
+                          ? "bg-success/10 text-success"
+                          : "bg-destructive/10 text-destructive"
+                      }`}
+                    >
+                      {tb.totals.balanced
+                        ? `Balanced — debits ${fmtMoney(parseFloat(tb.totals.debits))} = credits ${fmtMoney(parseFloat(tb.totals.credits))}.`
+                        : `OUT OF BALANCE — debits ${fmtMoney(parseFloat(tb.totals.debits))} vs credits ${fmtMoney(parseFloat(tb.totals.credits))} (Δ ${fmtMoney(tb.totals.differenceCents / 100)}).`}
+                    </div>
+                    {tb.rows.length === 0 ? (
+                      <div className="text-sm text-muted-foreground py-4">
+                        No posted journal entry activity in this date range.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left border-b">
+                              <th className="py-2 pr-3">Code</th>
+                              <th className="py-2 pr-3">Account</th>
+                              <th className="py-2 pr-3">Type</th>
+                              <th className="py-2 pr-3 text-right">Debits</th>
+                              <th className="py-2 pr-3 text-right">Credits</th>
+                              <th className="py-2 pr-3 text-right">Balance</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tb.rows.map((r) => (
+                              <tr
+                                key={`${r.accountId ?? "x"}-${r.code}`}
+                                className="border-b last:border-0"
+                              >
+                                <td className="py-1.5 pr-3 font-mono text-xs">
+                                  {r.code}
+                                </td>
+                                <td className="py-1.5 pr-3">{r.name}</td>
+                                <td className="py-1.5 pr-3 text-muted-foreground">
+                                  {r.type ? titleCase(r.type) : "—"}
+                                </td>
+                                <td className="py-1.5 pr-3 text-right tabular-nums">
+                                  {parseFloat(r.debits) > 0
+                                    ? fmtMoney(parseFloat(r.debits))
+                                    : ""}
+                                </td>
+                                <td className="py-1.5 pr-3 text-right tabular-nums">
+                                  {parseFloat(r.credits) > 0
+                                    ? fmtMoney(parseFloat(r.credits))
+                                    : ""}
+                                </td>
+                                <td className="py-1.5 pr-3 text-right tabular-nums font-medium">
+                                  {fmtMoney(parseFloat(r.balance))}
+                                </td>
+                              </tr>
+                            ))}
+                            <tr className="border-t-2 font-semibold">
+                              <td colSpan={3} className="py-2 pr-3">
+                                Totals
+                              </td>
+                              <td className="py-2 pr-3 text-right tabular-nums">
+                                {fmtMoney(parseFloat(tb.totals.debits))}
+                              </td>
+                              <td className="py-2 pr-3 text-right tabular-nums">
+                                {fmtMoney(parseFloat(tb.totals.credits))}
+                              </td>
+                              <td className="py-2 pr-3" />
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
           )}
 
           {selected.byStatus && <div className="print-page-break" />}

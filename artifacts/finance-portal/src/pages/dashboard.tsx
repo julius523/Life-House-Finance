@@ -245,6 +245,8 @@ function FullDashboard() {
         </div>
       ) : null}
 
+      <AccountingStatusCard />
+
       <CreditsDonut />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
@@ -345,6 +347,135 @@ type CreditSummary = {
   writeOff: number;
   byStatus: { status: CreditStatus; amount: number; count: number }[];
 };
+
+type AccountingStatus = {
+  coa: { total: number; active: number; system: number };
+  trialBalance: {
+    fromDate: string;
+    toDate: string;
+    totals: {
+      debits: string;
+      credits: string;
+      balanced: boolean;
+      differenceCents: number;
+    };
+  };
+  settings: { accountingMethod: string };
+};
+
+function AccountingStatusCard() {
+  const [status, setStatus] = useState<AccountingStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const today = new Date();
+        const fy0 = new Date(today.getFullYear(), 0, 1);
+        const toDate = today.toISOString().slice(0, 10);
+        const fromDate = fy0.toISOString().slice(0, 10);
+        const [coa, tb, settings] = await Promise.all([
+          apiJson<{ accounts: Array<{ isActive: boolean; isSystem: boolean }> }>(
+            `/accounting/chart-of-accounts?includeArchived=true`,
+          ),
+          apiJson<AccountingStatus["trialBalance"]>(
+            `/reports/trial-balance?fromDate=${fromDate}&toDate=${toDate}`,
+          ),
+          apiJson<{ settings: { accountingMethod: string } }>(
+            `/accounting/settings`,
+          ),
+        ]);
+        if (cancelled) return;
+        setStatus({
+          coa: {
+            total: coa.accounts.length,
+            active: coa.accounts.filter((a) => a.isActive).length,
+            system: coa.accounts.filter((a) => a.isSystem).length,
+          },
+          trialBalance: tb,
+          settings: settings.settings,
+        });
+      } catch (err) {
+        if (!cancelled) setError(String((err as Error)?.message ?? err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <div>
+          <CardTitle>Accounting status</CardTitle>
+          <CardDescription>
+            Chart of Accounts, Trial Balance, and posting method.
+          </CardDescription>
+        </div>
+        <div className="flex gap-2">
+          <Link href="/accounting/coa">
+            <Button variant="outline" size="sm">
+              Chart of Accounts
+            </Button>
+          </Link>
+          <Link href="/reports">
+            <Button variant="outline" size="sm">
+              Trial Balance
+            </Button>
+          </Link>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-16 w-full" />
+        ) : error ? (
+          <div className="text-sm text-muted-foreground">{error}</div>
+        ) : status ? (
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <div className="text-xs text-muted-foreground">CoA accounts</div>
+              <div className="text-2xl font-bold">{status.coa.active}</div>
+              <div className="text-xs text-muted-foreground">
+                {status.coa.system} system · {status.coa.total} total
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">
+                Trial Balance YTD
+              </div>
+              <div className="text-2xl font-bold">
+                ${Number(status.trialBalance.totals.debits).toLocaleString()}
+              </div>
+              <div
+                className={`text-xs ${status.trialBalance.totals.balanced ? "text-success" : "text-destructive"}`}
+              >
+                {status.trialBalance.totals.balanced
+                  ? "Debits = Credits"
+                  : `Out of balance by $${(status.trialBalance.totals.differenceCents / 100).toLocaleString()}`}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Method</div>
+              <div className="text-2xl font-bold capitalize">
+                {status.settings.accountingMethod}
+              </div>
+              <Link href="/accounting/settings">
+                <span className="text-xs text-primary hover:underline cursor-pointer">
+                  Edit settings →
+                </span>
+              </Link>
+            </div>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
 
 function CreditsDonut() {
   const [data, setData] = useState<CreditSummary | null>(null);

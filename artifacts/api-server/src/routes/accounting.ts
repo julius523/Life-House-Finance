@@ -17,6 +17,7 @@ import {
   journalEntriesTable,
   journalEntryLinesTable,
   accountingPeriodsTable,
+  chartOfAccountsTable,
   type CopilotMessageRow,
   type CopilotThreadRow,
   type CopilotToolCallRow,
@@ -180,7 +181,7 @@ Non-negotiable rules:
    b. Every internal claim must be supported by an entry in the top-level "sources" array.
    c. Each "sources" entry's snippet_id MUST be an exact snippet_id returned by search_internal_policies on this turn. The server will reject your response if any snippet_id was not actually returned.
    d. If search_internal_policies returns no_documents_indexed=true or no relevant matches, you have no internal evidence — say so in "missing_information" and leave "sources" as an empty array. General accounting reasoning is still allowed in "why" but must not claim to be based on internal documents.
-   e. Never reference a chart of accounts as if Life House had one — there is no formal CoA configured.
+   e. The Life House Chart of Accounts is configured (see CHART OF ACCOUNTS block appended below). When you reference a GL account, use the canonical "<code> — <name>" form from that list. Never invent codes that are not in the list. Use search_chart_of_accounts to discover or filter accounts.
 5. Be conservative and audit-ready.
 6. If the question affects filed financials, taxes, payroll, external reporting, bank movement, or final journal posting, set "human_review_needed" to true.
 7. If a user asks for a classification decision without enough detail, ask for the missing facts in "missing_information".
@@ -189,17 +190,55 @@ Non-negotiable rules:
 10. When the user provides page context describing what they are currently looking at, treat it as authoritative read-only background — do not invent details beyond what is provided.
 11. You have read-only tools to inspect Life House records (current page record, programs, vendors, open approvals, missing receipts, reconciliation status, search). Call them whenever the user's question depends on actual Life House data — do NOT guess at what records exist. Tool results are the only authoritative internal data source you currently have.
 12. For policy / procedure / memo questions, ALWAYS call search_internal_policies first. Cite the snippets you actually used in "sources". If nothing relevant comes back, say so in "missing_information" and do not pretend to have internal sources.
-13a. There is no formal chart of accounts integration yet. search_chart_of_accounts returns no_formal_chart_of_accounts=true with related internal mappings (programs) for context only. Programs are NOT GL accounts. State the limitation explicitly in "missing_information".
+13a. The Chart of Accounts IS the source of truth for GL coding. Always pick a code from the canonical CHART OF ACCOUNTS block below (or from a fresh search_chart_of_accounts call). When drafting a journal entry, every line MUST use a real account_code from the list — accounts that are archived or have allow_manual_posting=false are rejected by the posting service. Programs (search_programs / search_chart_of_accounts mapping_type=program) are dimensions, NOT accounts.
 13b. Use escalate_to_human only when human accountant judgment, oversight, or sign-off is genuinely required. Use create_followup_task to leave the current user an actionable reminder. Use draft_memo to produce a draft document the user can copy — never claim a memo was sent or saved.
 14. Hard tool boundaries (Step 6 — drafting only):
     - You have FOUR drafting tools: draft_journal_entry, draft_memo, create_followup_task, escalate_to_human.
     - Every draft is saved with status="pending_review" and requires a human reviewer to approve before any downstream effect occurs.
     - You CANNOT post journal entries, change account balances, approve or reject expenses/bills, mark anything compliant, send external emails, or alter any financial record. The tools simply do not have those capabilities.
-    - draft_journal_entry validates that debits equal credits to the cent before saving; an unbalanced draft is rejected and you must fix it.
+    - draft_journal_entry validates that debits equal credits to the cent AND that every line's account_code resolves to an active, manually-postable Chart of Accounts row before saving; unbalanced or invalid-account drafts are rejected and you must fix them.
     - When you draft an action, name it explicitly in your "answer" (e.g., "I drafted a journal entry for review") and put a high-level summary of the proposal in "recommended_next_step". Do not pretend a draft has been posted, sent, or approved.
     - escalate_to_human additionally creates an admin notification immediately (because that IS the purpose of escalation) and is also recorded as an agent_action for acknowledgement.
 
 You MUST respond with a single JSON object that strictly matches the response schema. Use the literal string "None" in any narrative field that genuinely does not apply. Do not use Markdown headings inside fields — the UI provides the structure.`;
+
+/**
+ * Step 9: build the live system prompt by appending a snapshot of the active
+ * Chart of Accounts. Loaded once per agent turn so any CoA edits show up
+ * immediately without restarting the model. Only active rows are listed
+ * — archived accounts are intentionally hidden so the model doesn't try to
+ * reference them.
+ */
+async function buildAgentInstructions(): Promise<string> {
+  const rows = await db
+    .select({
+      code: chartOfAccountsTable.code,
+      name: chartOfAccountsTable.name,
+      type: chartOfAccountsTable.type,
+      normalBalance: chartOfAccountsTable.normalBalance,
+      allowManualPosting: chartOfAccountsTable.allowManualPosting,
+    })
+    .from(chartOfAccountsTable)
+    .where(eq(chartOfAccountsTable.isActive, true))
+    .orderBy(asc(chartOfAccountsTable.code));
+  if (rows.length === 0) {
+    return `${AGENT_INSTRUCTIONS}
+
+CHART OF ACCOUNTS:
+(empty — no active accounts configured. State this explicitly in "missing_information" if the question depends on the CoA.)`;
+  }
+  const lines: string[] = [];
+  for (const r of rows) {
+    const flag = r.allowManualPosting ? "" : " [HEADER — no manual posting]";
+    lines.push(
+      `- ${r.code} — ${r.name} (${r.type}, normal ${r.normalBalance})${flag}`,
+    );
+  }
+  return `${AGENT_INSTRUCTIONS}
+
+CHART OF ACCOUNTS (active accounts only — use these exact codes):
+${lines.join("\n")}`;
+}
 
 const RESPONSE_SCHEMA = {
   type: "object",
@@ -854,9 +893,10 @@ router.post(
       agentActionIds,
     };
     try {
+      const liveInstructions = await buildAgentInstructions();
       let response = await openai.responses.create({
         model: AGENT_MODEL,
-        instructions: AGENT_INSTRUCTIONS,
+        instructions: liveInstructions,
         input: input as never,
         tools: getOpenAIToolDefinitions() as never,
         reasoning: { effort: "low", summary: "auto" },
@@ -1649,6 +1689,22 @@ router.post(
           creditsCents: result.creditsCents,
         });
         return;
+      case "invalid_account": {
+        const reasonText =
+          result.reason === "unknown_account"
+            ? `account '${result.account}' is not in the chart of accounts`
+            : result.reason === "archived_account"
+              ? `account '${result.account}' is archived`
+              : `account '${result.account}' is not allowed for manual posting`;
+        res.status(422).json({
+          error: `Posting refused: line ${result.lineNo} — ${reasonText}.`,
+          code: "INVALID_ACCOUNT",
+          lineNo: result.lineNo,
+          account: result.account,
+          reason: result.reason,
+        });
+        return;
+      }
       case "period_locked":
         res.status(409).json({
           error: `Posting refused: ${result.entryDate} falls in ${result.periodLabel ? `closed period '${result.periodLabel}'` : "no open accounting period"}.`,

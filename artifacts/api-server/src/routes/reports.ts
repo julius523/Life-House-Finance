@@ -6,8 +6,11 @@ import {
   programsTable,
   vendorsTable,
   transactionsTable,
+  journalEntriesTable,
+  journalEntryLinesTable,
+  chartOfAccountsTable,
 } from "@workspace/db";
-import { sql, and, gte, lte } from "drizzle-orm";
+import { sql, and, gte, lte, eq, asc } from "drizzle-orm";
 import { z } from "zod";
 import { GetFinancialSummaryReportResponse } from "@workspace/api-zod";
 
@@ -26,6 +29,15 @@ const isoDateString = z
 const QuerySchema = z.object({
   fromDate: isoDateString.optional(),
   toDate: isoDateString.optional(),
+  /**
+   * Step 9 — `source=ledger` recomputes the P&L and Balance Sheet sections
+   * from posted journal entries (Chart of Accounts × journal_entry_lines)
+   * instead of from operational tables. Other sections (status grids,
+   * spend by program, missing receipts, bank reconciliation) always come
+   * from the operational source because they have no ledger equivalent.
+   * Default is `operational` to preserve pre-Step-9 behavior.
+   */
+  source: z.enum(["operational", "ledger"]).optional(),
 });
 
 router.get("/reports/financial-summary", async (req, res): Promise<void> => {
@@ -35,6 +47,7 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
     return;
   }
   const { fromDate, toDate } = parsed.data;
+  const source: "operational" | "ledger" = parsed.data.source ?? "operational";
 
   const expenseConds = [];
   if (fromDate) expenseConds.push(gte(expensesTable.expenseDate, fromDate));
@@ -217,7 +230,111 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
   const totalDebits = parseFloat(tx.debits);
   const totalCredits = parseFloat(tx.credits);
 
-  // ---- Profit & Loss (cash basis, restricted to date range) ----
+  // ---- Profit & Loss --------------------------------------------------
+  // Two sources are supported (Step 9):
+  //   * operational (default): cash-basis from expenses/bills/transactions
+  //   * ledger: aggregates posted journal_entry_lines by CoA type
+  //
+  // Variables produced by both branches:
+  //   incomeByProgram, uncategorizedIncome, totalIncome,
+  //   expensesByProgram, uncategorizedExpenses, totalExpenses
+  let incomeByProgram: { programId: number; programName: string; amount: number }[] = [];
+  let uncategorizedIncome = 0;
+  let totalIncome = 0;
+  let expensesByProgram: { programId: number; programName: string; amount: number }[] = [];
+  let uncategorizedExpenses = 0;
+  let totalExpenses = 0;
+
+  // ---- Balance sheet variables (filled by either branch below) -------
+  let cashOnHand = 0;
+  let outstandingReceivables = 0;
+  let unpaidBills = 0;
+  let unreimbursedExpenses = 0;
+  let totalAssets = 0;
+  let totalLiabilities = 0;
+  let equity = 0;
+
+  if (source === "ledger") {
+    // ----- Ledger-based P&L ------------------------------------------------
+    // Sum activity per CoA row over [fromDate, toDate]; revenue accounts net
+    // credits − debits, expense accounts net debits − credits.
+    const plConds = [eq(journalEntriesTable.status, "posted")];
+    if (fromDate) plConds.push(gte(journalEntriesTable.entryDate, fromDate));
+    if (toDate) plConds.push(lte(journalEntriesTable.entryDate, toDate));
+    const plRows = await db
+      .select({
+        type: chartOfAccountsTable.type,
+        debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+        credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      })
+      .from(journalEntryLinesTable)
+      .innerJoin(
+        journalEntriesTable,
+        eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+      )
+      .innerJoin(
+        chartOfAccountsTable,
+        eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
+      )
+      .where(and(...plConds))
+      .groupBy(chartOfAccountsTable.type);
+    for (const r of plRows) {
+      const debits = Number(r.debits) / 100;
+      const credits = Number(r.credits) / 100;
+      if (r.type === "revenue") {
+        uncategorizedIncome += credits - debits;
+      } else if (r.type === "expense") {
+        uncategorizedExpenses += debits - credits;
+      }
+    }
+    totalIncome = uncategorizedIncome;
+    totalExpenses = uncategorizedExpenses;
+
+    // ----- Ledger-based Balance Sheet (as of toDate) ----------------------
+    const bsConds = [eq(journalEntriesTable.status, "posted")];
+    if (toDate) bsConds.push(lte(journalEntriesTable.entryDate, toDate));
+    const bsRows = await db
+      .select({
+        type: chartOfAccountsTable.type,
+        normalBalance: chartOfAccountsTable.normalBalance,
+        debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+        credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      })
+      .from(journalEntryLinesTable)
+      .innerJoin(
+        journalEntriesTable,
+        eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+      )
+      .innerJoin(
+        chartOfAccountsTable,
+        eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
+      )
+      .where(and(...bsConds))
+      .groupBy(chartOfAccountsTable.type, chartOfAccountsTable.normalBalance);
+    for (const r of bsRows) {
+      const debits = Number(r.debits) / 100;
+      const credits = Number(r.credits) / 100;
+      if (r.type === "asset") {
+        const net = debits - credits; // debit-normal
+        totalAssets += net;
+        // Map cash subtype roughly to cashOnHand — without subtype filter we
+        // surface total assets only; UI shows the breakdown via Trial Balance.
+        cashOnHand += net;
+      } else if (r.type === "liability") {
+        totalLiabilities += credits - debits;
+      } else if (r.type === "equity") {
+        // Equity goes into the synthesized equity total.
+        equity += credits - debits;
+      }
+    }
+    // Plug current-period net income into equity so totals tie out
+    // (assets = liabilities + equity).
+    equity += totalIncome - totalExpenses;
+    if (totalAssets === 0 && totalLiabilities === 0) {
+      equity = 0;
+    }
+  } else {
+    // ----- Operational P&L (legacy behavior) ------------------------------
   // Income = bank credits, attributed to a program when linked.
   const incomeRows = await db
     .select({
@@ -234,7 +351,7 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
     )
     .groupBy(transactionsTable.matchedProgramId);
 
-  const incomeByProgram = incomeRows
+  incomeByProgram = incomeRows
     .filter((r) => r.programId !== null)
     .map((r) => {
       const program = programs.find((p) => p.id === r.programId);
@@ -245,10 +362,10 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
       };
     })
     .sort((a, b) => b.amount - a.amount);
-  const uncategorizedIncome = incomeRows
+  uncategorizedIncome = incomeRows
     .filter((r) => r.programId === null)
     .reduce((s, r) => s + parseFloat(r.amount), 0);
-  const totalIncome =
+  totalIncome =
     incomeByProgram.reduce((s, r) => s + r.amount, 0) + uncategorizedIncome;
 
   // Expenses = approved/reimbursed expenses + paid bills (so the P&L matches
@@ -288,7 +405,7 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
     const k = r.programId;
     expenseByProgramMap.set(k, (expenseByProgramMap.get(k) ?? 0) + parseFloat(r.amount));
   }
-  const expensesByProgram = [...expenseByProgramMap.entries()]
+  expensesByProgram = [...expenseByProgramMap.entries()]
     .filter(([k]) => k !== null)
     .map(([k, amount]) => {
       const program = programs.find((p) => p.id === k);
@@ -299,8 +416,8 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
       };
     })
     .sort((a, b) => b.amount - a.amount);
-  const uncategorizedExpenses = expenseByProgramMap.get(null) ?? 0;
-  const totalExpenses =
+  uncategorizedExpenses = expenseByProgramMap.get(null) ?? 0;
+  totalExpenses =
     expensesByProgram.reduce((s, r) => s + r.amount, 0) + uncategorizedExpenses;
 
   // ---- Balance sheet snapshot (as-of `toDate`, ignoring fromDate) ----
@@ -316,7 +433,7 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
         ...(toDate ? [lte(transactionsTable.transactionDate, toDate)] : []),
       ),
     );
-  const cashOnHand =
+  cashOnHand =
     parseFloat(reconciledAgg[0]?.credits ?? "0") -
     parseFloat(reconciledAgg[0]?.debits ?? "0");
 
@@ -332,7 +449,7 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
         ...(toDate ? [lte(transactionsTable.transactionDate, toDate)] : []),
       ),
     );
-  const outstandingReceivables = parseFloat(receivableAgg[0]?.amount ?? "0");
+  outstandingReceivables = parseFloat(receivableAgg[0]?.amount ?? "0");
 
   const unpaidBillAgg = await db
     .select({
@@ -345,7 +462,7 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
         ...(toDate ? [lte(billsTable.dueDate, toDate)] : []),
       ),
     );
-  const unpaidBills = parseFloat(unpaidBillAgg[0]?.amount ?? "0");
+  unpaidBills = parseFloat(unpaidBillAgg[0]?.amount ?? "0");
 
   const unreimbursedAgg = await db
     .select({
@@ -358,11 +475,12 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
         ...(toDate ? [lte(expensesTable.expenseDate, toDate)] : []),
       ),
     );
-  const unreimbursedExpenses = parseFloat(unreimbursedAgg[0]?.amount ?? "0");
+  unreimbursedExpenses = parseFloat(unreimbursedAgg[0]?.amount ?? "0");
 
-  const totalAssets = cashOnHand + outstandingReceivables;
-  const totalLiabilities = unpaidBills + unreimbursedExpenses;
-  const equity = totalAssets - totalLiabilities;
+  totalAssets = cashOnHand + outstandingReceivables;
+  totalLiabilities = unpaidBills + unreimbursedExpenses;
+  equity = totalAssets - totalLiabilities;
+  } // end operational branch
 
   res.json(
     GetFinancialSummaryReportResponse.parse({
@@ -413,6 +531,165 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
       },
     })
   );
+});
+
+// ---------------------------------------------------------------------------
+// Step 9 — GET /reports/trial-balance?from=YYYY-MM-DD&to=YYYY-MM-DD
+//
+// Returns one row per Chart of Accounts code with the sum of debit and credit
+// activity over the requested date range, plus a net "balance" expressed
+// according to the account's normal_balance (debit-normal accounts net as
+// debits − credits; credit-normal accounts net as credits − debits).
+//
+// The endpoint also returns whether total debits = total credits to the cent
+// — this should always hold for a valid double-entry ledger; if it does not,
+// the report shows the imbalance so the operator can investigate.
+//
+// Only journal_entries with status='posted' are included. Reversal entries
+// are themselves status='posted' so they correctly net out the original.
+// ---------------------------------------------------------------------------
+router.get("/reports/trial-balance", async (req, res): Promise<void> => {
+  const parsed = QuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res
+      .status(400)
+      .json({ error: "Invalid date range", details: parsed.error.format() });
+    return;
+  }
+  const { fromDate, toDate } = parsed.data;
+
+  const conds = [eq(journalEntriesTable.status, "posted")];
+  if (fromDate) conds.push(gte(journalEntriesTable.entryDate, fromDate));
+  if (toDate) conds.push(lte(journalEntriesTable.entryDate, toDate));
+
+  const totals = await db
+    .select({
+      accountId: journalEntryLinesTable.accountId,
+      legacyAccount: journalEntryLinesTable.account,
+      debitsCents: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      creditsCents: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+    })
+    .from(journalEntryLinesTable)
+    .innerJoin(
+      journalEntriesTable,
+      eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+    )
+    .where(and(...conds))
+    .groupBy(journalEntryLinesTable.accountId, journalEntryLinesTable.account);
+
+  const accountRows = await db
+    .select({
+      id: chartOfAccountsTable.id,
+      code: chartOfAccountsTable.code,
+      name: chartOfAccountsTable.name,
+      type: chartOfAccountsTable.type,
+      subtype: chartOfAccountsTable.subtype,
+      normalBalance: chartOfAccountsTable.normalBalance,
+      isActive: chartOfAccountsTable.isActive,
+    })
+    .from(chartOfAccountsTable)
+    .orderBy(asc(chartOfAccountsTable.code));
+  const accountById = new Map(accountRows.map((a) => [a.id, a]));
+
+  // Aggregate by account. Lines with NULL accountId (should be zero post-S2)
+  // are still surfaced under a synthetic "(unmapped)" bucket so they cannot
+  // hide ledger imbalance.
+  type Bucket = {
+    accountId: number | null;
+    code: string;
+    name: string;
+    type: string | null;
+    subtype: string | null;
+    normalBalance: "debit" | "credit" | null;
+    isActive: boolean;
+    debitsCents: number;
+    creditsCents: number;
+  };
+  const buckets = new Map<string, Bucket>();
+  for (const t of totals) {
+    let key: string;
+    let base: Omit<Bucket, "debitsCents" | "creditsCents">;
+    if (t.accountId !== null) {
+      const a = accountById.get(t.accountId);
+      key = `id:${t.accountId}`;
+      base = {
+        accountId: t.accountId,
+        code: a?.code ?? `#${t.accountId}`,
+        name: a?.name ?? t.legacyAccount,
+        type: a?.type ?? null,
+        subtype: a?.subtype ?? null,
+        normalBalance: (a?.normalBalance as "debit" | "credit" | null) ?? null,
+        isActive: a?.isActive ?? true,
+      };
+    } else {
+      key = `legacy:${t.legacyAccount}`;
+      base = {
+        accountId: null,
+        code: "(unmapped)",
+        name: t.legacyAccount,
+        type: null,
+        subtype: null,
+        normalBalance: null,
+        isActive: true,
+      };
+    }
+    const existing = buckets.get(key);
+    if (existing) {
+      existing.debitsCents += Number(t.debitsCents);
+      existing.creditsCents += Number(t.creditsCents);
+    } else {
+      buckets.set(key, {
+        ...base,
+        debitsCents: Number(t.debitsCents),
+        creditsCents: Number(t.creditsCents),
+      });
+    }
+  }
+
+  const rows = Array.from(buckets.values())
+    .filter((b) => b.debitsCents > 0 || b.creditsCents > 0)
+    .map((b) => {
+      // Net balance is positive on the side that matches normal_balance.
+      const netCents =
+        b.normalBalance === "credit"
+          ? b.creditsCents - b.debitsCents
+          : b.debitsCents - b.creditsCents;
+      return {
+        accountId: b.accountId,
+        code: b.code,
+        name: b.name,
+        type: b.type,
+        subtype: b.subtype,
+        normalBalance: b.normalBalance,
+        isActive: b.isActive,
+        debits: (b.debitsCents / 100).toFixed(2),
+        credits: (b.creditsCents / 100).toFixed(2),
+        balance: (netCents / 100).toFixed(2),
+        balanceSide: netCents >= 0 ? b.normalBalance ?? "debit" : (b.normalBalance === "credit" ? "debit" : "credit"),
+      };
+    })
+    .sort((a, b) => a.code.localeCompare(b.code));
+
+  const totalDebitsCents = rows.reduce(
+    (s, r) => s + Math.round(parseFloat(r.debits) * 100),
+    0,
+  );
+  const totalCreditsCents = rows.reduce(
+    (s, r) => s + Math.round(parseFloat(r.credits) * 100),
+    0,
+  );
+
+  res.json({
+    fromDate: fromDate ?? null,
+    toDate: toDate ?? null,
+    rows,
+    totals: {
+      debits: (totalDebitsCents / 100).toFixed(2),
+      credits: (totalCreditsCents / 100).toFixed(2),
+      balanced: totalDebitsCents === totalCreditsCents,
+      differenceCents: totalDebitsCents - totalCreditsCents,
+    },
+  });
 });
 
 export default router;

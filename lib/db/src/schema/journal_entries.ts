@@ -14,6 +14,7 @@ import { usersTable } from "./users";
 import { copilotThreadsTable } from "./copilot_threads";
 import { copilotMessagesTable } from "./copilot_messages";
 import { agentActionsTable } from "./agent_actions";
+import { chartOfAccountsTable } from "./chart_of_accounts";
 
 /**
  * Step 8 — Posted general-ledger journal entries.
@@ -158,7 +159,24 @@ export const journalEntryLinesTable = pgTable(
      * NEVER floats. Balance check is `sum(debit cents) == sum(credit cents)`.
      */
     amountCents: integer("amount_cents").notNull(),
+    /**
+     * Free-text account string captured at posting time. NEVER mutated
+     * — preserves the immutable historical record. Step 9 added the
+     * `accountId` FK alongside it; new postings populate both, and the
+     * Step 9 backfill populates accountId for historical rows.
+     */
     account: text("account").notNull(),
+    /**
+     * Step 9 — link to the Chart of Accounts. Nullable at the column
+     * level because the historical backfill runs after the schema push,
+     * and a brand-new install may have rows for a brief window before
+     * backfill completes. Posting validation requires this to be non-null
+     * for any newly-posted line (enforced in postingService).
+     */
+    accountId: integer("account_id").references(
+      () => chartOfAccountsTable.id,
+      { onDelete: "restrict" },
+    ),
     program: text("program"),
     fund: text("fund"),
     memo: text("memo"),
@@ -169,6 +187,7 @@ export const journalEntryLinesTable = pgTable(
       table.journalEntryId,
       table.lineNo,
     ),
+    index("journal_entry_lines_account_id_idx").on(table.accountId),
   ],
 );
 

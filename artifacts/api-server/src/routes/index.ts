@@ -17,6 +17,7 @@ import reportsRouter from "./reports";
 import creditsRouter from "./credits";
 import notificationsRouter from "./notifications";
 import accountingRouter from "./accounting";
+import coaRouter from "./coa";
 
 const router: IRouter = Router();
 
@@ -38,5 +39,6 @@ router.use(reportsRouter);
 router.use(creditsRouter);
 router.use(notificationsRouter);
 router.use(accountingRouter);
+router.use(coaRouter);
 
 export default router;

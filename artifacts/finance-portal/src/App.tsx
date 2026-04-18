@@ -30,6 +30,8 @@ import ReportsPage from "@/pages/reports";
 import AdminPage from "@/pages/admin";
 import CreditsPage from "@/pages/credits";
 import AccountingPage from "@/pages/accounting";
+import AccountingCoaPage from "@/pages/accounting-coa";
+import AccountingSettingsPage from "@/pages/accounting-settings";
 
 const queryClient = new QueryClient();
 
@@ -92,6 +94,8 @@ function AppRoutes() {
         {route("/month-end/:id", "month-end", MonthEndDetail)}
         {route("/reports", "reports", ReportsPage)}
         {route("/accounting", "accounting", AccountingPage)}
+        {route("/accounting/coa", "accounting", AccountingCoaPage)}
+        {route("/accounting/settings", "accounting", AccountingSettingsPage)}
         {route("/admin", "admin", AdminPage)}
 
         <Route component={NotFound} />
