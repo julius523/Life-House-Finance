@@ -1,0 +1,66 @@
+Choose C.
+
+That’s the sane order:
+
+1. Test the merged Task #25 hard
+2. Do not broaden scope
+3. Wait for Task #29 for draft → submit → approve → post
+
+Your read is right: what shipped is the direct-post slice, not the full manual JE workflow.
+
+Send this to Replit:
+
+:::writing{variant=“chat_message” id=“41267”}
+Choose C.
+
+First, run live acceptance tests against the just-merged Task #25 only, then stop. Do not implement the draft/approval workflow in this pass.
+
+Test exactly what shipped:
+
+Task #25 acceptance tests
+
+1. Happy path post
+    * authorized user creates and posts a balanced manual JE
+    * JE is written to ledger correctly
+    * activity_log row exists with actor, timestamp, and JE id
+2. Unbalanced rejection
+    * debits ≠ credits
+    * clean 400-style rejection
+    * no JE posted
+3. Archived / inactive / non-manual account rejection
+    * reject account with is_active=false
+    * reject account with allow_manual_posting=false
+    * no JE posted
+4. Closed period rejection
+    * posting into locked/closed period fails
+    * no JE posted
+5. Authorization matrix
+    * verify exactly which roles can access POST /accounting/journal-entries
+    * confirm unauthorized roles are blocked server-side
+6. Idempotency / duplicate submit
+    * double-submit or replay the request
+    * confirm only one JE posts
+7. JE detail linkage
+    * verify the posted JE can be viewed on the detail page
+    * confirm actor/timestamp/JE id linkage is visible or retrievable
+8. Regression
+    * re-run Step 8 and Step 9 suites
+    * both must remain green
+
+Clarifications
+
+* Do not test or build draft/save/submit/approve/reject in this task. That belongs to Task #29.
+* Do verify that existing reversal behavior from Step 8 still works against JEs posted through this new manual entry path.
+* If no-self-approval is not applicable yet because this is direct-post only, say that explicitly in the report instead of pretending it was tested.
+
+Deliverables
+
+* concise live acceptance report for Task #25
+* pass/fail by test
+* screenshots or raw evidence where appropriate
+* explicit note on what is still missing and deferred to Task #29
+
+After the test pass, stop and wait.
+:::
+
+That keeps this from turning into a scope-mutating blob. First prove the direct-post slice is trustworthy. Then add the approval layer.
