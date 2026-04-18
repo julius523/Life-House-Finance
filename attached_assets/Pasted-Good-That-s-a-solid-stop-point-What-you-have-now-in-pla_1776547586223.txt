@@ -1,0 +1,48 @@
+Good. That’s a solid stop point.
+
+What you have now, in plain English:
+
+* Step 8 is functionally done.
+* Acceptance coverage is complete: 7/7 passing.
+* Step 6 and Step 7 still pass, so no regression was introduced.
+* The nasty one was real: entry number allocation was reusing JE-YYYY-000001 because of the SUBSTRING binding issue.
+* The important concurrency hole was also real: posting and period close could have raced, and the row lock fix closes that.
+
+What I’d call the remaining “don’t-be-sloppy” checklist before merge:
+
+1. Verify DB constraints match service assumptions
+    * unique on journal_entries.entry_no
+    * foreign keys on the new posting-related tables
+    * period status / close-state constraints where applicable
+    * not-null on fields the service now treats as mandatory
+2. Review idempotency behavior
+    * If the post endpoint is retried, confirm it cannot double-post the same source action or draft.
+    * If idempotency is intentional via a posting key, make sure it is enforced in DB, not just app code.
+3. Confirm audit trail completeness
+    * who drafted
+    * who approved
+    * who posted
+    * timestamp for each
+    * reversal linkage
+    * source action / source document linkage
+4. Hit the unhappy-path API checks one more time
+    * post to closed period
+    * post without approval
+    * approve as same user if separation is required
+    * reverse already-reversed JE
+    * fetch nonexistent JE
+    * list JEs with empty results / filters
+5. Make sure period close semantics are explicit
+    * whether close blocks all posting immediately
+    * whether reopen exists or is intentionally forbidden
+    * whether back-dated entries are blocked by covering-period lookup
+6. Check transaction boundaries in code review
+    * entry number allocation
+    * period lock acquisition
+    * JE insert
+    * lines insert
+    * posting status mutation
+    * audit/event write
+        These all need to live in one transaction or the whole thing gets haunted later.
+
+My read: this is mergeable once the code review confirms those basics. The period-lock fix especially moves it from “works in happy path” to “not embarrassing under load.”
