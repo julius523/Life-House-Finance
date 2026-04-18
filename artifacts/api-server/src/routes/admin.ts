@@ -11,6 +11,8 @@ import {
   receiptsTable,
   activityLogTable,
   monthEndChecklistsTable,
+  emailSettingsTable,
+  emailTemplatesTable,
 } from "@workspace/db";
 import { eq, asc, isNull, inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -19,6 +21,13 @@ import {
   getTodaySnapshotInfo,
   restoreTodaySnapshot,
 } from "../lib/dailySnapshot";
+import {
+  DEFAULT_EMAIL_TEMPLATES,
+  DEFAULT_SENDER_NAME,
+  deliverEmail,
+  getSenderName,
+  renderTemplate,
+} from "../lib/notifications";
 
 const MASTER_WIPE_PASSWORD = "Leg@ci2433!";
 
@@ -264,6 +273,167 @@ router.post("/admin/backfill-receipt-uploaders", async (_req, res): Promise<void
     scanned: orphanReceipts.length,
     updated,
     unresolved,
+  });
+});
+
+// --- Email settings & templates ----------------------------------------
+
+const KNOWN_TEMPLATE_TYPES = Object.keys(DEFAULT_EMAIL_TEMPLATES);
+
+const TEMPLATE_VARIABLES: Record<string, string[]> = {
+  bill_needs_correction: ["itemId", "itemName", "amount", "actor", "reason", "link"],
+  expense_needs_correction: ["itemId", "itemName", "amount", "actor", "reason", "link"],
+};
+
+const SAMPLE_VARIABLES: Record<string, Record<string, string>> = {
+  bill_needs_correction: {
+    itemId: "1234",
+    itemName: "Acme Plumbing",
+    amount: "245.00",
+    actor: "Casey Admin",
+    reason: "Please attach a clearer copy of the invoice.",
+    link: "/bills/1234",
+  },
+  expense_needs_correction: {
+    itemId: "987",
+    itemName: "Costco Wholesale",
+    amount: "84.21",
+    actor: "Casey Admin",
+    reason: "Please split the food and supplies portions.",
+    link: "/expenses/987",
+  },
+};
+
+router.get("/admin/email-settings", async (_req, res): Promise<void> => {
+  const senderName = await getSenderName();
+  const rows = await db.select().from(emailTemplatesTable);
+  const byType = new Map(rows.map((r) => [r.type, r]));
+  const templates = KNOWN_TEMPLATE_TYPES.map((type) => {
+    const stored = byType.get(type);
+    const fallback = DEFAULT_EMAIL_TEMPLATES[type]!;
+    return {
+      type,
+      subject: stored?.subject ?? fallback.subject,
+      body: stored?.body ?? fallback.body,
+      defaultSubject: fallback.subject,
+      defaultBody: fallback.body,
+      variables: TEMPLATE_VARIABLES[type] ?? [],
+      updatedAt: stored?.updatedAt ?? null,
+    };
+  });
+  res.json({
+    senderName,
+    defaultSenderName: DEFAULT_SENDER_NAME,
+    templates,
+  });
+});
+
+const EmailSettingsBody = z.object({
+  senderName: z.string().min(1).max(120),
+  templates: z.array(
+    z.object({
+      type: z.string().min(1),
+      subject: z.string().min(1).max(300),
+      body: z.string().min(1).max(8000),
+    }),
+  ),
+});
+
+router.put("/admin/email-settings", async (req, res): Promise<void> => {
+  const parsed = EmailSettingsBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: parsed.error.issues[0]?.message ?? "Invalid body",
+    });
+    return;
+  }
+  const { senderName, templates } = parsed.data;
+
+  for (const t of templates) {
+    if (!KNOWN_TEMPLATE_TYPES.includes(t.type)) {
+      res.status(400).json({ error: `Unknown template type: ${t.type}` });
+      return;
+    }
+  }
+
+  const now = new Date();
+  // Wrap sender + template upserts in one transaction so a mid-loop failure
+  // can never leave the settings half-applied.
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(emailSettingsTable)
+      .values({ id: 1, senderName, updatedAt: now })
+      .onConflictDoUpdate({
+        target: emailSettingsTable.id,
+        set: { senderName, updatedAt: now },
+      });
+
+    for (const t of templates) {
+      await tx
+        .insert(emailTemplatesTable)
+        .values({
+          type: t.type,
+          subject: t.subject,
+          body: t.body,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: emailTemplatesTable.type,
+          set: { subject: t.subject, body: t.body, updatedAt: now },
+        });
+    }
+  });
+
+  res.json({ ok: true });
+});
+
+const SendTestBody = z.object({
+  type: z.string().min(1),
+  subject: z.string().min(1).max(300),
+  body: z.string().min(1).max(8000),
+});
+
+router.post("/admin/email-settings/test", async (req, res): Promise<void> => {
+  const parsed = SendTestBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: parsed.error.issues[0]?.message ?? "Invalid body",
+    });
+    return;
+  }
+  if (!KNOWN_TEMPLATE_TYPES.includes(parsed.data.type)) {
+    res.status(400).json({ error: `Unknown template type: ${parsed.data.type}` });
+    return;
+  }
+  const me = req.authUser;
+  if (!me?.email) {
+    res
+      .status(400)
+      .json({ error: "Your account has no email address on file." });
+    return;
+  }
+
+  const sample = SAMPLE_VARIABLES[parsed.data.type] ?? {};
+  const subject = renderTemplate(parsed.data.subject, sample);
+  const body = renderTemplate(parsed.data.body, sample);
+  const link = sample["link"] ?? null;
+
+  const sent = await deliverEmail({
+    to: me.email,
+    subject: `[TEST] ${subject}`,
+    body,
+    link,
+  });
+
+  res.json({
+    ok: true,
+    delivered: sent,
+    to: me.email,
+    subject,
+    body,
+    note: sent
+      ? "Test email queued for delivery."
+      : "No SMTP provider is configured (SENDGRID_API_KEY + NOTIFICATION_FROM_EMAIL). The rendered email was logged to the server logs instead.",
   });
 });
 

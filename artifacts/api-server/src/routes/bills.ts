@@ -278,6 +278,13 @@ router.post("/bills/:id/reject", requireRole("admin", "approver"), async (req, r
         link: `/bills/${bill.id}`,
         referenceType: "bill",
         referenceId: bill.id,
+        variables: {
+          itemId: bill.id,
+          itemName: vendorName,
+          amount: Number(bill.amount).toFixed(2),
+          actor: rejectedBy,
+          reason,
+        },
       });
     }
   }

@@ -1,6 +1,14 @@
-import { db, notificationsTable, usersTable } from "@workspace/db";
+import {
+  db,
+  notificationsTable,
+  usersTable,
+  emailSettingsTable,
+  emailTemplatesTable,
+} from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
+
+export type TemplateVariables = Record<string, string | number | null | undefined>;
 
 export type CreateNotificationInput = {
   userId: number;
@@ -10,6 +18,23 @@ export type CreateNotificationInput = {
   link?: string | null;
   referenceType?: string | null;
   referenceId?: number | null;
+  variables?: TemplateVariables;
+};
+
+export const DEFAULT_SENDER_NAME = "Life House Finance Portal";
+
+export const DEFAULT_EMAIL_TEMPLATES: Record<
+  string,
+  { subject: string; body: string }
+> = {
+  bill_needs_correction: {
+    subject: "Bill #{{itemId}} needs your attention",
+    body: "Your bill for {{itemName}} (\${{amount}}) was sent back by {{actor}}. Reason: {{reason}}",
+  },
+  expense_needs_correction: {
+    subject: "Expense #{{itemId}} needs your attention",
+    body: "Your expense at {{itemName}} (\${{amount}}) was sent back by {{actor}}. Reason: {{reason}}",
+  },
 };
 
 function escapeHtml(value: string): string {
@@ -32,6 +57,17 @@ function resolveAbsoluteLink(link: string): string {
       : "";
   if (!base) return link;
   return `${base}${link.startsWith("/") ? "" : "/"}${link}`;
+}
+
+export function renderTemplate(
+  template: string,
+  variables: TemplateVariables = {},
+): string {
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => {
+    const v = variables[key];
+    if (v === undefined || v === null) return "";
+    return String(v);
+  });
 }
 
 function renderHtmlEmail(opts: {
@@ -105,7 +141,33 @@ function renderHtmlEmail(opts: {
 </html>`;
 }
 
-async function deliverEmail(opts: {
+export async function getSenderName(): Promise<string> {
+  try {
+    const [row] = await db.select().from(emailSettingsTable).limit(1);
+    if (row?.senderName) return row.senderName;
+  } catch (err) {
+    logger.warn({ err }, "Failed to read sender name from email_settings");
+  }
+  return process.env["NOTIFICATION_FROM_NAME"] ?? DEFAULT_SENDER_NAME;
+}
+
+export async function getTemplate(
+  type: string,
+): Promise<{ subject: string; body: string } | null> {
+  try {
+    const [row] = await db
+      .select()
+      .from(emailTemplatesTable)
+      .where(eq(emailTemplatesTable.type, type))
+      .limit(1);
+    if (row) return { subject: row.subject, body: row.body };
+  } catch (err) {
+    logger.warn({ err, type }, "Failed to read email template");
+  }
+  return DEFAULT_EMAIL_TEMPLATES[type] ?? null;
+}
+
+export async function deliverEmail(opts: {
   to: string;
   subject: string;
   body: string;
@@ -117,10 +179,10 @@ async function deliverEmail(opts: {
   // prod logs. Failures are logged but never thrown — email is best-effort.
   const apiKey = process.env["SENDGRID_API_KEY"];
   const fromAddress = process.env["NOTIFICATION_FROM_EMAIL"];
-  const fromName = process.env["NOTIFICATION_FROM_NAME"] ?? "Life House Finance Portal";
+  const fromName = await getSenderName();
   if (!apiKey || !fromAddress) {
     logger.info(
-      { to: opts.to, subject: opts.subject, link: opts.link },
+      { to: opts.to, subject: opts.subject, link: opts.link, fromName },
       `[notification email] ${opts.subject} -> ${opts.to}`,
     );
     return false;
@@ -187,20 +249,34 @@ export async function createNotification(
     .where(eq(usersTable.id, input.userId));
   const emailTo = user?.email ?? null;
 
+  // Resolve template (DB > defaults > caller-provided fallback). Render with
+  // variables so admins can customize wording without a code deploy.
+  const template = await getTemplate(input.type);
+  const variables: TemplateVariables = {
+    ...(input.variables ?? {}),
+    link: input.link ?? "",
+  };
+  const subject = template
+    ? renderTemplate(template.subject, variables)
+    : input.title;
+  const body = template
+    ? renderTemplate(template.body, variables)
+    : input.body;
+
   let emailSent = false;
   if (emailTo) {
     try {
       emailSent = await deliverEmail({
         to: emailTo,
-        subject: input.title,
-        body: input.body,
+        subject,
+        body,
         link: input.link ?? null,
       });
     } catch (err) {
       // Defense in depth: deliverEmail already swallows its own errors, but
       // ensure email failures never break the calling API request.
       logger.warn(
-        { err, to: emailTo, subject: input.title },
+        { err, to: emailTo, subject },
         "Unexpected error while delivering notification email",
       );
       emailSent = false;
@@ -210,8 +286,8 @@ export async function createNotification(
   await db.insert(notificationsTable).values({
     userId: input.userId,
     type: input.type,
-    title: input.title,
-    body: input.body,
+    title: subject,
+    body,
     link: input.link ?? null,
     referenceType: input.referenceType ?? null,
     referenceId: input.referenceId ?? null,

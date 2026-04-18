@@ -27,7 +27,8 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, UserPlus, KeyRound, AlertTriangle, History } from "lucide-react";
+import { Shield, UserPlus, KeyRound, AlertTriangle, History, Mail, Send, RotateCcw } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 
 const ROLE_LABEL: Record<UserRole, string> = {
   admin: "Admin",
@@ -140,6 +141,8 @@ export default function AdminPage() {
           onSaved={() => setPasswordFor(null)}
         />
       )}
+
+      <EmailSettingsCard />
 
       <Card className="border-amber-500/40">
         <CardHeader>
@@ -590,5 +593,254 @@ function ChangePasswordDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+type TemplateForm = {
+  type: string;
+  subject: string;
+  body: string;
+  defaultSubject: string;
+  defaultBody: string;
+  variables: string[];
+};
+
+const TEMPLATE_LABELS: Record<string, string> = {
+  bill_needs_correction: "Bill sent back for correction",
+  expense_needs_correction: "Expense sent back for correction",
+};
+
+function EmailSettingsCard() {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testingType, setTestingType] = useState<string | null>(null);
+  const [senderName, setSenderName] = useState("");
+  const [defaultSenderName, setDefaultSenderName] = useState("");
+  const [templates, setTemplates] = useState<TemplateForm[]>([]);
+
+  const load = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/admin/email-settings", {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      const data = (await res.json()) as {
+        senderName: string;
+        defaultSenderName: string;
+        templates: TemplateForm[];
+      };
+      setSenderName(data.senderName);
+      setDefaultSenderName(data.defaultSenderName);
+      setTemplates(data.templates);
+    } catch (e) {
+      toast({
+        title: "Could not load email settings",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const updateTemplate = (type: string, patch: Partial<TemplateForm>) => {
+    setTemplates((prev) =>
+      prev.map((t) => (t.type === type ? { ...t, ...patch } : t)),
+    );
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/email-settings", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          senderName: senderName.trim(),
+          templates: templates.map((t) => ({
+            type: t.type,
+            subject: t.subject,
+            body: t.body,
+          })),
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Save failed (${res.status})`);
+      }
+      toast({ title: "Email settings saved" });
+    } catch (e) {
+      toast({
+        title: "Could not save",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const sendTest = async (t: TemplateForm) => {
+    setTestingType(t.type);
+    try {
+      const res = await fetch("/api/admin/email-settings/test", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: t.type,
+          subject: t.subject,
+          body: t.body,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        delivered?: boolean;
+        to?: string;
+        note?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.error ?? `Test failed (${res.status})`);
+      }
+      toast({
+        title: data.delivered
+          ? `Test sent to ${data.to}`
+          : "Test email logged (no SMTP configured)",
+        description: data.note,
+      });
+    } catch (e) {
+      toast({
+        title: "Could not send test",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setTestingType(null);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Mail className="h-5 w-5 text-primary" />
+          Email templates &amp; sender
+        </CardTitle>
+        <CardDescription>
+          Customize the wording of notification emails and the sender name
+          shown to recipients. Use{" "}
+          <span className="font-mono text-xs">{`{{placeholder}}`}</span>{" "}
+          tokens to insert values like the item name or link.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {loading ? (
+          <div className="text-muted-foreground">Loading…</div>
+        ) : (
+          <>
+            <div className="space-y-1.5 max-w-md">
+              <Label>Sender name</Label>
+              <Input
+                value={senderName}
+                onChange={(e) => setSenderName(e.target.value)}
+                placeholder={defaultSenderName}
+              />
+              <p className="text-xs text-muted-foreground">
+                Shown in the "From" line of outgoing emails (the email
+                address itself is set via{" "}
+                <span className="font-mono">NOTIFICATION_FROM_EMAIL</span>).
+              </p>
+            </div>
+
+            <div className="space-y-5">
+              {templates.map((t) => (
+                <div
+                  key={t.type}
+                  className="rounded-md border p-4 space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div>
+                      <div className="font-semibold">
+                        {TEMPLATE_LABELS[t.type] ?? t.type}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        Available placeholders:{" "}
+                        {t.variables.map((v, i) => (
+                          <span key={v}>
+                            <span className="font-mono">{`{{${v}}}`}</span>
+                            {i < t.variables.length - 1 ? ", " : ""}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          updateTemplate(t.type, {
+                            subject: t.defaultSubject,
+                            body: t.defaultBody,
+                          })
+                        }
+                      >
+                        <RotateCcw className="mr-2 h-3 w-3" />
+                        Reset
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={testingType === t.type}
+                        onClick={() => sendTest(t)}
+                      >
+                        <Send className="mr-2 h-3 w-3" />
+                        {testingType === t.type
+                          ? "Sending…"
+                          : "Send test to me"}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Subject</Label>
+                    <Input
+                      value={t.subject}
+                      onChange={(e) =>
+                        updateTemplate(t.type, { subject: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Body</Label>
+                    <Textarea
+                      value={t.body}
+                      onChange={(e) =>
+                        updateTemplate(t.type, { body: e.target.value })
+                      }
+                      rows={5}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end">
+              <Button onClick={save} disabled={saving}>
+                {saving ? "Saving…" : "Save email settings"}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

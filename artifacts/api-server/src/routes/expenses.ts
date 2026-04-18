@@ -345,6 +345,13 @@ router.post("/expenses/:id/reject", requireRole("admin", "approver"), async (req
         link: `/expenses/${expense.id}`,
         referenceType: "expense",
         referenceId: expense.id,
+        variables: {
+          itemId: expense.id,
+          itemName: expense.merchant,
+          amount: Number(expense.amount).toFixed(2),
+          actor: bodyParsed.data.rejectedBy,
+          reason: bodyParsed.data.reason,
+        },
       });
     }
   }

@@ -12,3 +12,4 @@ export * from "./activity_log";
 export * from "./credits";
 export * from "./daily_snapshots";
 export * from "./notifications";
+export * from "./email_settings";
