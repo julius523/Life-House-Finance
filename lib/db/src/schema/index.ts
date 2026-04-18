@@ -13,3 +13,5 @@ export * from "./credits";
 export * from "./daily_snapshots";
 export * from "./notifications";
 export * from "./email_settings";
+export * from "./copilot_threads";
+export * from "./copilot_messages";

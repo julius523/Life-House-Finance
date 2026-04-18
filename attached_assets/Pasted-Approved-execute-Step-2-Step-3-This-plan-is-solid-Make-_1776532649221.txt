@@ -1,0 +1,52 @@
+Approved — execute Step 2 + Step 3.
+
+This plan is solid. Make these small adjustments before implementation:
+
+1. Add one raw payload field for debugging/future-proofing
+In copilot_messages, add:
+- rawResponseJson — jsonb, nullable
+Store the validated structured model output there after parsing.
+Reason: helps with debugging, schema evolution, and future auditability without depending only on split text columns.
+
+2. Add the indexes needed for scale now
+Please include:
+- index on copilot_threads(userId, updatedAt desc)
+- index on copilot_messages(threadId, id)
+- index on copilot_messages(threadId, createdAt)
+These are cheap now and helpful immediately.
+
+3. Keep “Why” reasoning-only until retrieval exists
+No internal-source claims, no pseudo-citations, no file references until Step 5 retrieval is live.
+The UI and server should assume “Why” is general accounting reasoning only in Steps 2–3.
+
+4. Tighten deletion behavior
+Keep DELETE available, but make sure thread deletion removes only the copilot thread/messages and nothing outside that boundary.
+No cascading into anything else, ever.
+Document this explicitly.
+
+5. Prefer a checked-in migration if practical
+If the repo supports it, use a committed migration file rather than relying only on db:push.
+If that is not realistic in this project right now, proceed with db:push but call out the tradeoff in your implementation notes.
+
+6. Add one more pageContext field
+Please add:
+- entityLabel: string | null
+Example: "Bill #482"
+This makes the context chip/UI cleaner and avoids overloading visibleSummary for display text.
+
+7. Persist whether the assistant turn failed
+Either:
+- add status = 'ok' | 'error'
+or
+- document clearly that errorCode being non-null means the assistant turn failed.
+I’m okay with either, but it should be explicit and consistent in the UI/API.
+
+After those changes, proceed.
+
+Deliverables in your implementation update:
+- exact files changed
+- final schema
+- final API contract
+- final pageContext contract
+- screenshots
+- remaining limitations
