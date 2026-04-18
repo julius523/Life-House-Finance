@@ -27,6 +27,7 @@ import {
 import { requireAuth } from "../lib/auth";
 import {
   postApprovedJournalEntry,
+  postManualJournalEntry,
   reverseJournalEntry,
   type PostingActor,
 } from "../lib/postingService";
@@ -1766,6 +1767,111 @@ router.post(
       case "period_locked":
         res.status(409).json({
           error: `Reversal refused: today (${result.entryDate}) falls in ${result.periodLabel ? `closed period '${result.periodLabel}'` : "no open accounting period"}.`,
+          code: "PERIOD_LOCKED",
+          entryDate: result.entryDate,
+          periodLabel: result.periodLabel,
+        });
+        return;
+    }
+  },
+);
+
+// Manual journal entry posting from the UI. Admin or approver only — same
+// role gate as the agent_action posting flow. The actual rules
+// (account validation, balance, period lock) live in postingService so
+// the manual path and the copilot draft → approval → post path stay in
+// lockstep.
+const ManualJournalEntryBody = z.object({
+  entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, {
+    message: "entryDate must be YYYY-MM-DD",
+  }),
+  memo: z.string().min(1).max(2000),
+  lines: z
+    .array(
+      z.object({
+        type: z.enum(["debit", "credit"]),
+        amount: z.number().positive().finite(),
+        account_code: z.string().min(1).max(60),
+        program: z.string().max(120).nullish(),
+        fund: z.string().max(120).nullish(),
+        memo: z.string().max(500).nullish(),
+      }),
+    )
+    .min(2, { message: "At least two lines are required." })
+    .max(100),
+});
+
+router.post(
+  "/accounting/journal-entries",
+  async (req, res): Promise<void> => {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const parsed = ManualJournalEntryBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: parsed.error.issues[0]?.message ?? "Invalid body",
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    const result = await postManualJournalEntry(
+      {
+        entryDate: parsed.data.entryDate,
+        memo: parsed.data.memo,
+        lines: parsed.data.lines,
+      },
+      toPostingActor(req),
+    );
+    switch (result.kind) {
+      case "ok":
+        res.status(201).json({
+          journalEntry: serializeJournalEntry(
+            result.journalEntry,
+            result.lines,
+          ),
+        });
+        return;
+      case "forbidden":
+        res
+          .status(403)
+          .json({ error: result.reason, code: "FORBIDDEN" });
+        return;
+      case "invalid_payload":
+        res.status(422).json({
+          error: result.reason,
+          code: "INVALID_PAYLOAD",
+        });
+        return;
+      case "unbalanced":
+        res.status(422).json({
+          error: `Posting refused: debits (${(result.debitsCents / 100).toFixed(2)}) do not equal credits (${(result.creditsCents / 100).toFixed(2)}).`,
+          code: "UNBALANCED",
+          debitsCents: result.debitsCents,
+          creditsCents: result.creditsCents,
+        });
+        return;
+      case "invalid_account": {
+        const reasonText =
+          result.reason === "unknown_account"
+            ? `account '${result.account}' is not in the chart of accounts`
+            : result.reason === "archived_account"
+              ? `account '${result.account}' is archived`
+              : `account '${result.account}' is not allowed for manual posting`;
+        res.status(400).json({
+          error: `Posting refused: line ${result.lineNo} — ${reasonText}.`,
+          code: "INVALID_ACCOUNT",
+          lineNo: result.lineNo,
+          account: result.account,
+          reason: result.reason,
+        });
+        return;
+      }
+      case "period_locked":
+        res.status(409).json({
+          error: `Posting refused: ${result.entryDate} falls in ${result.periodLabel ? `closed period '${result.periodLabel}'` : "no open accounting period"}.`,
           code: "PERIOD_LOCKED",
           entryDate: result.entryDate,
           periodLabel: result.periodLabel,

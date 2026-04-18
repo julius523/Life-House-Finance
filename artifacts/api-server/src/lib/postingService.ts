@@ -609,6 +609,187 @@ export async function postApprovedJournalEntry(
 }
 
 // ---------------------------------------------------------------------------
+// Manual posting (no agent_action — staff entered the JE by hand)
+// ---------------------------------------------------------------------------
+
+export type ManualJournalEntryInput = {
+  entryDate: string;
+  memo: string;
+  lines: unknown;
+};
+
+export type PostManualJournalEntryResult =
+  | {
+      kind: "ok";
+      journalEntry: JournalEntryRow;
+      lines: JournalEntryLineRow[];
+    }
+  | { kind: "forbidden"; reason: string }
+  | { kind: "invalid_payload"; reason: string }
+  | { kind: "unbalanced"; debitsCents: number; creditsCents: number }
+  | {
+      kind: "invalid_account";
+      lineNo: number;
+      account: string;
+      reason:
+        | "unknown_account"
+        | "archived_account"
+        | "manual_posting_disabled";
+    }
+  | {
+      kind: "period_locked";
+      entryDate: string;
+      periodLabel: string | null;
+    };
+
+export async function postManualJournalEntry(
+  input: ManualJournalEntryInput,
+  actor: PostingActor,
+): Promise<PostManualJournalEntryResult> {
+  if (!POSTING_ALLOWED_ROLES.includes(actor.role)) {
+    return {
+      kind: "forbidden",
+      reason: `Role '${actor.role}' is not allowed to post journal entries. Allowed roles: ${POSTING_ALLOWED_ROLES.join(", ")}.`,
+    };
+  }
+  if (typeof input.entryDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input.entryDate)) {
+    return {
+      kind: "invalid_payload",
+      reason: "Entry date must be in YYYY-MM-DD format.",
+    };
+  }
+  const memo = typeof input.memo === "string" ? input.memo.trim() : "";
+  if (memo.length === 0) {
+    return { kind: "invalid_payload", reason: "Memo is required." };
+  }
+
+  return db.transaction(async (tx) => {
+    const sanitized = await sanitizeLines(tx, input.lines);
+    if (!sanitized.ok) {
+      if ("kind" in sanitized && sanitized.kind === "invalid_account") {
+        return {
+          kind: "invalid_account" as const,
+          lineNo: sanitized.lineNo,
+          account: sanitized.account,
+          reason: sanitized.accountReason,
+        };
+      }
+      return { kind: "invalid_payload" as const, reason: sanitized.reason };
+    }
+    const lines = sanitized.lines;
+
+    let debitsCents = 0;
+    let creditsCents = 0;
+    for (const ln of lines) {
+      const cents = toCents(ln.amount)!;
+      if (ln.type === "debit") debitsCents += cents;
+      else creditsCents += cents;
+    }
+    if (debitsCents === 0) {
+      return {
+        kind: "invalid_payload" as const,
+        reason: "Journal entry total must be greater than zero.",
+      };
+    }
+    if (debitsCents !== creditsCents) {
+      return {
+        kind: "unbalanced" as const,
+        debitsCents,
+        creditsCents,
+      };
+    }
+
+    const period = await findCoveringPeriod(
+      tx as unknown as typeof db,
+      input.entryDate,
+    );
+    if (!period || period.status !== "open") {
+      return {
+        kind: "period_locked" as const,
+        entryDate: input.entryDate,
+        periodLabel: period?.label ?? null,
+      };
+    }
+
+    const entryNo = await allocateEntryNo(
+      tx as unknown as typeof db,
+      yearOfIsoDate(input.entryDate),
+    );
+
+    const evidenceSnapshot = {
+      source: "manual_ui",
+      poster: {
+        user_id: actor.id,
+        role: actor.role,
+        email: actor.email,
+      },
+      submitted_payload: {
+        entry_date: input.entryDate,
+        memo,
+        lines: lines.map((ln) => ({
+          type: ln.type,
+          amount: ln.amount,
+          account: ln.account,
+          program: ln.program,
+          fund: ln.fund,
+          memo: ln.memo,
+        })),
+      },
+      snapshot_taken_at: new Date().toISOString(),
+    };
+
+    const [je] = await tx
+      .insert(journalEntriesTable)
+      .values({
+        entryNo,
+        entryDate: input.entryDate,
+        memo,
+        totalsDebitsCents: debitsCents,
+        totalsCreditsCents: creditsCents,
+        status: "posted",
+        postedByUserId: actor.id,
+        agentActionId: null,
+        threadId: null,
+        assistantMessageId: null,
+        approverUserId: actor.id,
+        evidenceSnapshot,
+      })
+      .returning();
+
+    const lineRows = await tx
+      .insert(journalEntryLinesTable)
+      .values(
+        lines.map((ln, i) => ({
+          journalEntryId: je!.id,
+          lineNo: i + 1,
+          type: ln.type,
+          amountCents: toCents(ln.amount)!,
+          account: ln.account,
+          accountId: ln.accountId,
+          program: ln.program,
+          fund: ln.fund,
+          memo: ln.memo,
+        })),
+      )
+      .returning();
+
+    await tx.insert(activityLogTable).values({
+      type: "journal_entry_posted",
+      description: `${actor.firstName ?? ""} ${actor.lastName ?? ""} manually posted ${je!.entryNo} (${(debitsCents / 100).toFixed(2)})`,
+      actor: `${actor.firstName ?? ""} ${actor.lastName ?? ""}`.trim() || actor.email || `user#${actor.id}`,
+      referenceId: je!.id,
+      referenceType: "journal_entry",
+    });
+
+    return {
+      kind: "ok" as const,
+      journalEntry: je!,
+      lines: lineRows,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Reversal
 // ---------------------------------------------------------------------------
 

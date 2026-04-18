@@ -33,6 +33,7 @@ import AccountingPage from "@/pages/accounting";
 import AccountingCoaPage from "@/pages/accounting-coa";
 import AccountingCoaDetail from "@/pages/accounting-coa-detail";
 import AccountingSettingsPage from "@/pages/accounting-settings";
+import JournalEntriesNewPage from "@/pages/journal-entries-new";
 
 const queryClient = new QueryClient();
 
@@ -95,6 +96,11 @@ function AppRoutes() {
         {route("/month-end/:id", "month-end", MonthEndDetail)}
         {route("/reports", "reports", ReportsPage)}
         {route("/accounting", "accounting", AccountingPage)}
+        {route(
+          "/accounting/journal-entries/new",
+          "accounting",
+          JournalEntriesNewPage,
+        )}
         {route("/accounting/coa", "accounting", AccountingCoaPage)}
         {route("/accounting/coa/:id", "accounting", AccountingCoaDetail)}
         {route("/accounting/settings", "accounting", AccountingSettingsPage)}

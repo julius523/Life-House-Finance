@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import {
   Card,
   CardContent,
@@ -30,6 +30,7 @@ import {
   Pencil,
   Activity,
   Info,
+  BookOpen,
 } from "lucide-react";
 
 type ThreadSummary = {
@@ -340,15 +341,25 @@ export default function AccountingPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-          <Calculator className="h-7 w-7 text-primary" />
-          Accounting
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Ask the Life House GAAP Copilot about classifications,
-          documentation, controls, and month-end close.
-        </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <Calculator className="h-7 w-7 text-primary" />
+            Accounting
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Ask the Life House GAAP Copilot about classifications,
+            documentation, controls, and month-end close.
+          </p>
+        </div>
+        {(user?.role === "admin" || user?.role === "approver") && (
+          <Button asChild variant="outline">
+            <Link href="/accounting/journal-entries/new">
+              <BookOpen className="h-4 w-4 mr-1" />
+              New journal entry
+            </Link>
+          </Button>
+        )}
       </div>
 
       <Card className="border-amber-500/40 bg-amber-50/40">
