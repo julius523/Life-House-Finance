@@ -1696,7 +1696,7 @@ router.post(
             : result.reason === "archived_account"
               ? `account '${result.account}' is archived`
               : `account '${result.account}' is not allowed for manual posting`;
-        res.status(422).json({
+        res.status(400).json({
           error: `Posting refused: line ${result.lineNo} — ${reasonText}.`,
           code: "INVALID_ACCOUNT",
           lineNo: result.lineNo,

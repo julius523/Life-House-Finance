@@ -22,6 +22,7 @@ import {
   chartOfAccountsTable,
   accountingSettingsTable,
   journalEntryLinesTable,
+  activityLogTable,
   ACCOUNT_TYPES,
   NORMAL_BALANCES,
   ACCOUNTING_METHODS,
@@ -41,6 +42,58 @@ function requireAdmin(req: Request, res: Response): boolean {
     return false;
   }
   return true;
+}
+
+function requireAdminOrApprover(req: Request, res: Response): boolean {
+  const role = req.authUser?.role;
+  if (role !== "admin" && role !== "approver") {
+    res.status(403).json({ error: "Admins or approvers only" });
+    return false;
+  }
+  return true;
+}
+
+function actorLabel(req: Request): string {
+  const u = req.authUser;
+  if (!u) return "system";
+  const name = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
+  return name || u.email || `user#${u.id}`;
+}
+
+async function writeCoaAudit(
+  req: Request,
+  action: "coa.create" | "coa.update" | "coa.archive" | "coa.restore" | "coa.delete",
+  resourceId: number | null,
+  description: string,
+): Promise<void> {
+  try {
+    await db.insert(activityLogTable).values({
+      type: action,
+      description,
+      actor: actorLabel(req),
+      referenceId: resourceId,
+      referenceType: "chart_of_accounts",
+    });
+  } catch (err) {
+    req.log?.warn({ err }, "failed to write CoA activity log");
+  }
+}
+
+async function writeSettingsAudit(
+  req: Request,
+  description: string,
+): Promise<void> {
+  try {
+    await db.insert(activityLogTable).values({
+      type: "accounting_settings.update",
+      description,
+      actor: actorLabel(req),
+      referenceId: 1,
+      referenceType: "accounting_settings",
+    });
+  } catch (err) {
+    req.log?.warn({ err }, "failed to write settings activity log");
+  }
 }
 
 function parseId(req: Request, res: Response): number | null {
@@ -90,6 +143,7 @@ const CoaUpdateSchema = z
 // ---------------------------------------------------------------------------
 
 router.get("/accounting/chart-of-accounts", async (req, res): Promise<void> => {
+  if (!requireAdminOrApprover(req, res)) return;
   const QuerySchema = z.object({
     q: z.string().max(120).optional(),
     type: z.enum(ACCOUNT_TYPES).optional(),
@@ -123,6 +177,7 @@ router.get("/accounting/chart-of-accounts", async (req, res): Promise<void> => {
 router.get(
   "/accounting/chart-of-accounts/:id",
   async (req, res): Promise<void> => {
+    if (!requireAdminOrApprover(req, res)) return;
     const id = parseId(req, res);
     if (id === null) return;
     const [row] = await db
@@ -179,6 +234,12 @@ router.post("/accounting/chart-of-accounts", async (req, res): Promise<void> => 
         allowManualPosting: parsed.data.allowManualPosting ?? true,
       })
       .returning();
+    await writeCoaAudit(
+      req,
+      "coa.create",
+      row.id,
+      `Created account ${row.code} — ${row.name} (${row.type}/${row.normalBalance})`,
+    );
     res.status(201).json({ account: row });
   } catch (err) {
     req.log?.error({ err }, "create CoA failed");
@@ -268,6 +329,22 @@ router.patch(
         .set(update)
         .where(eq(chartOfAccountsTable.id, id))
         .returning();
+      const archiveChange =
+        "isActive" in parsed.data && parsed.data.isActive !== existing.isActive;
+      const auditAction: Parameters<typeof writeCoaAudit>[1] = archiveChange
+        ? parsed.data.isActive
+          ? "coa.restore"
+          : "coa.archive"
+        : "coa.update";
+      const changedKeys = Object.keys(update).filter((k) => k !== "updatedAt");
+      await writeCoaAudit(
+        req,
+        auditAction,
+        updated.id,
+        archiveChange
+          ? `${parsed.data.isActive ? "Restored" : "Archived"} account ${updated.code} — ${updated.name}`
+          : `Updated account ${updated.code} — ${updated.name} (fields: ${changedKeys.join(", ") || "none"})`,
+      );
       res.json({ account: updated });
     } catch (err) {
       req.log?.error({ err }, "update CoA failed");
@@ -312,6 +389,12 @@ router.delete(
     await db
       .delete(chartOfAccountsTable)
       .where(eq(chartOfAccountsTable.id, id));
+    await writeCoaAudit(
+      req,
+      "coa.delete",
+      id,
+      `Deleted unused account ${existing.code} — ${existing.name}`,
+    );
     res.json({ ok: true, id });
   },
 );
@@ -423,6 +506,11 @@ router.patch("/accounting/settings", async (req, res): Promise<void> => {
     .set(update)
     .where(eq(accountingSettingsTable.id, existing.id))
     .returning();
+  const changed = Object.keys(parsed.data).filter((k) => k in parsed.data);
+  await writeSettingsAudit(
+    req,
+    `Updated accounting settings (fields: ${changed.join(", ") || "none"})`,
+  );
   res.json({ settings: updated });
 });
 

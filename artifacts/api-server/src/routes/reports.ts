@@ -26,19 +26,25 @@ const isoDateString = z
   .refine((v) => !Number.isNaN(Date.parse(v)), { message: "Invalid date" })
   .transform((v) => new Date(v).toISOString().slice(0, 10));
 
-const QuerySchema = z.object({
-  fromDate: isoDateString.optional(),
-  toDate: isoDateString.optional(),
-  /**
-   * Step 9 — `source=ledger` recomputes the P&L and Balance Sheet sections
-   * from posted journal entries (Chart of Accounts × journal_entry_lines)
-   * instead of from operational tables. Other sections (status grids,
-   * spend by program, missing receipts, bank reconciliation) always come
-   * from the operational source because they have no ledger equivalent.
-   * Default is `operational` to preserve pre-Step-9 behavior.
-   */
-  source: z.enum(["operational", "ledger"]).optional(),
-});
+const QuerySchema = z
+  .object({
+    fromDate: isoDateString.optional(),
+    toDate: isoDateString.optional(),
+    // Step 9 — Trial Balance contract uses `from`/`to` aliases.
+    from: isoDateString.optional(),
+    to: isoDateString.optional(),
+    /**
+     * Step 9 — `source=ledger` recomputes the P&L and Balance Sheet sections
+     * from posted journal entries (Chart of Accounts × journal_entry_lines)
+     * instead of from operational tables. Default is `operational`.
+     */
+    source: z.enum(["operational", "ledger"]).optional(),
+  })
+  .transform((d) => ({
+    ...d,
+    fromDate: d.fromDate ?? d.from,
+    toDate: d.toDate ?? d.to,
+  }));
 
 router.get("/reports/financial-summary", async (req, res): Promise<void> => {
   const parsed = QuerySchema.safeParse(req.query);

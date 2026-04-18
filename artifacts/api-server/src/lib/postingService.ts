@@ -48,7 +48,9 @@ export type PostingActor = {
 type JournalLineInput = {
   type: "debit" | "credit";
   amount: unknown;
-  account: unknown;
+  account?: unknown;
+  account_code?: unknown;
+  accountId?: unknown;
   program?: unknown;
   fund?: unknown;
   memo?: unknown;
@@ -240,7 +242,15 @@ async function sanitizeLines(
     if (raw.type !== "debit" && raw.type !== "credit") {
       return { ok: false, reason: `Line ${lineNo} has invalid type.` };
     }
-    if (typeof raw.account !== "string" || raw.account.trim().length === 0) {
+    // Step 9 — accept either `account_code` (preferred, set by the
+    // copilot draft tool) or the legacy free-text `account` field.
+    const codeStr =
+      typeof raw.account_code === "string" && raw.account_code.trim().length
+        ? raw.account_code.trim()
+        : typeof raw.account === "string" && raw.account.trim().length
+          ? raw.account.trim()
+          : null;
+    if (!codeStr) {
       return {
         ok: false,
         reason: `Line ${lineNo} is missing an account code.`,
@@ -253,7 +263,7 @@ async function sanitizeLines(
         reason: `Line ${lineNo} has invalid amount; must be positive.`,
       };
     }
-    const accountRaw = raw.account.trim();
+    const accountRaw = codeStr;
     const accountKey =
       extractCodeFromLegacyAccountString(accountRaw) ?? accountRaw;
     pending.push({
@@ -683,6 +693,7 @@ export async function reverseJournalEntry(
           type: ln.type === "debit" ? "credit" : "debit",
           amountCents: ln.amountCents,
           account: ln.account,
+          accountId: ln.accountId,
           program: ln.program,
           fund: ln.fund,
           memo: ln.memo
