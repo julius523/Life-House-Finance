@@ -1,0 +1,1728 @@
+Replit Implementation Guide
+
+Project: Accounting + Expense Management + GAAP-Ready Financial Operations Platform
+
+1. Objective
+
+Build an internal accounting and expense management system that:
+
+* supports controlled double-entry accounting
+* connects expenses, approvals, vendors, receipts, and bank statement imports
+* produces financial statements
+* supports period close
+* enforces internal controls
+* creates a path to GAAP-compliant operations
+* eventually supports financial modeling, budgeting, and forecasting
+
+This is not just an accounting page.
+This is a financial operating system inside the app.
+
+⸻
+
+2. Current State
+
+The app already has the early accounting core:
+
+* controlled journal entry posting
+* draft → approve → post workflow
+* reversal support
+* journal entry numbering
+* accounting periods
+* period close
+* posting permissions / separation of duties
+* audit trail foundation
+
+This means the project already has the ledger engine.
+
+What is not finished yet:
+
+* chart of accounts
+* financial statement reporting
+* expense management workflow tied into the ledger
+* vendor bill workflow
+* account balances and rollups
+* bank imports and reconciliations
+* accrual workflows
+* budgeting / forecasting / modeling
+* GAAP reporting layer
+
+⸻
+
+3. Final Product Vision
+
+The final system should let an admin or finance user do all of this in one place:
+
+1. Configure the company’s accounting structure
+2. Create and manage a chart of accounts
+3. Import expenses from bank statements or receipts
+4. Review, categorize, and approve expenses
+5. Turn approved expenses into journal entries
+6. Manage vendors and bills
+7. Reconcile bank activity
+8. Close accounting periods
+9. Generate:
+    * income statement
+    * balance sheet
+    * cash flow statement
+    * trial balance
+    * general ledger
+10. Build budgets and financial forecasts
+11. Run scenario models
+12. Maintain full audit logs and permission-based controls
+
+⸻
+
+4. High-Level System Architecture
+
+Core Modules
+
+Build the app in these modules:
+
+1. Accounting Settings
+2. Chart of Accounts
+3. Journal Entries
+4. Accounting Periods
+5. Expenses
+6. Vendors / Bills / AP Lite
+7. Bank Imports
+8. Reconciliation
+9. Financial Reports
+10. Budgets & Forecasting
+11. Financial Modeling
+12. Audit Logs / Controls
+13. File & Receipt Storage
+14. AI Parsing / Categorization Layer
+
+⸻
+
+5. Tech Direction
+
+Replit should keep using the existing stack unless something is already locked differently.
+
+Recommended stack assumptions
+
+* Frontend: React / Next.js or current app frontend
+* Backend: Node / TypeScript
+* Database: Postgres
+* ORM: Drizzle
+* Auth: existing auth system
+* File storage: object storage / Supabase Storage / S3-compatible layer
+* Background jobs: queue or cron-style workers if available
+* AI parsing: OpenAI or chosen model integration
+* OCR / file parsing: PDF and CSV ingestion pipeline
+
+Non-negotiables
+
+* use transactions for every posting workflow
+* use database constraints, not just UI validation
+* keep accounting logic on the server side
+* all financial events must be audit logged
+* avoid hard deletes for accounting records
+
+⸻
+
+6. Core Business Rules
+
+These rules must be enforced server-side.
+
+Ledger rules
+
+* every posted journal entry must balance
+* total debits must equal total credits
+* journal entries cannot post into a closed period
+* posted entries cannot be edited directly
+* corrections must be done through reversing entries and reposting
+* each posted entry must have:
+    * source
+    * created by
+    * approved by
+    * posted by
+    * timestamps
+    * period association
+
+Internal controls
+
+* same user cannot perform all stages if separation is enabled
+* permissions must support:
+    * draft only
+    * approve only
+    * post only
+    * reverse only
+    * close periods only
+* edits to posted transactions must be blocked
+* period close must lock posting
+
+Expense rules
+
+* expense records begin in draft/review state
+* only approved expenses can generate accounting entries
+* every expense must map to:
+    * vendor
+    * amount
+    * date
+    * payment account
+    * expense account
+    * tax treatment if applicable
+* imported expenses should not auto-post without review unless explicitly allowed by settings
+
+Reporting rules
+
+* statements must derive from posted journal entries only
+* draft or unposted entries must never affect official reports
+* reporting must respect accounting period boundaries
+
+⸻
+
+7. Required Data Model
+
+Below is the target schema at a practical level. Replit should translate this into actual DB tables and migrations.
+
+⸻
+
+A. organizations
+
+If not already present.
+
+Fields:
+
+* id
+* name
+* base_currency
+* fiscal_year_start_month
+* timezone
+* created_at
+* updated_at
+
+⸻
+
+B. accounting_settings
+
+One row per organization.
+
+Fields:
+
+* id
+* organization_id
+* accounting_method (cash, accrual)
+* separation_of_duties_enabled
+* allow_auto_posting
+* require_expense_approval
+* require_receipts_over_amount
+* default_ap_account_id
+* default_ar_account_id
+* default_cash_account_id
+* default_expense_clearing_account_id
+* default_rounding_account_id
+* period_close_requires_admin
+* lock_dates_before
+* created_at
+* updated_at
+
+⸻
+
+C. chart_of_accounts
+
+Fields:
+
+* id
+* organization_id
+* code
+* name
+* description
+* type (asset, liability, equity, revenue, expense, contra_asset, contra_liability, contra_revenue, other)
+* subtype
+* normal_balance (debit, credit)
+* parent_account_id
+* is_active
+* is_system
+* allow_manual_posting
+* requires_department
+* requires_class
+* requires_location
+* created_at
+* updated_at
+
+Constraints:
+
+* unique (organization_id, code)
+* unique (organization_id, name) recommended
+
+⸻
+
+D. accounting_periods
+
+Fields:
+
+* id
+* organization_id
+* name
+* start_date
+* end_date
+* fiscal_year
+* fiscal_month
+* status (open, soft_closed, closed)
+* closed_at
+* closed_by
+* created_at
+* updated_at
+
+Rules:
+
+* no overlapping periods for one org
+* posting only allowed to open periods
+* close action must row-lock the period
+
+⸻
+
+E. journal_entries
+
+Fields:
+
+* id
+* organization_id
+* entry_no
+* period_id
+* entry_date
+* effective_date
+* source_type (manual, expense, bill, import, reconciliation, system, reversal)
+* source_id
+* memo
+* status (draft, approved, posted, reversed, voided)
+* currency
+* total_debits
+* total_credits
+* drafted_by
+* approved_by
+* posted_by
+* reversed_by
+* reversed_entry_id
+* created_at
+* updated_at
+* posted_at
+* reversed_at
+
+Constraints:
+
+* unique (organization_id, entry_no)
+
+⸻
+
+F. journal_entry_lines
+
+Fields:
+
+* id
+* journal_entry_id
+* line_no
+* account_id
+* description
+* debit_amount
+* credit_amount
+* vendor_id
+* customer_id
+* department_id
+* class_id
+* location_id
+* expense_id
+* bill_id
+* metadata_json
+* created_at
+
+Rules:
+
+* debit and credit cannot both be > 0 on same line
+* one side must be 0
+* journal must balance in total
+
+⸻
+
+G. account_balances
+
+Optional cache / materialized strategy for speed.
+
+Fields:
+
+* id
+* organization_id
+* account_id
+* period_id
+* opening_balance
+* debit_total
+* credit_total
+* closing_balance
+* updated_at
+
+This can be generated live at first, then cached later.
+
+⸻
+
+H. vendors
+
+Fields:
+
+* id
+* organization_id
+* name
+* legal_name
+* email
+* phone
+* tax_id_last4_or_masked
+* address_json
+* payment_terms
+* default_expense_account_id
+* default_ap_account_id
+* category
+* status (active, inactive)
+* notes
+* created_at
+* updated_at
+
+⸻
+
+I. expenses
+
+Fields:
+
+* id
+* organization_id
+* vendor_id
+* expense_date
+* posted_date
+* amount
+* tax_amount
+* currency
+* payment_method
+* payment_account_id
+* expense_account_id
+* tax_account_id
+* department_id
+* class_id
+* location_id
+* description
+* memo
+* source_type (manual, bank_import, receipt_scan, statement_import, card_feed)
+* source_file_id
+* review_status (draft, needs_review, approved, rejected, posted)
+* approval_status
+* receipt_required
+* has_receipt
+* linked_journal_entry_id
+* submitted_by
+* approved_by
+* posted_by
+* created_at
+* updated_at
+
+⸻
+
+J. expense_receipts / attachments
+
+Fields:
+
+* id
+* organization_id
+* expense_id
+* file_name
+* mime_type
+* storage_path
+* file_size
+* uploaded_by
+* uploaded_at
+* extracted_text
+* parsed_metadata_json
+
+⸻
+
+K. bank_accounts
+
+Fields:
+
+* id
+* organization_id
+* name
+* institution_name
+* masked_account_no
+* currency
+* gl_account_id
+* status
+* created_at
+* updated_at
+
+⸻
+
+L. bank_import_batches
+
+Fields:
+
+* id
+* organization_id
+* bank_account_id
+* source_file_id
+* imported_by
+* import_type (csv, pdf_statement, api_feed)
+* imported_at
+* status (uploaded, parsed, reviewed, processed, failed)
+* notes
+
+⸻
+
+M. bank_transactions
+
+Fields:
+
+* id
+* organization_id
+* batch_id
+* bank_account_id
+* transaction_date
+* posting_date
+* description_raw
+* vendor_guess
+* amount
+* direction (debit, credit)
+* external_reference
+* normalized_hash
+* status (new, matched, converted_to_expense, ignored, reconciled)
+* linked_expense_id
+* linked_journal_entry_id
+* metadata_json
+* created_at
+* updated_at
+
+Constraint:
+
+* dedupe using normalized hash where appropriate
+
+⸻
+
+N. reconciliations
+
+Fields:
+
+* id
+* organization_id
+* bank_account_id
+* period_id
+* statement_ending_date
+* statement_ending_balance
+* system_balance
+* difference_amount
+* status (draft, in_review, completed)
+* prepared_by
+* approved_by
+* completed_at
+* created_at
+* updated_at
+
+⸻
+
+O. bills
+
+For AP lite.
+
+Fields:
+
+* id
+* organization_id
+* vendor_id
+* bill_no
+* bill_date
+* due_date
+* amount
+* tax_amount
+* status (draft, approved, posted, partially_paid, paid, voided)
+* ap_account_id
+* expense_account_id
+* linked_journal_entry_id
+* created_by
+* approved_by
+* created_at
+* updated_at
+
+⸻
+
+P. bill_payments
+
+Fields:
+
+* id
+* organization_id
+* bill_id
+* payment_date
+* amount
+* payment_account_id
+* linked_journal_entry_id
+* created_by
+* created_at
+
+⸻
+
+Q. budgets
+
+Fields:
+
+* id
+* organization_id
+* name
+* fiscal_year
+* version
+* status (draft, approved, archived)
+* scenario_type (base, best_case, worst_case, custom)
+* created_by
+* approved_by
+* created_at
+* updated_at
+
+⸻
+
+R. budget_lines
+
+Fields:
+
+* id
+* budget_id
+* account_id
+* period_id
+* amount
+* department_id
+* class_id
+* location_id
+* notes
+
+⸻
+
+S. forecast_models
+
+Fields:
+
+* id
+* organization_id
+* name
+* type (cash_flow, opex, revenue, runway, scenario)
+* assumptions_json
+* created_by
+* created_at
+* updated_at
+
+⸻
+
+T. forecast_results
+
+Fields:
+
+* id
+* forecast_model_id
+* period_id
+* metric_name
+* value
+* generated_at
+
+⸻
+
+U. audit_logs
+
+Fields:
+
+* id
+* organization_id
+* actor_user_id
+* entity_type
+* entity_id
+* action
+* before_json
+* after_json
+* ip_address
+* user_agent
+* occurred_at
+
+Every major action must write here.
+
+⸻
+
+8. UI Pages to Build
+
+⸻
+
+1. Accounting Dashboard
+
+Purpose:
+
+* executive overview of accounting health
+
+Show:
+
+* current open period
+* unposted journal entries
+* expenses pending review
+* bills due
+* bank imports needing review
+* reconciliation status
+* revenue / expense summary
+* month-to-date P&L snapshot
+* quick actions
+
+Quick actions:
+
+* new journal entry
+* import bank statement
+* add expense
+* add vendor
+* close period
+* run reports
+
+Acceptance:
+
+* dashboard cards pull from live data
+* links go directly into relevant workflows
+
+⸻
+
+2. Accounting Settings Page
+
+Purpose:
+
+* configure accounting behavior
+
+Sections:
+
+* organization accounting profile
+* fiscal year settings
+* accounting method
+* separation of duties
+* default accounts
+* expense approval settings
+* receipt policy
+* auto-post rules
+* close-period rules
+
+Acceptance:
+
+* only admins / finance admins can edit
+* setting changes are audit logged
+
+⸻
+
+3. Chart of Accounts Page
+
+Features:
+
+* list accounts
+* create / edit / archive accounts
+* filter by type
+* search by code or name
+* import/export COA CSV
+* hierarchy display
+* account detail page with ledger activity
+
+Acceptance:
+
+* no duplicate codes
+* inactive accounts cannot be used for new transactions unless allowed
+* account type controls normal balance behavior
+
+⸻
+
+4. Journal Entries Page
+
+Features:
+
+* JE list
+* create manual JE
+* draft / approve / post / reverse
+* JE detail page
+* JE line editor
+* attachments
+* source linkage
+* filter by date, status, source, account
+
+Acceptance:
+
+* JE must balance before approval/post
+* cannot post into closed period
+* posted JE immutable except reversal flow
+
+⸻
+
+5. Accounting Periods Page
+
+Features:
+
+* list periods
+* open / soft close / close
+* create periods in batch
+* view close checklist
+* lock status indicator
+
+Acceptance:
+
+* close requires lock and permissions
+* no posting to closed periods
+* overlapping periods blocked
+
+⸻
+
+6. Expenses Page
+
+Features:
+
+* expense list
+* add manual expense
+* review imported expenses
+* attach receipts
+* approve / reject / post
+* bulk categorize
+* filters: vendor, status, date, amount, account
+
+Acceptance:
+
+* approved expense can generate JE
+* expense state changes are audited
+* receipt policy enforced based on amount/settings
+
+⸻
+
+7. Vendors Page
+
+Features:
+
+* vendor list
+* create/edit vendor
+* vendor default accounts
+* vendor expense history
+* bills history
+* contact details
+
+Acceptance:
+
+* vendor merge strategy for duplicates
+* inactive vendors hidden from new selections by default
+
+⸻
+
+8. Bills / AP Page
+
+Features:
+
+* create vendor bill
+* approve bill
+* post bill
+* record payment
+* aging view
+* unpaid / overdue filters
+
+Acceptance:
+
+* posting bill generates JE:
+    * debit expense
+    * credit AP
+* bill payment generates JE:
+    * debit AP
+    * credit cash
+
+⸻
+
+9. Bank Imports Page
+
+Features:
+
+* upload CSV or statement PDF
+* parse bank transactions
+* show import batch status
+* review parsed transactions
+* map transactions to vendors / categories / accounts
+* convert transactions into expenses
+
+Acceptance:
+
+* dedupe repeated imports
+* batch-level error reporting
+* manual correction allowed before conversion
+
+⸻
+
+10. Reconciliation Page
+
+Features:
+
+* choose bank account + period
+* compare statement balance vs system balance
+* match transactions
+* identify unmatched items
+* finalize reconciliation
+
+Acceptance:
+
+* only posted entries count
+* completed reconciliation stores final result and audit log
+
+⸻
+
+11. Financial Reports Page
+
+Reports required:
+
+* trial balance
+* general ledger
+* income statement
+* balance sheet
+* cash flow statement
+* expense by vendor
+* budget vs actual
+* period comparison
+
+Filters:
+
+* date range
+* period
+* department
+* class
+* location
+* account
+
+Export:
+
+* CSV
+* PDF
+
+Acceptance:
+
+* reports use posted entries only
+* balances tie out to ledger
+
+⸻
+
+12. Budgeting Page
+
+Features:
+
+* create budget version
+* monthly budget lines
+* duplicate from prior year
+* compare budget vs actual
+
+Acceptance:
+
+* versions preserved
+* reports can compare actuals to budget
+
+⸻
+
+13. Forecasting / Modeling Page
+
+Features:
+
+* build scenarios
+* project cash flow
+* monthly burn
+* revenue assumptions
+* what-if drivers
+* runway estimates
+
+Acceptance:
+
+* assumptions editable
+* results saved by scenario
+* can compare models side by side
+
+⸻
+
+14. Audit Log Page
+
+Features:
+
+* list all key finance actions
+* filter by user/entity/action/date
+* inspect before/after changes
+* export logs
+
+Acceptance:
+
+* all core finance actions appear here
+
+⸻
+
+9. Core Workflows Replit Must Implement
+
+⸻
+
+Workflow A: Manual Journal Entry
+
+1. User creates JE draft
+2. Adds lines
+3. System validates balance
+4. Approver approves
+5. Poster posts
+6. System:
+    * assigns JE number
+    * finds open period
+    * writes posted_at / posted_by
+    * locks JE from editing
+    * writes audit logs
+    * updates balances or balance cache
+
+⸻
+
+Workflow B: Expense Review to Ledger
+
+1. User imports or creates expense
+2. Expense enters draft or needs_review
+3. Reviewer categorizes:
+    * vendor
+    * expense account
+    * payment account
+    * department/class if needed
+4. Approver approves
+5. On post:
+    * create JE
+    * debit expense account
+    * credit cash / card / payable account
+    * link JE to expense
+6. Expense status becomes posted
+
+⸻
+
+Workflow C: Vendor Bill
+
+1. Create bill
+2. Approve bill
+3. Post bill
+4. System creates JE:
+    * debit expense
+    * credit AP
+5. Payment later creates second JE:
+    * debit AP
+    * credit cash
+
+⸻
+
+Workflow D: Bank Statement Import
+
+1. Upload CSV or PDF
+2. Parse transactions
+3. Normalize and dedupe
+4. Show review table
+5. AI suggests:
+    * vendor
+    * category
+    * account
+6. User confirms/corrects
+7. Convert to expense drafts
+8. Approved expenses can post to ledger
+
+⸻
+
+Workflow E: Reversal
+
+1. User selects posted JE
+2. Click reverse
+3. System generates opposite entry
+4. Reversal links to original JE
+5. Original status updates accordingly
+
+⸻
+
+Workflow F: Period Close
+
+1. Finance admin runs close checklist
+2. System confirms:
+    * no unposted required entries
+    * no unresolved review queues if policy requires
+3. User closes period
+4. System locks it
+5. Posting endpoint blocks all future entries into that period
+
+⸻
+
+Workflow G: Financial Reporting
+
+1. User chooses report type and date/period
+2. System aggregates posted lines
+3. Applies account type logic
+4. Renders statement
+5. Supports export
+
+⸻
+
+10. Accounting Logic Replit Must Respect
+
+⸻
+
+Double-entry logic
+
+Every accounting event must create balanced debits and credits.
+
+Examples:
+
+Expense paid immediately
+
+* Debit Office Supplies Expense
+* Credit Bank / Card
+
+Bill entered but not paid
+
+* Debit Expense
+* Credit Accounts Payable
+
+Bill payment
+
+* Debit Accounts Payable
+* Credit Cash
+
+Refund
+
+* Debit Cash
+* Credit Expense reduction or appropriate account
+
+Reversal
+
+* opposite of original lines
+
+⸻
+
+Normal balance rules
+
+* Assets: debit normal
+* Expenses: debit normal
+* Liabilities: credit normal
+* Equity: credit normal
+* Revenue: credit normal
+
+These rules matter for reports and UI balance display.
+
+⸻
+
+Accrual readiness
+
+The first release does not need full advanced accrual automation, but schema and design must leave room for:
+
+* prepaid expenses
+* deferred revenue
+* accrued liabilities
+* fixed asset depreciation
+
+⸻
+
+11. AI Features to Add
+
+These should be helpful, not reckless.
+
+AI-assisted expense parsing
+
+From receipts / bank descriptions / statements:
+
+* extract merchant
+* date
+* amount
+* likely category
+* likely vendor
+* confidence score
+
+AI-assisted categorization
+
+Suggest:
+
+* account
+* vendor match
+* tax flag
+* recurring pattern
+
+AI-assisted anomaly detection
+
+Flag:
+
+* duplicate expenses
+* unusually large expenses
+* suspicious coding changes
+* vendors with changing category patterns
+
+Rules
+
+* AI can suggest
+* AI should not silently post official accounting entries unless explicitly enabled
+* every AI action should include confidence and review status
+
+⸻
+
+12. Permissions Matrix
+
+At minimum, support these roles:
+
+Admin
+
+* full access
+* settings
+* close periods
+* reverse entries
+* manage users
+
+Finance Manager
+
+* manage COA
+* approve and post
+* run reports
+* manage bills and vendors
+* reconcile bank accounts
+
+Accountant
+
+* create JE
+* review expenses
+* create bills
+* prepare reconciliations
+* limited reporting
+
+Submitter
+
+* submit expenses
+* upload receipts
+* create drafts only
+
+Reviewer
+
+* review expenses
+* approve expenses
+* cannot close periods unless granted
+
+Read-only Auditor
+
+* view reports
+* view audit logs
+* no edits
+
+Permissions should be granular, not hardcoded by title only.
+
+⸻
+
+13. API Requirements
+
+Replit should implement clean server endpoints by module.
+
+Examples:
+
+Chart of Accounts
+
+* GET /api/accounting/accounts
+* POST /api/accounting/accounts
+* PATCH /api/accounting/accounts/:id
+* POST /api/accounting/accounts/:id/archive
+
+Journal Entries
+
+* GET /api/accounting/journal-entries
+* GET /api/accounting/journal-entries/:id
+* POST /api/accounting/journal-entries
+* POST /api/accounting/journal-entries/:id/approve
+* POST /api/accounting/journal-entries/:id/post
+* POST /api/accounting/journal-entries/:id/reverse
+
+Periods
+
+* GET /api/accounting/periods
+* POST /api/accounting/periods
+* POST /api/accounting/periods/:id/close
+* POST /api/accounting/periods/:id/reopen if supported
+
+Expenses
+
+* GET /api/expenses
+* POST /api/expenses
+* PATCH /api/expenses/:id
+* POST /api/expenses/:id/approve
+* POST /api/expenses/:id/post
+* POST /api/expenses/import
+
+Vendors
+
+* GET /api/vendors
+* POST /api/vendors
+* PATCH /api/vendors/:id
+
+Bills
+
+* GET /api/bills
+* POST /api/bills
+* POST /api/bills/:id/approve
+* POST /api/bills/:id/post
+* POST /api/bills/:id/pay
+
+Bank Imports
+
+* POST /api/bank-imports
+* GET /api/bank-imports/:id
+* POST /api/bank-imports/:id/parse
+* POST /api/bank-imports/:id/convert-to-expenses
+
+Reconciliation
+
+* GET /api/reconciliations
+* POST /api/reconciliations
+* POST /api/reconciliations/:id/complete
+
+Reports
+
+* GET /api/reports/trial-balance
+* GET /api/reports/general-ledger
+* GET /api/reports/income-statement
+* GET /api/reports/balance-sheet
+* GET /api/reports/cash-flow
+* GET /api/reports/budget-vs-actual
+
+⸻
+
+14. Reporting Calculations Replit Must Implement
+
+⸻
+
+Trial Balance
+
+Group posted JE lines by account for the selected period/range.
+
+Output:
+
+* account code
+* account name
+* debit balance
+* credit balance
+
+Must balance total debits and credits.
+
+⸻
+
+Income Statement
+
+Use revenue and expense accounts only.
+
+Output:
+
+* revenue
+* cost categories if used
+* operating expenses
+* net income
+
+⸻
+
+Balance Sheet
+
+Use asset, liability, equity accounts.
+
+Output:
+
+* assets
+* liabilities
+* equity
+* retained earnings logic as needed
+
+⸻
+
+Cash Flow
+
+For initial version:
+
+* indirect method is acceptable
+* or simple categorized cash activity if indirect is too much for first phase
+
+But build data model so a stronger version can come later.
+
+⸻
+
+15. Financial Modeling Requirements
+
+This is later-phase but should be designed now.
+
+Models to support
+
+* monthly cash flow projection
+* operating expense forecast
+* runway projection
+* revenue forecast
+* scenario modeling
+
+Inputs
+
+* historical actuals from ledger
+* user assumptions
+* custom line item overrides
+* expected recurring expenses
+* growth assumptions
+
+Outputs
+
+* projected revenue
+* projected expense
+* projected net income
+* projected ending cash
+* runway months
+* scenario comparison
+
+⸻
+
+16. Phase-by-Phase Build Order
+
+This is the order Replit should follow.
+
+⸻
+
+Phase 1 — Stabilize Ledger Core
+
+Goal: finish the accounting backbone.
+
+Build:
+
+* chart of accounts
+* account types and validation
+* accounting settings
+* JE UI + detail page cleanup
+* period list / close UI
+* audit log coverage
+
+Done when:
+
+* users can create, approve, post, reverse JEs against real accounts
+* periods can be closed safely
+* reports can use account structures
+
+⸻
+
+Phase 2 — Expense Management Integration
+
+Goal: connect spending to accounting.
+
+Build:
+
+* vendors
+* expenses page
+* receipt uploads
+* expense review / approval / posting flow
+* expense → JE automation
+
+Done when:
+
+* manual and imported expenses can flow into posted accounting entries
+
+⸻
+
+Phase 3 — Bank Imports + Reconciliation
+
+Goal: reduce manual entry.
+
+Build:
+
+* bank accounts
+* import batches
+* CSV parser
+* PDF statement pipeline if feasible
+* transaction review table
+* reconciliation page
+
+Done when:
+
+* bank statement transactions can become expense drafts and reconciliation works
+
+⸻
+
+Phase 4 — AP Lite
+
+Goal: manage unpaid bills correctly.
+
+Build:
+
+* bills
+* bill approval
+* bill posting
+* bill payment workflow
+* AP aging report
+
+Done when:
+
+* bills and payments flow correctly into ledger and reports
+
+⸻
+
+Phase 5 — Financial Reporting
+
+Goal: make the system useful to leadership.
+
+Build:
+
+* trial balance
+* general ledger
+* income statement
+* balance sheet
+* cash flow statement
+* export options
+
+Done when:
+
+* reports tie out to posted data and are usable for month-end review
+
+⸻
+
+Phase 6 — Budgeting + Forecasting
+
+Goal: planning.
+
+Build:
+
+* budgets
+* budget lines
+* budget vs actual
+* forecast assumptions
+* scenario models
+
+Done when:
+
+* users can compare actuals to plan and run projections
+
+⸻
+
+Phase 7 — AI Layer
+
+Goal: speed up accounting work.
+
+Build:
+
+* receipt parser
+* transaction categorization suggestions
+* duplicate detection
+* anomaly alerts
+
+Done when:
+
+* AI meaningfully reduces manual work without bypassing controls
+
+⸻
+
+17. Acceptance Criteria by Milestone
+
+⸻
+
+Milestone 1: GAAP-Ready Foundation
+
+Must have:
+
+* chart of accounts
+* open/closed periods
+* posted JE immutability
+* reversals
+* audit logs
+* trial balance
+
+⸻
+
+Milestone 2: Accounting + Expense Linked
+
+Must have:
+
+* expense workflow
+* vendor mapping
+* expense posting to JE
+* receipt attachments
+* review controls
+
+⸻
+
+Milestone 3: Operational Finance
+
+Must have:
+
+* bank imports
+* reconciliation
+* AP lite
+* financial statements
+
+⸻
+
+Milestone 4: Planning Layer
+
+Must have:
+
+* budgets
+* forecasts
+* scenario models
+
+⸻
+
+18. Important Edge Cases Replit Must Handle
+
+* duplicate bank imports
+* period-close race condition
+* same user trying to bypass separation of duties
+* reversing already reversed entries
+* inactive accounts selected on old drafts
+* imported expenses missing vendor/account
+* negative values and refunds
+* partial payments on bills
+* multi-line expenses if one statement line must split across accounts
+* report ranges spanning multiple periods
+* edits after approval but before posting
+* deleted attachment references
+* vendor merge collisions
+
+⸻
+
+19. Testing Requirements
+
+Replit should create tests for:
+
+Unit tests
+
+* balancing logic
+* account normal balance logic
+* report aggregation
+* period lookup
+* reversal generation
+* dedupe logic
+
+Integration tests
+
+* manual JE lifecycle
+* expense → approval → posting
+* vendor bill → payment
+* bank import → conversion
+* reconciliation completion
+* period close blocking posts
+
+Permission tests
+
+* submitter denied posting
+* reviewer denied period close
+* admin allowed all
+* same-user separation denied where enabled
+
+Regression tests
+
+* unique JE numbering
+* period lock race
+* reversal linking
+* report totals
+
+⸻
+
+20. Seed Data Replit Should Add
+
+Create default seed data for new orgs:
+
+Default accounts
+
+* 1000 Cash
+* 1100 Accounts Receivable
+* 1200 Prepaid Expenses
+* 1500 Fixed Assets
+* 2000 Accounts Payable
+* 2100 Credit Card Payable
+* 3000 Owner’s Equity / Retained Earnings placeholder
+* 4000 Revenue
+* 5000 Cost of Services or COGS if applicable
+* 6000 Operating Expenses
+* 6100 Office Supplies
+* 6200 Rent
+* 6300 Software
+* 6400 Professional Services
+* 6500 Payroll / Contractor
+* 6600 Travel
+* 6700 Utilities
+
+Also seed:
+
+* current fiscal year periods
+* accounting settings defaults
+
+⸻
+
+21. UI/UX Standards
+
+* finance tables must support sorting, filters, pagination, and export
+* every record detail page should show linked records
+* show status chips clearly
+* do not hide failed states
+* include finance-safe confirmations for destructive or irreversible actions
+* make audit trail visible on detail pages
+* provide bulk actions where practical
+
+⸻
+
+22. Definition of Done
+
+This system is not done when the page looks good.
+It is done only when:
+
+1. transactions move correctly through controlled workflows
+2. reports tie out mathematically
+3. period close blocks inappropriate posting
+4. expenses and bills post into the ledger correctly
+5. audit logs prove who did what
+6. permissions prevent bad behavior
+7. the data can support budgeting and modeling
+
+⸻
+
+23. Replit Build Instructions
+
+Use this as the direct instruction block for Replit:
+
+Build mandate
+
+Implement a modular accounting and expense management system on top of the existing controlled ledger posting engine. Preserve existing posting, approval, reversal, and period-lock logic. Expand the system into a GAAP-ready accounting platform in phases.
+
+Immediate priorities
+
+1. Build Chart of Accounts
+2. Build Accounting Settings
+3. Build Journal Entry UI around real account selection
+4. Build Expenses + Vendors
+5. Build Expense-to-Journal Entry automation
+6. Build Trial Balance, Income Statement, and Balance Sheet
+7. Add audit logging across all finance actions
+
+Engineering rules
+
+* use transactional server-side posting logic
+* use database constraints
+* no hard delete for accounting records
+* posted entries immutable
+* corrections by reversal only
+* all financial actions audit logged
+* reports use posted data only
+* support future forecasting and modeling
+
+Deliverables expected from Replit
+
+* DB migrations
+* backend endpoints
+* frontend pages
+* permission checks
+* seed data
+* automated tests
+* documentation comments in critical accounting logic
+
+⸻
+
+24. Recommended First Sprint
+
+Tell Replit to do this first:
+
+Sprint 1
+
+* implement chart_of_accounts
+* implement accounting_settings
+* update JE creation to require real accounts
+* add account validation and balance checks
+* create trial balance endpoint + page
+* create basic accounting dashboard cards
+* expand audit logging for all JE lifecycle actions
+
+That gives you the first truly useful accounting release.
+
+⸻
+
+25. Honest Bottom Line
+
+Once all of the above is built:
+
+* yes, the app can become GAAP-ready
+* yes, it can link accounting + expenses + approvals + reports
+* yes, it can support financial modeling
+* no, it is not there yet
+* right now you have the engine, not the full vehicle
+
+This guide is the roadmap to build the whole vehicle.
