@@ -627,11 +627,30 @@ export default function ReportsPage() {
                 <div>
                   <div className="font-semibold mb-2">Assets</div>
                   <dl className="text-sm divide-y">
-                    <Row k="Cash on hand" v={fmtMoney(data.balanceSheet.cashOnHand)} />
-                    <Row
-                      k="Outstanding receivables"
-                      v={fmtMoney(data.balanceSheet.outstandingReceivables)}
-                    />
+                    {source === "ledger" ? (
+                      <>
+                        <Row k="Cash" v={fmtMoney(data.balanceSheet.cash)} />
+                        <Row
+                          k="Accounts receivable"
+                          v={fmtMoney(data.balanceSheet.accountsReceivable)}
+                        />
+                        <Row
+                          k="Other assets"
+                          v={fmtMoney(data.balanceSheet.otherAssets)}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <Row
+                          k="Cash on hand"
+                          v={fmtMoney(data.balanceSheet.cashOnHand)}
+                        />
+                        <Row
+                          k="Outstanding receivables"
+                          v={fmtMoney(data.balanceSheet.outstandingReceivables)}
+                        />
+                      </>
+                    )}
                     <Row
                       k="Total assets"
                       v={fmtMoney(data.balanceSheet.totalAssets)}
@@ -642,11 +661,29 @@ export default function ReportsPage() {
                 <div>
                   <div className="font-semibold mb-2">Liabilities</div>
                   <dl className="text-sm divide-y">
-                    <Row k="Unpaid bills" v={fmtMoney(data.balanceSheet.unpaidBills)} />
-                    <Row
-                      k="Unreimbursed expenses"
-                      v={fmtMoney(data.balanceSheet.unreimbursedExpenses)}
-                    />
+                    {source === "ledger" ? (
+                      <>
+                        <Row
+                          k="Accounts payable"
+                          v={fmtMoney(data.balanceSheet.accountsPayable)}
+                        />
+                        <Row
+                          k="Other liabilities"
+                          v={fmtMoney(data.balanceSheet.otherLiabilities)}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <Row
+                          k="Unpaid bills"
+                          v={fmtMoney(data.balanceSheet.unpaidBills)}
+                        />
+                        <Row
+                          k="Unreimbursed expenses"
+                          v={fmtMoney(data.balanceSheet.unreimbursedExpenses)}
+                        />
+                      </>
+                    )}
                     <Row
                       k="Total liabilities"
                       v={fmtMoney(data.balanceSheet.totalLiabilities)}

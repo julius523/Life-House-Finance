@@ -13,6 +13,28 @@ export type FinancialSummaryReportBalanceSheet = {
   outstandingReceivables: number;
   unpaidBills: number;
   unreimbursedExpenses: number;
+  /** Ledger-source: net debit balance of asset accounts with subtype
+'cash' as of toDate. Operational source: mirrors cashOnHand.
+ */
+  cash: number;
+  /** Ledger-source: net debit balance of asset accounts with subtype
+'ar'. Operational source: mirrors outstandingReceivables.
+ */
+  accountsReceivable: number;
+  /** Ledger-source: net debit balance of all remaining asset
+accounts (everything not classified as cash or AR, including
+contra-asset accounts). Operational source: 0.
+ */
+  otherAssets: number;
+  /** Ledger-source: net credit balance of liability accounts with
+subtype 'ap'. Operational source: mirrors unpaidBills.
+ */
+  accountsPayable: number;
+  /** Ledger-source: net credit balance of all remaining liability
+accounts (including contra-liability). Operational source:
+mirrors unreimbursedExpenses.
+ */
+  otherLiabilities: number;
   totalAssets: number;
   totalLiabilities: number;
   equity: number;

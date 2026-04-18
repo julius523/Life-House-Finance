@@ -2364,6 +2364,33 @@ components:
               type: number
             unreimbursedExpenses:
               type: number
+            cash:
+              type: number
+              description: |
+                Ledger-source: net debit balance of asset accounts with subtype
+                'cash' as of toDate. Operational source: mirrors cashOnHand.
+            accountsReceivable:
+              type: number
+              description: |
+                Ledger-source: net debit balance of asset accounts with subtype
+                'ar'. Operational source: mirrors outstandingReceivables.
+            otherAssets:
+              type: number
+              description: |
+                Ledger-source: net debit balance of all remaining asset
+                accounts (everything not classified as cash or AR, including
+                contra-asset accounts). Operational source: 0.
+            accountsPayable:
+              type: number
+              description: |
+                Ledger-source: net credit balance of liability accounts with
+                subtype 'ap'. Operational source: mirrors unpaidBills.
+            otherLiabilities:
+              type: number
+              description: |
+                Ledger-source: net credit balance of all remaining liability
+                accounts (including contra-liability). Operational source:
+                mirrors unreimbursedExpenses.
             totalAssets:
               type: number
             totalLiabilities:
@@ -2375,6 +2402,11 @@ components:
             - outstandingReceivables
             - unpaidBills
             - unreimbursedExpenses
+            - cash
+            - accountsReceivable
+            - otherAssets
+            - accountsPayable
+            - otherLiabilities
             - totalAssets
             - totalLiabilities
             - equity

@@ -257,6 +257,14 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
   let outstandingReceivables = 0;
   let unpaidBills = 0;
   let unreimbursedExpenses = 0;
+  // Task 26 — explicit subtype breakdown for the ledger-source BS so the
+  // card matches what users expect from a real GAAP Balance Sheet (instead
+  // of dumping every asset into a single cashOnHand bucket).
+  let cash = 0;
+  let accountsReceivable = 0;
+  let otherAssets = 0;
+  let accountsPayable = 0;
+  let otherLiabilities = 0;
   let totalAssets = 0;
   let totalLiabilities = 0;
   let equity = 0;
@@ -306,9 +314,13 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
       sql`${journalEntriesTable.status} in ('posted', 'reversed')`,
     ];
     if (toDate) bsConds.push(lte(journalEntriesTable.entryDate, toDate));
+    // Group by subtype as well so we can split assets into cash / AR / other
+    // and liabilities into AP / other (Task 26). Subtype is nullable, so any
+    // null subtype falls into the "other" bucket for its type.
     const bsRows = await db
       .select({
         type: chartOfAccountsTable.type,
+        subtype: chartOfAccountsTable.subtype,
         normalBalance: chartOfAccountsTable.normalBalance,
         debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
         credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
@@ -323,23 +335,55 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
         eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
       )
       .where(and(...bsConds))
-      .groupBy(chartOfAccountsTable.type, chartOfAccountsTable.normalBalance);
+      .groupBy(
+        chartOfAccountsTable.type,
+        chartOfAccountsTable.subtype,
+        chartOfAccountsTable.normalBalance,
+      );
     for (const r of bsRows) {
       const debits = Number(r.debits) / 100;
       const credits = Number(r.credits) / 100;
       if (r.type === "asset") {
         const net = debits - credits; // debit-normal
         totalAssets += net;
-        // Map cash subtype roughly to cashOnHand — without subtype filter we
-        // surface total assets only; UI shows the breakdown via Trial Balance.
-        cashOnHand += net;
+        if (r.subtype === "cash") {
+          cash += net;
+        } else if (r.subtype === "ar") {
+          accountsReceivable += net;
+        } else {
+          otherAssets += net;
+        }
+      } else if (r.type === "contra_asset") {
+        // Contra-asset rows (e.g. accumulated depreciation) reduce assets;
+        // their net debit balance is negative, so adding to totalAssets and
+        // otherAssets handles the sign correctly.
+        const net = debits - credits;
+        totalAssets += net;
+        otherAssets += net;
       } else if (r.type === "liability") {
-        totalLiabilities += credits - debits;
+        const net = credits - debits; // credit-normal
+        totalLiabilities += net;
+        if (r.subtype === "ap") {
+          accountsPayable += net;
+        } else {
+          otherLiabilities += net;
+        }
+      } else if (r.type === "contra_liability") {
+        const net = credits - debits;
+        totalLiabilities += net;
+        otherLiabilities += net;
       } else if (r.type === "equity") {
         // Equity goes into the synthesized equity total.
         equity += credits - debits;
       }
     }
+    // Keep the legacy single-figure fields populated so existing consumers
+    // (and the operational/ledger toggle on the BS card) still work — they
+    // now mirror the breakdown's cash and AR rows.
+    cashOnHand = cash;
+    outstandingReceivables = accountsReceivable;
+    unpaidBills = accountsPayable;
+    unreimbursedExpenses = otherLiabilities;
     // Plug current-period net income into equity so totals tie out
     // (assets = liabilities + equity).
     equity += totalIncome - totalExpenses;
@@ -493,6 +537,13 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
   totalAssets = cashOnHand + outstandingReceivables;
   totalLiabilities = unpaidBills + unreimbursedExpenses;
   equity = totalAssets - totalLiabilities;
+  // Operational source has no CoA subtype — mirror the legacy fields onto
+  // the new breakdown so the contract stays uniform across both sources.
+  cash = cashOnHand;
+  accountsReceivable = outstandingReceivables;
+  otherAssets = 0;
+  accountsPayable = unpaidBills;
+  otherLiabilities = unreimbursedExpenses;
   } // end operational branch
 
   res.json(
@@ -538,6 +589,11 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
         outstandingReceivables,
         unpaidBills,
         unreimbursedExpenses,
+        cash,
+        accountsReceivable,
+        otherAssets,
+        accountsPayable,
+        otherLiabilities,
         totalAssets,
         totalLiabilities,
         equity,

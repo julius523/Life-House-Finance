@@ -1653,6 +1653,31 @@ export const GetFinancialSummaryReportResponse = zod.object({
       .describe("Matched-but-not-yet-reconciled credits."),
     unpaidBills: zod.number(),
     unreimbursedExpenses: zod.number(),
+    cash: zod
+      .number()
+      .describe(
+        "Ledger-source: net debit balance of asset accounts with subtype\n'cash' as of toDate. Operational source: mirrors cashOnHand.\n",
+      ),
+    accountsReceivable: zod
+      .number()
+      .describe(
+        "Ledger-source: net debit balance of asset accounts with subtype\n'ar'. Operational source: mirrors outstandingReceivables.\n",
+      ),
+    otherAssets: zod
+      .number()
+      .describe(
+        "Ledger-source: net debit balance of all remaining asset\naccounts (everything not classified as cash or AR, including\ncontra-asset accounts). Operational source: 0.\n",
+      ),
+    accountsPayable: zod
+      .number()
+      .describe(
+        "Ledger-source: net credit balance of liability accounts with\nsubtype 'ap'. Operational source: mirrors unpaidBills.\n",
+      ),
+    otherLiabilities: zod
+      .number()
+      .describe(
+        "Ledger-source: net credit balance of all remaining liability\naccounts (including contra-liability). Operational source:\nmirrors unreimbursedExpenses.\n",
+      ),
     totalAssets: zod.number(),
     totalLiabilities: zod.number(),
     equity: zod.number(),
