@@ -14,6 +14,9 @@ import {
   activityLogTable,
   notificationsTable,
   usersTable,
+  journalEntriesTable,
+  journalEntryLinesTable,
+  accountingPeriodsTable,
   type CopilotMessageRow,
   type CopilotThreadRow,
   type CopilotToolCallRow,
@@ -21,6 +24,11 @@ import {
   type AgentActionRow,
 } from "@workspace/db";
 import { requireAuth } from "../lib/auth";
+import {
+  postApprovedJournalEntry,
+  reverseJournalEntry,
+  type PostingActor,
+} from "../lib/postingService";
 import {
   getOpenAIToolDefinitions,
   runTool,
@@ -1537,6 +1545,333 @@ router.post(
   "/accounting/agent-actions/:id/cancel",
   async (req, res): Promise<void> => {
     await reviewAgentAction(req, res, "canceled");
+  },
+);
+
+// ===========================================================================
+// Step 8 — Controlled ledger posting endpoints
+//
+// These routes are the ONLY way an approved JE draft becomes a real ledger
+// row. The actual rules (idempotency, period-lock, role check, evidence
+// snapshot, etc.) live in `lib/postingService.ts`. The handlers here are
+// intentionally thin: parse + map result kinds to HTTP codes.
+// ===========================================================================
+
+function toPostingActor(req: Request): PostingActor {
+  const u = req.authUser!;
+  return {
+    id: u.id,
+    role: u.role as PostingActor["role"],
+    firstName: u.firstName ?? null,
+    lastName: u.lastName ?? null,
+    email: u.email ?? null,
+  };
+}
+
+function serializeJournalEntry(
+  je: typeof journalEntriesTable.$inferSelect,
+  lines?: Array<typeof journalEntryLinesTable.$inferSelect>,
+) {
+  return {
+    id: je.id,
+    entryNo: je.entryNo,
+    entryDate: je.entryDate,
+    memo: je.memo,
+    status: je.status,
+    totalsDebitsCents: je.totalsDebitsCents,
+    totalsCreditsCents: je.totalsCreditsCents,
+    postedAt: je.postedAt,
+    postedByUserId: je.postedByUserId,
+    agentActionId: je.agentActionId,
+    threadId: je.threadId,
+    assistantMessageId: je.assistantMessageId,
+    approverUserId: je.approverUserId,
+    evidenceSnapshot: je.evidenceSnapshot,
+    reversesJournalEntryId: je.reversesJournalEntryId,
+    reversedByJournalEntryId: je.reversedByJournalEntryId,
+    reversalReason: je.reversalReason,
+    createdAt: je.createdAt,
+    ...(lines ? { lines } : {}),
+  };
+}
+
+router.post(
+  "/accounting/agent-actions/:id/post",
+  async (req, res): Promise<void> => {
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const result = await postApprovedJournalEntry(id, toPostingActor(req));
+    switch (result.kind) {
+      case "ok":
+        res.status(result.idempotent ? 200 : 201).json({
+          journalEntry: serializeJournalEntry(
+            result.journalEntry,
+            result.lines,
+          ),
+          agentAction: serializeAgentAction(result.agentAction),
+          idempotent: result.idempotent,
+        });
+        return;
+      case "not_found":
+        res.status(404).json({ error: "Agent action not found" });
+        return;
+      case "wrong_action_type":
+        res.status(400).json({
+          error: `Only draft_journal_entry actions can be posted; got '${result.actionType}'.`,
+          code: "WRONG_ACTION_TYPE",
+        });
+        return;
+      case "not_approved":
+        res.status(409).json({
+          error: `Agent action is not approved (status='${result.status}'). Approve it first.`,
+          code: "NOT_APPROVED",
+        });
+        return;
+      case "forbidden":
+        res
+          .status(403)
+          .json({ error: result.reason, code: "FORBIDDEN" });
+        return;
+      case "invalid_payload":
+        res.status(422).json({
+          error: result.reason,
+          code: "INVALID_PAYLOAD",
+        });
+        return;
+      case "unbalanced":
+        res.status(422).json({
+          error: `Posting refused: debits (${(result.debitsCents / 100).toFixed(2)}) do not equal credits (${(result.creditsCents / 100).toFixed(2)}).`,
+          code: "UNBALANCED",
+          debitsCents: result.debitsCents,
+          creditsCents: result.creditsCents,
+        });
+        return;
+      case "period_locked":
+        res.status(409).json({
+          error: `Posting refused: ${result.entryDate} falls in ${result.periodLabel ? `closed period '${result.periodLabel}'` : "no open accounting period"}.`,
+          code: "PERIOD_LOCKED",
+          entryDate: result.entryDate,
+          periodLabel: result.periodLabel,
+        });
+        return;
+    }
+  },
+);
+
+router.post(
+  "/accounting/journal-entries/:id/reverse",
+  async (req, res): Promise<void> => {
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const Body = z.object({ reason: z.string().min(1).max(2000) });
+    const parsed = Body.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: parsed.error.issues[0]?.message ?? "Invalid body",
+      });
+      return;
+    }
+    const result = await reverseJournalEntry(
+      id,
+      toPostingActor(req),
+      parsed.data.reason,
+    );
+    switch (result.kind) {
+      case "ok":
+        res.status(result.idempotent ? 200 : 201).json({
+          original: serializeJournalEntry(result.original),
+          reversal: serializeJournalEntry(
+            result.reversal,
+            result.reversalLines,
+          ),
+          idempotent: result.idempotent,
+        });
+        return;
+      case "not_found":
+        res.status(404).json({ error: "Journal entry not found" });
+        return;
+      case "forbidden":
+        res
+          .status(403)
+          .json({ error: result.reason, code: "FORBIDDEN" });
+        return;
+      case "missing_reason":
+        res.status(400).json({
+          error: "A reversal reason of at least 5 characters is required.",
+          code: "MISSING_REASON",
+        });
+        return;
+      case "period_locked":
+        res.status(409).json({
+          error: `Reversal refused: today (${result.entryDate}) falls in ${result.periodLabel ? `closed period '${result.periodLabel}'` : "no open accounting period"}.`,
+          code: "PERIOD_LOCKED",
+          entryDate: result.entryDate,
+          periodLabel: result.periodLabel,
+        });
+        return;
+    }
+  },
+);
+
+router.get(
+  "/accounting/journal-entries",
+  async (req, res): Promise<void> => {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const status = typeof req.query["status"] === "string"
+      ? (req.query["status"] as string)
+      : null;
+    const conds = [];
+    if (status === "posted" || status === "reversed") {
+      conds.push(eq(journalEntriesTable.status, status));
+    }
+    const rows = await db
+      .select()
+      .from(journalEntriesTable)
+      .where(conds.length ? and(...conds) : undefined)
+      .orderBy(desc(journalEntriesTable.postedAt))
+      .limit(200);
+    res.json({ entries: rows.map((r) => serializeJournalEntry(r)) });
+  },
+);
+
+router.get(
+  "/accounting/journal-entries/:id",
+  async (req, res): Promise<void> => {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [je] = await db
+      .select()
+      .from(journalEntriesTable)
+      .where(eq(journalEntriesTable.id, id));
+    if (!je) {
+      res.status(404).json({ error: "Journal entry not found" });
+      return;
+    }
+    const lines = await db
+      .select()
+      .from(journalEntryLinesTable)
+      .where(eq(journalEntryLinesTable.journalEntryId, je.id))
+      .orderBy(asc(journalEntryLinesTable.lineNo));
+    res.json({ journalEntry: serializeJournalEntry(je, lines) });
+  },
+);
+
+// --- Accounting periods management ----------------------------------------
+router.get("/accounting/periods", async (req, res): Promise<void> => {
+  const role = req.authUser?.role;
+  if (role !== "admin" && role !== "approver") {
+    res.status(403).json({ error: "Admins or approvers only" });
+    return;
+  }
+  const rows = await db
+    .select()
+    .from(accountingPeriodsTable)
+    .orderBy(desc(accountingPeriodsTable.periodStart));
+  res.json({ periods: rows });
+});
+
+router.post("/accounting/periods", async (req, res): Promise<void> => {
+  if (req.authUser?.role !== "admin") {
+    res.status(403).json({ error: "Admins only" });
+    return;
+  }
+  const Body = z.object({
+    label: z.string().min(1).max(100),
+    periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    status: z.enum(["open", "closed"]).optional(),
+  });
+  const parsed = Body.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({
+      error: parsed.error.issues[0]?.message ?? "Invalid body",
+    });
+    return;
+  }
+  if (parsed.data.periodEnd < parsed.data.periodStart) {
+    res
+      .status(400)
+      .json({ error: "periodEnd must be on or after periodStart" });
+    return;
+  }
+  try {
+    const [row] = await db
+      .insert(accountingPeriodsTable)
+      .values({
+        label: parsed.data.label,
+        periodStart: parsed.data.periodStart,
+        periodEnd: parsed.data.periodEnd,
+        status: parsed.data.status ?? "open",
+      })
+      .returning();
+    res.status(201).json({ period: row });
+  } catch (err) {
+    req.log?.error({ err }, "create period failed");
+    res.status(409).json({
+      error: "Could not create period (label may already exist).",
+    });
+  }
+});
+
+router.post(
+  "/accounting/periods/:id/close",
+  async (req, res): Promise<void> => {
+    if (req.authUser?.role !== "admin") {
+      res.status(403).json({ error: "Admins only" });
+      return;
+    }
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    // Take the same row lock that postingService.findCoveringPeriod takes
+    // (FOR UPDATE inside the posting tx). This guarantees that any in-flight
+    // posting transaction either commits before this UPDATE runs (in which
+    // case the JE is part of the now-closed period's history — accepted),
+    // or it blocks here until the close commits and then *fails* its own
+    // findCoveringPeriod check on retry. Without this lock the close could
+    // commit while a posting tx is mid-flight and still allow the post to
+    // commit — i.e., a closed-period bypass.
+    const closedRow = await db.transaction(async (tx) => {
+      const lockResult = (await tx.execute(sql`
+        SELECT id FROM accounting_periods WHERE id = ${id} FOR UPDATE
+      `)) as unknown as { rows: Array<{ id: number }> };
+      if (lockResult.rows.length === 0) return null;
+      const [updated] = await tx
+        .update(accountingPeriodsTable)
+        .set({
+          status: "closed",
+          closedAt: new Date(),
+          closedByUserId: req.authUser!.id,
+        })
+        .where(eq(accountingPeriodsTable.id, id))
+        .returning();
+      return updated ?? null;
+    });
+    if (!closedRow) {
+      res.status(404).json({ error: "Period not found" });
+      return;
+    }
+    res.json({ period: closedRow });
   },
 );
 

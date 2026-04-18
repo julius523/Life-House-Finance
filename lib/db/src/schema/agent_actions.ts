@@ -76,6 +76,25 @@ export const agentActionsTable = pgTable(
     }),
     reviewedAt: timestamp("reviewed_at"),
     reviewNotes: text("review_notes"),
+    /**
+     * Step 8 — controlled ledger posting.
+     *
+     * When an approved `draft_journal_entry` is posted into the real
+     * ledger via the posting workflow, this column points to the
+     * resulting `journal_entries.id`. It is also indexed by the
+     * `journal_entries.agentActionId` UNIQUE partial index, so DB-level
+     * idempotency holds: at most one posted JE per approved draft.
+     *
+     * Nullable because (a) non-JE actions never post, and (b) a JE draft
+     * can sit in the approved-but-not-yet-posted state.
+     *
+     * Note: we deliberately avoid a foreign key to journal_entries here
+     * because journal_entries.agentActionId already FKs back to this
+     * table — adding the reverse FK would create a circular dependency
+     * for the migration tool. The application code keeps the two sides
+     * in sync inside a single transaction.
+     */
+    postedJournalEntryId: integer("posted_journal_entry_id"),
   },
   (table) => [
     index("agent_actions_status_idx").on(table.status, table.createdAt),

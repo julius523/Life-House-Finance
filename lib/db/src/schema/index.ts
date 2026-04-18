@@ -20,3 +20,5 @@ export * from "./copilot_documents";
 export * from "./copilot_document_chunks";
 export * from "./copilot_message_sources";
 export * from "./agent_actions";
+export * from "./accounting_periods";
+export * from "./journal_entries";
