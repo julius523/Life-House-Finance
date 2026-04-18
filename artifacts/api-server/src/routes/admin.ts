@@ -318,6 +318,7 @@ router.get("/admin/email-settings", async (_req, res): Promise<void> => {
       defaultSubject: fallback.subject,
       defaultBody: fallback.body,
       variables: TEMPLATE_VARIABLES[type] ?? [],
+      sampleVariables: SAMPLE_VARIABLES[type] ?? {},
       updatedAt: stored?.updatedAt ?? null,
     };
   });

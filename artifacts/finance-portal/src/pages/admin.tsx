@@ -603,12 +603,26 @@ type TemplateForm = {
   defaultSubject: string;
   defaultBody: string;
   variables: string[];
+  sampleVariables: Record<string, string>;
 };
 
 const TEMPLATE_LABELS: Record<string, string> = {
   bill_needs_correction: "Bill sent back for correction",
   expense_needs_correction: "Expense sent back for correction",
 };
+
+// Mirrors renderTemplate in artifacts/api-server/src/lib/notifications.ts so
+// admins see the same substitution behavior as a real send.
+function renderTemplatePreview(
+  template: string,
+  variables: Record<string, string>,
+): string {
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => {
+    const v = variables[key];
+    if (v === undefined || v === null) return "";
+    return String(v);
+  });
+}
 
 function EmailSettingsCard() {
   const { toast } = useToast();
@@ -810,24 +824,65 @@ function EmailSettingsCard() {
                       </Button>
                     </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label>Subject</Label>
-                    <Input
-                      value={t.subject}
-                      onChange={(e) =>
-                        updateTemplate(t.type, { subject: e.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Body</Label>
-                    <Textarea
-                      value={t.body}
-                      onChange={(e) =>
-                        updateTemplate(t.type, { body: e.target.value })
-                      }
-                      rows={5}
-                    />
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <Label>Subject</Label>
+                        <Input
+                          value={t.subject}
+                          onChange={(e) =>
+                            updateTemplate(t.type, { subject: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Body</Label>
+                        <Textarea
+                          value={t.body}
+                          onChange={(e) =>
+                            updateTemplate(t.type, { body: e.target.value })
+                          }
+                          rows={8}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="flex items-center justify-between gap-2">
+                        <span>Preview</span>
+                        <span className="text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
+                          Sample — not sent
+                        </span>
+                      </Label>
+                      <div className="rounded-md border bg-muted/30 overflow-hidden">
+                        <div className="border-b bg-background/60 px-3 py-2 text-xs">
+                          <div className="text-muted-foreground">Subject</div>
+                          <div className="font-semibold break-words">
+                            {renderTemplatePreview(
+                              t.subject,
+                              t.sampleVariables,
+                            ) || (
+                              <span className="text-muted-foreground italic font-normal">
+                                (empty)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="px-3 py-2 text-sm whitespace-pre-wrap break-words min-h-[7rem]">
+                          {renderTemplatePreview(
+                            t.body,
+                            t.sampleVariables,
+                          ) || (
+                            <span className="text-muted-foreground italic">
+                              (empty)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Filled in with the same sample values used by{" "}
+                        <span className="font-medium">Send test to me</span>.
+                      </p>
+                    </div>
                   </div>
                 </div>
               ))}
