@@ -1,0 +1,1344 @@
+# Life House Reentry Open-Source Finance Stack
+
+## Comprehensive Implementation Guide for Replit or Manus AI
+
+## 1. Objective
+
+Build a branded, low-cost, implementation-ready finance operations stack for Life House Reentry that supports:
+
+* organizational expense reporting
+* receipt tracking and OCR
+* document retention and audit readiness
+* bank transaction import and reconciliation
+* GAAP-style accounting workflows
+* program / grant / fund / site reporting
+* approval workflows for reimbursements and vendor spending
+* clean month-end close processes
+* future automation without locking the organization into expensive software
+
+This guide is written so it can be handed directly to Replit or Manus AI as a build spec.
+
+---
+
+## 2. Recommended Strategy
+
+### Core Decision
+
+Use **one primary accounting system**, **one receipt/document system**, and **one bank-ingestion method**.
+
+### Recommended Stack
+
+#### Required
+
+1. **ERPNext** → core accounting, expense approvals, reimbursements, vendor bills, reporting, dimensions, budgets, reconciliations
+2. **Paperless-ngx** → OCR, searchable receipt storage, bank statement storage, invoice storage, document tagging, audit trail
+3. **PostgreSQL / MariaDB / Redis** → databases and caching required by the core apps
+4. **Docker Compose** → simplest low-cost deployment and maintenance path
+5. **Caddy or Traefik** → free HTTPS with automatic certificates
+
+#### Optional Later
+
+6. **Actual Budget** → optional cash-monitoring or departmental budgeting sidecar, not system of record
+7. **Custom integration microservice** → sync helper between Paperless and ERPNext, webhook listener, import parser, notification service
+8. **MinIO or S3-compatible storage** → optional object storage for backups and attachments
+9. **Metabase or Apache Superset** → optional advanced dashboards
+
+### What We Are Not Doing
+
+* We are **not** running multiple accounting ledgers in parallel.
+* We are **not** making Firefly III or Actual Budget the official accounting system.
+* We are **not** depending on paid AI APIs to make the core stack work.
+* We are **not** requiring live bank sync in phase 1.
+
+### Why
+
+This keeps the system:
+
+* cheap
+* auditable
+* easier to maintain
+* easier to train staff on
+* less likely to create duplicate transactions or broken reconciliations
+
+---
+
+## 3. Branding Requirements for Life House Reentry
+
+Apply these brand standards across any custom portal, admin shell, dashboards, integrations, or documentation UI.
+
+### Brand Font
+
+* **Montserrat** for all app UI, headings, buttons, forms, nav, cards, and PDFs
+
+### Brand Colors
+
+* Primary Green: `#24b556`
+* Primary Blue: `#4175f4`
+* Accent Purple: `#9649e2`
+* Deep Blue: `#1800ad`
+* White: `#ffffff`
+
+### UI Style Rules
+
+* clean, trustworthy, nonprofit-professional
+* soft rounded corners, not overly playful
+* strong contrast for accessibility
+* white background preferred for forms and accounting screens
+* buttons should primarily use Life House green or blue
+* status colors:
+
+  * success = green
+  * info = blue
+  * warning = amber/orange
+  * danger = red
+* headings should use Montserrat semi-bold or bold
+* body text should use Montserrat regular
+
+### App Tone
+
+* structured
+* compassionate
+* credible
+* clear
+* audit-ready
+
+---
+
+## 4. What Replit or Manus AI Should Build
+
+Replit or Manus AI should **not** rebuild ERPNext or Paperless from scratch.
+They should build the **integration layer**, **branding layer**, **deployment scripts**, **workflows**, **custom reports**, and **optional internal portal** around proven open-source apps.
+
+### Build Scope
+
+1. deployment scripts
+2. environment templates
+3. reverse proxy setup
+4. custom ERPNext configuration guide
+5. custom Paperless configuration guide
+6. receipt-to-expense matching workflow
+7. branded internal finance portal shell (optional)
+8. import tools for bank CSV / OFX / QFX normalization
+9. approval workflow rules
+10. month-end close checklist and automation helpers
+11. backup scripts
+12. user/role matrix
+13. audit log standards
+14. documentation
+
+---
+
+## 5. Source Repositories to Use
+
+Do not paste all third-party code into one repo. Clone the official projects and build a clean orchestration layer around them.
+
+### Upstream Projects
+
+```bash
+git clone https://github.com/frappe/frappe_docker.git
+# used to deploy ERPNext with Docker
+
+git clone https://github.com/paperless-ngx/paperless-ngx.git
+# used for receipt and document management
+```
+
+### Optional Projects
+
+```bash
+git clone https://github.com/actualbudget/actual.git
+# optional budgeting sidecar, not the official ledger
+```
+
+### Your Custom Repo
+
+Create a separate repo for your organization-specific implementation.
+Suggested name:
+
+```bash
+lifehouse-finance-stack
+```
+
+---
+
+## 6. Recommended Repository Structure
+
+```text
+lifehouse-finance-stack/
+  README.md
+  .env.example
+  docker-compose.override.yml
+  docs/
+    implementation-guide.md
+    admin-manual.md
+    month-end-close-sop.md
+    disaster-recovery.md
+    user-training.md
+  infra/
+    caddy/
+      Caddyfile
+    scripts/
+      backup.sh
+      restore.sh
+      init-folders.sh
+      bank-import-normalizer.py
+      receipt-sync.py
+  branding/
+    logo/
+    fonts/
+    theme/
+      lifehouse-theme.css
+      app-branding.md
+  integrations/
+    paperless_to_erpnext/
+      app.py
+      mapping.py
+      requirements.txt
+    bank_import/
+      parser.py
+      rules.yaml
+  templates/
+    expense-report-template.md
+    vendor-bill-checklist.md
+    receipt-naming-rules.md
+    chart-of-accounts-template.csv
+    accounting-dimensions-template.csv
+  prompts/
+    replit_master_prompt.md
+    manus_master_prompt.md
+```
+
+---
+
+## 7. Cheapest Implementation Path
+
+### Phase 1: Free / Cheapest Functional Version
+
+Use:
+
+* ERPNext (self-hosted)
+* Paperless-ngx (self-hosted)
+* Docker Compose
+* manual bank statement imports (CSV / OFX / QFX)
+* local file or attached-document storage
+* free HTTPS via Caddy + Let's Encrypt
+
+This avoids paid bank APIs, paid OCR APIs, and paid accounting software subscriptions.
+
+### Phase 2: Low-Cost Upgrades Only If Needed
+
+Possible later additions:
+
+* live bank sync provider
+* object storage backup
+* email sending provider
+* business SMTP provider
+* advanced BI dashboards
+* AI-assisted coding suggestions
+
+---
+
+## 8. Important Truths Before Building
+
+1. **GAAP-level accounting is not created by software alone.**
+2. You must define chart of accounts, approval rules, reconciliations, close procedures, document retention, and access controls.
+3. The open-source stack should support the workflow, not replace accounting judgment.
+4. The biggest risk is bad configuration, not lack of features.
+5. Manual bank import in phase 1 is smarter than unstable auto-sync.
+
+---
+
+## 9. Required Inputs Before Final Wiring
+
+These are the items to gather before final implementation. Use placeholders until they are available.
+
+### Absolutely Required
+
+* production domain or subdomain names
+* admin email address
+* organization legal name exactly as it should appear in the app
+* timezone
+* chart of accounts preference
+* reporting dimensions to track
+* list of users and roles
+* preferred hosting location
+
+### Inputs Already Provided
+
+* initial domain target: `lifehouseaccounting.replit.app`
+* current hosting path: DigitalOcean now, NAS later
+* primary owner: Kai
+* additional owners / backup admins: Julius and Brittney
+* Google Workspace is in use and may be used for SMTP and workflow email ingestion
+* the app should support a deeply embedded ChatGPT-powered agent layer across finance, documents, reporting, and admin help flows
+
+### Strongly Recommended
+
+* logo files (SVG and PNG)
+* header and footer branding assets
+* expense approval policy
+* vendor approval policy
+* reimbursement policy
+* month-end close owner
+* backup owner
+* list of programs / grants / sites / departments
+
+### Only Needed for Certain Features
+
+* SMTP credentials for outgoing email
+* bank sync credentials if live sync is ever added through a direct provider
+* S3-compatible storage credentials if remote backups are used
+* AI API keys for the embedded assistant layer
+* Google Workspace service credentials only if Gmail automation is used beyond standard SMTP
+
+### Cheapest Recommended Approach for Now
+
+* no paid AI key required
+* no paid bank API required
+* no paid OCR service required
+* no paid PDF service required
+
+---
+
+## 10. Open-Source Apps and Their Roles
+
+### ERPNext = System of Record
+
+Use ERPNext for:
+
+* chart of accounts
+* journal entries
+* accounts payable
+* expense claims
+* employee advances
+* payment entries
+* bank reconciliation
+* accounting periods
+* budgets
+* dimensions / cost centers
+* reporting
+* closing books
+
+### Paperless-ngx = Document System of Record
+
+Use Paperless-ngx for:
+
+* receipts
+* vendor invoices
+* bank statements
+* grant notices
+* contracts
+* OCR
+* tags and correspondents
+* searchable archive
+* retention support
+
+### Optional Actual Budget = Non-Accounting Sidecar
+
+Use only for:
+
+* internal cash visibility
+* department-level spending awareness
+* simple planning dashboards
+  Do **not** use as the official accounting ledger.
+
+---
+
+## 10A. Website Section: `Accounting`
+
+Add a top-level website or app navigation item called:
+
+* **Accounting**
+
+This section should present Life House Reentry as offering a serious GAAP-aligned accounting environment inside the finance stack.
+
+### Purpose of the Section
+
+* explain the accounting backbone clearly
+* communicate audit readiness and strong internal controls
+* show that the system is built for real organizational finance, not casual expense tracking
+* make the section understandable to non-accountants while still credible to finance professionals
+
+### UX Requirements
+
+* page title: **Accounting**
+* intro banner with Life House branding
+* clean icon cards or expandable sections
+* strong visual hierarchy
+* plain-language explanations under each technical concept
+* “Learn More” expandable subsections for advanced items
+* mobile responsive
+* accessible contrast and spacing
+
+### Recommended Page Structure
+
+1. hero / intro
+2. core GAAP compliance features
+3. operational accounting features
+4. advanced accounting features
+5. internal controls and audit readiness
+6. reporting outputs
+7. future-ready capabilities
+
+### Suggested Hero Copy
+
+**Accounting**
+
+Build on a real accounting backbone designed for disciplined reporting, strong internal controls, and audit-ready financial operations. The Life House finance stack is designed to support accrual-based accounting, reconciliations, document-backed transactions, role-based approvals, and clean financial reporting.
+
+### Section 1: Core GAAP Compliance Features
+
+#### Accrual Accounting Method
+
+Support accrual-based accounting so revenue is recorded when earned and expenses are recorded when incurred, not only when cash moves.
+
+#### Revenue Recognition Support
+
+Provide configurable workflows that can support structured revenue recognition logic when contracts, obligations, and timing rules require it.
+
+#### Expense Matching Principle
+
+Enable expenses to be recorded in the same period as the revenue or program activity they support.
+
+#### Full Disclosure and Reporting
+
+Support reporting outputs such as:
+
+* Balance Sheet / Statement of Financial Position
+* Income Statement / Statement of Activities
+* Cash Flow Statement
+* Statement of Changes in Net Assets / Equity
+
+#### Consistency and Standardized Chart of Accounts
+
+Use a standardized chart of accounts and consistent accounting policies across reporting periods.
+
+### Section 2: Functional and Operational Features
+
+#### General Ledger Management
+
+Maintain a secure central ledger for all approved accounting activity.
+
+#### Internal Controls and Audit Trails
+
+Log key transactions, edits, approvals, timestamps, and user actions for audit-readiness.
+
+#### Automated Reconciliation
+
+Support bank reconciliation and balance sheet reconciliation workflows to reduce manual error.
+
+#### Fixed Asset Management
+
+Support tracking for fixed assets, depreciation, amortization, and asset lifecycle events.
+
+#### Multi-Entity Consolidation
+
+Design the architecture so multiple entities, sites, or affiliated operations can be supported later if needed.
+
+### Section 3: Advanced and Technical Features
+
+#### Internal-Use Software Accounting
+
+Support separate treatment of capitalizable versus expensed internal-use software costs if required by policy.
+
+#### Lease Accounting
+
+Allow lease records and related schedules to be tracked if operating or finance lease workflows are needed.
+
+#### Multi-Currency Support
+
+Keep architecture compatible with multi-currency operations if future growth requires it.
+
+#### Security and Access Controls
+
+Use role-based access, secure credential handling, environment variables, audit logs, and controlled permissions to protect data integrity.
+
+### Section 4: Internal Controls and Audit Readiness
+
+Show the following internal control concepts:
+
+* separation of duties
+* approval chains
+* attachment requirements
+* reconciliation procedures
+* period close controls
+* change logging
+* restricted access by role
+
+### Section 5: Reporting Outputs
+
+Highlight that the system should support:
+
+* monthly management reports
+* program-level expense reports
+* grant / contract reporting
+* cash reports
+* missing receipt reports
+* reconciliation exception reports
+* audit support packages
+
+### Replit Implementation Instructions for the `Accounting` Page
+
+1. create a new route: `/accounting`
+2. add `Accounting` to the main navigation
+3. use Montserrat font and Life House brand colors
+4. create reusable section-card components for each feature group
+5. use accordion or expandable cards for technical items
+6. include icons for ledger, controls, reporting, reconciliation, security, and audit
+7. include a CTA area at the bottom such as `View Reports`, `Upload Documents`, or `Go to Finance Dashboard`
+8. keep text editable through a central content config file or CMS-like JSON object
+9. make the page permission-aware if it is inside the authenticated app
+10. include analytics or event tracking for feature engagement if desired
+
+### Suggested Front-End Component Structure
+
+```text
+AccountingPage
+  AccountingHero
+  AccountingFeatureGrid
+  AccountingComplianceSection
+  AccountingOperationsSection
+  AccountingAdvancedSection
+  AccountingControlsSection
+  AccountingReportsSection
+  AccountingCTA
+```
+
+### Suggested Content Config Object
+
+```json
+{
+  "title": "Accounting",
+  "intro": "Build on a real accounting backbone designed for disciplined reporting, strong internal controls, and audit-ready financial operations.",
+  "sections": [
+    {
+      "heading": "Core GAAP Compliance Features",
+      "items": [
+        "Accrual Accounting Method",
+        "Revenue Recognition Support",
+        "Expense Matching Principle",
+        "Full Disclosure and Reporting",
+        "Consistency and Standardized Chart of Accounts"
+      ]
+    },
+    {
+      "heading": "Functional and Operational Features",
+      "items": [
+        "General Ledger Management",
+        "Internal Controls and Audit Trails",
+        "Automated Reconciliation",
+        "Fixed Asset Management",
+        "Multi-Entity Consolidation"
+      ]
+    },
+    {
+      "heading": "Advanced and Technical Features",
+      "items": [
+        "Internal-Use Software Accounting",
+        "Lease Accounting",
+        "Multi-Currency Support",
+        "Security and Access Controls"
+      ]
+    }
+  ]
+}
+```
+
+### Important Build Rule
+
+Do not market the system as fully compliant with any accounting standard unless the underlying workflows, policies, and reports are actually configured and tested. Phrase the section as **supports**, **enables**, or **is designed for** those accounting requirements unless verified in production.
+
+---
+
+## 11. Functional Requirements
+
+### A. Expense Reporting
+
+The app must support:
+
+* employee reimbursement requests
+* staff expense claims
+* attach one or more receipts
+* expense date
+* merchant/vendor
+* description
+* amount
+* payment method
+* program / grant / fund / site / department coding
+* manager approval
+* finance approval
+* status tracking
+* rejection reason
+* reimbursement date
+* link to accounting entry
+
+### B. Vendor Spend / Bills
+
+* vendor profile
+* invoice upload
+* due date
+* amount
+* coding by dimension
+* bill approval workflow
+* payment status
+* attached source documentation
+
+### C. Receipt Tracking
+
+* OCR on uploaded receipts
+* searchable text
+* vendor tagging
+* amount verification
+* date capture
+* file retention
+* link from receipt to related ERPNext record
+
+### D. Bank Import and Reconciliation
+
+* import CSV / OFX / QFX statements
+* normalize columns
+* dedupe based on transaction id + date + amount
+* match transactions to ERP entries
+* flag unmatched items
+* monthly reconciliation report
+
+### E. Reporting
+
+Minimum reports:
+
+* statement of activities / P&L equivalent
+* balance sheet / statement of financial position
+* cash by bank account
+* expense by program
+* expense by grant
+* expense by site
+* expense by department
+* unreconciled transactions
+* missing receipt report
+* pending approvals report
+* vendor spend report
+* month-end close checklist status
+
+### F. Security and Auditability
+
+* role-based access
+* document retention
+* immutable timestamps
+* creator / approver logging
+* backup policy
+* export capability
+* change history where supported
+
+---
+
+## 12. Non-Functional Requirements
+
+* mobile-friendly intake for receipts
+* desktop-friendly accounting UI
+* low-cost hosting
+* works without paid APIs
+* backup and restore must be documented
+* staff should be trainable in under 2 hours for basic workflows
+* implementation should allow future migration, not lock-in
+
+---
+
+## 13. Hosting Strategy
+
+### Best Practical Recommendation
+
+Use Replit or Manus AI to generate and maintain the implementation assets, but deploy the actual stack on a proper Linux server or VPS.
+
+### Why
+
+ERPNext and Paperless are real server applications with persistent storage and background jobs. They should not be treated like a tiny toy app.
+
+### Cheapest Acceptable Production Layout
+
+* 1 Linux VPS
+* Docker Compose
+* persistent volumes
+* Caddy for HTTPS
+* automated backups to secondary storage
+
+### Minimum Services
+
+* reverse proxy
+* ERPNext service group
+* Paperless service group
+* database(s)
+* Redis
+* backup cron job
+
+---
+
+## 14. High-Level Architecture
+
+```text
+[Staff Browser / Mobile]
+        |
+        v
+[Branded Portal or Direct App Access]
+        |
+        +--> [ERPNext]
+        |
+        +--> [Paperless-ngx]
+        |
+        +--> [Custom Integration Service]
+                    |
+                    +--> receipt sync
+                    +--> bank import normalization
+                    +--> webhook/event logging
+                    +--> report helpers
+```
+
+---
+
+## 15. Data Design for Reporting Dimensions
+
+At minimum, every expense-related transaction should be able to carry the following tags or dimensions:
+
+* fiscal year
+* fund
+* grant
+* program
+* site
+* department
+* spender / requestor
+* vendor
+* expense category
+* restricted / unrestricted
+
+### Suggested Core Dimensions
+
+1. **Fund**
+
+   * General Operating
+   * Restricted
+   * Temporarily Restricted
+   * Capital
+   * Emergency Assistance
+
+2. **Program**
+
+   * Housing Stabilization
+   * Recuperative / Post-Hospital Support
+   * CHW Training
+   * Transportation Support
+   * Case Management
+   * Reentry Support
+   * Operations
+   * Development / Fundraising
+
+3. **Site**
+
+   * Sacramento Main
+   * any future home / residence / office / site
+
+4. **Department**
+
+   * Finance
+   * Operations
+   * Programs
+   * Leadership
+   * Admin
+   * Development
+
+5. **Grant / Contract**
+
+   * separate code for each award or contract
+
+6. **Payer / Revenue Source**
+
+   * private donation
+   * grant
+   * contract
+   * reimbursement
+   * earned income
+   * CalAIM / MCP / FFS as applicable
+
+7. **Client Service Line**
+
+   * housing
+   * CHW
+   * transportation
+   * navigation
+   * admin shared cost
+
+8. **Restriction Status**
+
+   * restricted
+   * unrestricted
+   * board-designated
+
+9. **Cost Behavior**
+
+   * direct program cost
+   * shared admin cost
+   * occupancy cost
+   * payroll cost
+   * pass-through assistance
+
+10. **Vendor Type**
+
+* landlord
+* utility
+* transportation
+* staffing
+* software
+* food
+* client assistance
+* professional services
+
+11. **Approval Chain**
+
+* submitter
+* manager
+* finance
+* executive override
+
+12. **Custom Dynamic Dimensions**
+    The app must allow admins to add, rename, disable, delete, reorder, and require dimensions without needing code changes. Dimensions should be metadata-driven and configurable from an admin panel.
+
+---
+
+## 16. Suggested Chart of Accounts Structure
+
+This should be customized with your accountant, but the build should support import of a CSV-based chart of accounts.
+
+### Major Sections
+
+* Assets
+* Liabilities
+* Net Assets / Equity
+* Revenue
+* Expenses
+
+### Expense Categories Example
+
+* Salaries and Wages
+* Payroll Taxes
+* Contractor Services
+* Rent
+* Utilities
+* Transportation Assistance
+* Program Supplies
+* Client Assistance
+* Staff Travel
+* Insurance
+* Software and Subscriptions
+* Office Supplies
+* Training and Education
+* Marketing and Outreach
+* Professional Fees
+* Bank Fees
+* Depreciation
+* Miscellaneous
+
+---
+
+## 17. User Roles
+
+### Minimum Roles
+
+1. **System Admin**
+2. **Finance Admin**
+3. **Finance Staff**
+4. **Program Manager Approver**
+5. **Staff Submitter**
+6. **Read-Only Auditor**
+7. **Executive Read-Only**
+
+### Permissions Summary
+
+* Staff Submitter: submit expenses, upload receipts, view own records
+* Program Manager: approve or reject direct reports' expenses
+* Finance Staff: post bills, reconcile, review documents, run reports
+* Finance Admin: close periods, manage chart of accounts, manage users
+* Auditor: read-only access to reports, documents, and audit logs
+
+---
+
+## 18. Receipt Workflow
+
+### Phase 1 Workflow
+
+1. user uploads receipt to Paperless intake inbox
+2. Paperless OCRs and tags the document
+3. finance or user creates expense claim in ERPNext
+4. ERPNext record stores the Paperless document ID or URL reference
+5. approver reviews
+6. finance reviews coding and completeness
+7. accounting posts transaction
+8. bank import later matches the outgoing payment or card transaction
+9. month-end report flags any expense with missing documentation
+
+### Naming Convention
+
+```text
+YYYY-MM-DD_VENDOR_AMOUNT_CATEGORY_REQUESTOR
+```
+
+Example:
+
+```text
+2026-04-13_COSTCO_84.22_PROGRAMSUPPLIES_JJACKSON
+```
+
+---
+
+## 19. Bank Import Workflow
+
+### Strategy
+
+Use a layered approach:
+
+1. **Phase 1 live-ish and free:** ingest transaction notification emails from Google Workspace and parse them into a staging table
+2. **Phase 1 accounting truth:** continue to support manual CSV / OFX / QFX imports for reconciliation accuracy
+3. **Phase 2 optional:** add direct bank sync provider only if it proves stable, secure, and worth the cost
+
+### Email-Based Transaction Tracking
+
+If the bank sends transaction emails or alerts:
+
+* create a dedicated mailbox such as `bankfeeds@lifehousereentry.com`
+* auto-forward transaction alerts there
+* parse sender, subject, timestamp, merchant, amount, masked account, and transaction type
+* create a staged bank event record
+* match staged records later against formal statement imports
+* never treat email alerts as the final accounting record by themselves
+
+### Why This Matters
+
+Email alerts can provide near-live visibility while manual imports remain the source used for final reconciliation and month-end accuracy.
+
+### Phase 1 = Manual Import
+
+Support import of:
+
+* CSV
+* OFX
+* QFX
+
+### Normalization Rules
+
+The import parser should normalize to a standard schema:
+
+* transaction_id
+* account_name
+* posting_date
+* description
+* amount
+* direction
+* balance
+* source_file
+* raw_hash
+* source_type (`statement_import`, `email_alert`, `manual_entry`)
+
+### Dedupe Rule
+
+A transaction is duplicate if:
+
+* same account
+* same date
+* same absolute amount
+* same normalized description OR same bank transaction id
+
+### Match Rule Priority
+
+1. exact reference / check number / transfer id
+2. exact amount + date window + vendor name similarity
+3. exact amount + same employee reimbursement batch
+4. email alert matched to later statement line
+5. manual review queue
+
+### Security Rule
+
+Do not hard-code bank account or routing details into app source, prompts, public docs, or front-end code. Store any bank metadata only in encrypted admin settings or secure secrets where absolutely necessary.
+
+## 20. Approval Workflow Rules
+
+### Expense Claim
+
+* status: Draft → Submitted → Manager Approved → Finance Approved → Posted → Paid
+* rejection path: Submitted / Manager Approved / Finance Approved → Rejected
+* required fields before submit:
+
+  * expense date
+  * vendor
+  * amount
+  * category
+  * receipt attached or documented reason for no receipt
+  * dimension coding
+
+### Additional Robust Workflows Required
+
+* staff reimbursement workflow
+* company card transaction workflow
+* petty cash workflow if enabled
+* vendor onboarding workflow
+* vendor bill entry and approval
+* recurring bill workflow
+* bank transfer request workflow
+* check request workflow
+* donation deposit logging workflow
+* restricted-fund purchase validation workflow
+* missing receipt remediation workflow
+* reimbursement batch payout workflow
+* monthly accrual workflow
+* prepaid expense workflow
+* fixed asset purchase workflow
+* correction / reclass journal workflow
+* attachment exception workflow
+* month-end close checklist workflow
+* year-end close support workflow
+* audit request package workflow
+
+### Vendor Bill
+
+* status: Draft → Submitted → Reviewed → Approved for Payment → Paid
+
+### Missing Receipt Rule
+
+Any posted expense over your defined threshold without a receipt should appear on a missing-receipt exception report.
+
+---
+
+## 21. Month-End Close SOP Requirements
+
+The app and guide should support this monthly sequence:
+
+1. stop new postings for prior month except finance
+2. import final bank activity
+3. reconcile each bank account
+4. review unmatched transactions
+5. verify missing receipt report
+6. review expense coding by program/grant/site
+7. review prepaid / deferred items if used
+8. review AP and reimbursement liabilities
+9. lock or close period
+10. export report package
+
+### Minimum Monthly Report Package
+
+* balance sheet
+* statement of activities
+* cash by account
+* expense by dimension
+* unreconciled items
+* missing receipts
+* AP aging if used
+
+---
+
+## 22. Backup and Disaster Recovery
+
+### Required Backups
+
+* ERPNext database
+* Paperless database
+* Paperless documents / media
+* ERPNext site files / attachments
+* `.env` files stored securely
+* reverse proxy config
+* custom integration repo
+
+### Backup Frequency
+
+* database daily
+* documents daily
+* full app config daily
+* optional weekly encrypted offsite copy
+
+### Restore Testing
+
+Test restore to a staging environment at least monthly.
+
+---
+
+## 23. Security Requirements
+
+* use HTTPS only
+* use strong admin passwords
+* enable MFA where available
+* separate admin from day-to-day users
+* least-privilege role design
+* no credentials hard-coded in repo
+* all secrets stored in environment variables
+* backup access restricted
+* receipt/document access should follow role policy
+
+---
+
+## 24. Environment Variables Checklist
+
+Use placeholders until final deployment.
+
+```env
+# General
+APP_ENV=production
+APP_TIMEZONE=America/Los_Angeles
+ORG_NAME=Life House Reentry
+BASE_DOMAIN=finance.yourdomain.org
+ADMIN_EMAIL=admin@yourdomain.org
+
+# ERPNext / Frappe
+ERPNEXT_SITE_NAME=erp.lifehousereentry.org
+DB_ROOT_PASSWORD=CHANGE_ME
+MYSQL_ROOT_PASSWORD=CHANGE_ME
+MARIADB_ROOT_PASSWORD=CHANGE_ME
+REDIS_CACHE_URL=redis://redis-cache:6379
+REDIS_QUEUE_URL=redis://redis-queue:6379
+REDIS_SOCKETIO_URL=redis://redis-socketio:6379
+
+# Paperless
+PAPERLESS_URL=https://docs.lifehousereentry.org
+PAPERLESS_SECRET_KEY=CHANGE_ME
+PAPERLESS_TIME_ZONE=America/Los_Angeles
+PAPERLESS_OCR_LANGUAGE=eng
+PAPERLESS_ADMIN_USER=admin
+PAPERLESS_ADMIN_PASSWORD=CHANGE_ME
+
+# SMTP (optional)
+SMTP_HOST=
+SMTP_PORT=
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM=
+
+# Optional S3 / MinIO backups
+S3_BUCKET=
+S3_REGION=
+S3_ACCESS_KEY=
+S3_SECRET_KEY=
+
+# Optional live bank sync later
+BANK_SYNC_PROVIDER=
+BANK_SYNC_API_KEY=
+BANK_SYNC_API_SECRET=
+```
+
+---
+
+## 25. Example Docker-Oriented Build Strategy
+
+### Step 1
+
+Deploy ERPNext using the official Docker deployment repo.
+
+### Step 2
+
+Deploy Paperless-ngx as a sibling service in the same Docker host.
+
+### Step 3
+
+Add Caddy in front of both.
+
+### Step 4
+
+Create shared backup scripts.
+
+### Step 5
+
+Create custom integration service for:
+
+* receipt linking
+* metadata sync
+* import normalization
+* exception reporting
+
+---
+
+## 26. Integration Service Requirements
+
+The custom service should be a small Python service or worker.
+
+### Functions
+
+1. monitor imported bank files
+2. normalize bank data
+3. optionally push staging records into ERPNext
+4. generate receipt exception reports
+5. create a Paperless document reference index for ERPNext use
+6. optionally send summary emails
+
+### Suggested Stack
+
+* Python
+* FastAPI for optional API endpoints
+* cron or APScheduler for jobs
+* requests/httpx
+* pydantic
+* pandas only if needed for CSV normalization
+* IMAP / Gmail API ingestion module for transaction alert parsing
+* webhook/event layer for agent actions and audit trails
+
+### Embedded Agent Requirements
+
+The app should include a deeply embedded ChatGPT-powered assistant that can help with:
+
+* expense entry guidance
+* coding suggestions based on past patterns
+* receipt review support
+* missing-field detection
+* report explanation in plain language
+* policy reminders
+* document lookup support
+* month-end checklist assistance
+* audit package assembly help
+* admin setup help
+* natural-language search across transactions and documents
+
+### Agent Guardrails
+
+* agent suggestions must never auto-post accounting entries without human approval
+* agent can draft, classify, summarize, explain, and recommend
+* final approval stays with authorized humans
+* all agent actions must be logged
+* include toggle controls for where the agent is allowed to assist
+
+---
+
+## 27. Suggested Internal API Endpoints for Custom Layer
+
+```text
+POST /api/bank/import
+POST /api/bank/normalize
+GET  /api/bank/exceptions
+POST /api/receipts/link
+GET  /api/receipts/unlinked
+GET  /api/reports/missing-receipts
+GET  /api/reports/unreconciled
+POST /api/webhooks/paperless
+POST /api/webhooks/erpnext
+```
+
+---
+
+## 28. Master Prompt for Replit or Manus AI
+
+Use this as the implementation prompt.
+
+```text
+Build a production-ready open-source finance operations stack for Life House Reentry.
+
+Do NOT rebuild ERPNext or Paperless-ngx from scratch.
+Use official upstream open-source projects and create a clean integration layer, deployment scripts, and configuration package.
+
+Primary system of record: ERPNext.
+Document and receipt system: Paperless-ngx.
+Optional budgeting sidecar: Actual Budget, but not as the official ledger.
+
+Requirements:
+- apply Life House Reentry brand guidelines:
+  - Font: Montserrat
+  - Colors: #24b556, #4175f4, #9649e2, #1800ad, #ffffff
+- create Docker-based deployment package
+- include `.env.example`
+- include setup documentation
+- include backup and restore scripts
+- include bank CSV/OFX/QFX normalization script
+- include receipt linking workflow between Paperless and ERPNext
+- support dimensions for fund, grant, program, site, department
+- support expense claims, vendor bills, approvals, reconciliation, missing receipt reporting, and month-end close workflow
+- generate a clean docs folder with admin guide, training guide, month-end close SOP, disaster recovery SOP, and implementation checklist
+- optimize for free / cheapest solutions first
+- do not require paid AI APIs or paid bank APIs in phase 1
+- assume production deployment on Linux VPS using Docker Compose and free HTTPS
+- structure all custom code in a separate repo named lifehouse-finance-stack
+- include acceptance tests and a deployment checklist
+```
+
+---
+
+## 29. Deliverables Replit or Manus AI Must Produce
+
+1. README.md
+2. architecture diagram
+3. docker compose setup notes
+4. `.env.example`
+5. branded CSS/theme layer for any custom portal
+6. bank import normalizer script
+7. receipt-linking worker script
+8. report helper scripts
+9. deployment checklist
+10. backup and restore scripts
+11. admin training guide
+12. end-user training guide
+13. month-end close SOP
+14. implementation checklist
+15. role-permission matrix
+
+---
+
+## 30. Acceptance Criteria
+
+The build is done only when all of the following are true:
+
+* ERPNext and Paperless can both run successfully
+* HTTPS is configured
+* branding is applied to all custom layers
+* at least one bank file can be normalized and imported
+* at least one expense claim can be submitted and approved
+* at least one receipt can be uploaded, OCR’d, and linked
+* missing receipt report works
+* expense-by-program report works
+* expense-by-grant report works
+* backup script runs successfully
+* restore procedure is documented
+* users and permissions are documented
+* no secrets are hard-coded
+
+---
+
+## 31. Current Inputs Incorporated
+
+### Already Incorporated
+
+* current domain target: `lifehouseaccounting.replit.app`
+* hosting now: DigitalOcean
+* hosting later: NAS
+* primary operational owner: Kai
+* additional owners: Julius and Brittney
+* Google Workspace available for SMTP and email-based workflow automation
+* robust workflow preference: enabled
+* dynamic dimensions requirement: enabled
+* embedded agent requirement: enabled
+
+### Still Needed Before Production Deployment
+
+* exact logo files uploaded directly if Drive access is not available during implementation
+* final subdomain plan if moving beyond the temporary Replit domain
+* DigitalOcean deployment access method to be used by the builder
+* OpenAI API key for embedded agent setup
+* Gmail/Workspace configuration details if using mailbox ingestion for bank alerts
+
+## 32. Recommended Final Decision
+
+For Life House Reentry, the smartest low-cost path is:
+
+**ERPNext + Paperless-ngx + manual bank import + Docker + Caddy + custom integration layer**
+
+That gives you the strongest balance of:
+
+* free / cheap
+* open source
+* auditable
+* expandable
+* staff-usable
+* accountant-friendly
+
+Anything more complicated on day one is likely to waste time, create duplicates, and increase maintenance burden.
+
+---
+
+## 33. Next Step
+
+Once the missing inputs are provided, generate:
+
+1. a finalized implementation packet
+2. the `.env.example`
+3. the Replit/Manus AI master prompt
+4. the folder structure
+5. initial deployment scripts
+6. the role-permission matrix
+7. the month-end close SOP
