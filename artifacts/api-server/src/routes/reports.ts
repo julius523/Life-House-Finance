@@ -556,6 +556,12 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
 // are themselves status='posted' so they correctly net out the original.
 // ---------------------------------------------------------------------------
 router.get("/reports/trial-balance", async (req, res): Promise<void> => {
+  // Step 9 — Trial Balance is admin/approver only.
+  const role = req.authUser?.role;
+  if (role !== "admin" && role !== "approver") {
+    res.status(403).json({ error: "Trial Balance is restricted to admins and approvers." });
+    return;
+  }
   const parsed = QuerySchema.safeParse(req.query);
   if (!parsed.success) {
     res

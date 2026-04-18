@@ -242,18 +242,24 @@ async function sanitizeLines(
     if (raw.type !== "debit" && raw.type !== "credit") {
       return { ok: false, reason: `Line ${lineNo} has invalid type.` };
     }
-    // Step 9 — accept either `account_code` (preferred, set by the
-    // copilot draft tool) or the legacy free-text `account` field.
+    // Step 9 — accept three identifier shapes, in priority order:
+    //   (1) numeric `accountId` — direct CoA primary key (most precise)
+    //   (2) `account_code` — preferred string code from copilot drafts
+    //   (3) legacy `account` free-text field (back-compat for old payloads)
+    const accountIdNum =
+      typeof raw.accountId === "number" && Number.isInteger(raw.accountId)
+        ? raw.accountId
+        : null;
     const codeStr =
       typeof raw.account_code === "string" && raw.account_code.trim().length
         ? raw.account_code.trim()
         : typeof raw.account === "string" && raw.account.trim().length
           ? raw.account.trim()
           : null;
-    if (!codeStr) {
+    if (accountIdNum === null && !codeStr) {
       return {
         ok: false,
-        reason: `Line ${lineNo} is missing an account code.`,
+        reason: `Line ${lineNo} is missing an account_id or account_code.`,
       };
     }
     const cents = toCents(raw.amount);
@@ -263,13 +269,16 @@ async function sanitizeLines(
         reason: `Line ${lineNo} has invalid amount; must be positive.`,
       };
     }
-    const accountRaw = codeStr;
+    const accountRaw = codeStr ?? `#${accountIdNum}`;
     const accountKey =
-      extractCodeFromLegacyAccountString(accountRaw) ?? accountRaw;
+      codeStr === null
+        ? null
+        : (extractCodeFromLegacyAccountString(accountRaw) ?? accountRaw);
     pending.push({
       lineNo,
       type: raw.type,
       cents,
+      accountId: accountIdNum,
       accountRaw,
       accountKey,
       program: typeof raw.program === "string" ? raw.program : null,
@@ -278,22 +287,53 @@ async function sanitizeLines(
     });
   }
 
-  // Bulk-lookup all distinct codes in one query.
-  const distinctCodes = Array.from(new Set(pending.map((p) => p.accountKey)));
-  const coaRows = await tx
-    .select({
-      id: chartOfAccountsTable.id,
-      code: chartOfAccountsTable.code,
-      isActive: chartOfAccountsTable.isActive,
-      allowManualPosting: chartOfAccountsTable.allowManualPosting,
-    })
-    .from(chartOfAccountsTable)
-    .where(inArray(chartOfAccountsTable.code, distinctCodes));
-  const byCode = new Map(coaRows.map((r) => [r.code, r]));
+  // Bulk-lookup: by id when provided, otherwise by code.
+  const distinctIds = Array.from(
+    new Set(
+      pending
+        .map((p) => p.accountId)
+        .filter((x): x is number => x !== null),
+    ),
+  );
+  const distinctCodes = Array.from(
+    new Set(
+      pending
+        .map((p) => p.accountKey)
+        .filter((x): x is string => x !== null),
+    ),
+  );
+  const [byIdRows, byCodeRows] = await Promise.all([
+    distinctIds.length
+      ? tx
+          .select({
+            id: chartOfAccountsTable.id,
+            code: chartOfAccountsTable.code,
+            isActive: chartOfAccountsTable.isActive,
+            allowManualPosting: chartOfAccountsTable.allowManualPosting,
+          })
+          .from(chartOfAccountsTable)
+          .where(inArray(chartOfAccountsTable.id, distinctIds))
+      : Promise.resolve([] as Array<{ id: number; code: string; isActive: boolean; allowManualPosting: boolean }>),
+    distinctCodes.length
+      ? tx
+          .select({
+            id: chartOfAccountsTable.id,
+            code: chartOfAccountsTable.code,
+            isActive: chartOfAccountsTable.isActive,
+            allowManualPosting: chartOfAccountsTable.allowManualPosting,
+          })
+          .from(chartOfAccountsTable)
+          .where(inArray(chartOfAccountsTable.code, distinctCodes))
+      : Promise.resolve([] as Array<{ id: number; code: string; isActive: boolean; allowManualPosting: boolean }>),
+  ]);
+  const byId = new Map(byIdRows.map((r) => [r.id, r]));
+  const byCode = new Map(byCodeRows.map((r) => [r.code, r]));
 
   const resolved: ResolvedJournalLine[] = [];
   for (const p of pending) {
-    const hit = byCode.get(p.accountKey);
+    const hit =
+      (p.accountId !== null ? byId.get(p.accountId) : undefined) ??
+      (p.accountKey !== null ? byCode.get(p.accountKey) : undefined);
     if (!hit) {
       return {
         ok: false,
