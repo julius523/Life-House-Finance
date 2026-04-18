@@ -129,6 +129,7 @@ export type Section =
   | "credits"
   | "month-end"
   | "reports"
+  | "accounting"
   | "admin";
 
 const SUBMITTER_SECTIONS = new Set<Section>([
@@ -137,6 +138,7 @@ const SUBMITTER_SECTIONS = new Set<Section>([
   "bills",
   "receipts",
   "vendors",
+  "accounting",
 ]);
 
 // --- Admin user-management helpers -----------------------------------------

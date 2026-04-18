@@ -13,6 +13,7 @@ import {
   TrendingUp,
   Menu,
   Shield,
+  Calculator,
   LogOut,
 } from "lucide-react";
 import { useState } from "react";
@@ -38,6 +39,7 @@ const NAV_ITEMS: Array<{
   { href: "/credits", label: "Credits & Deposits", icon: TrendingUp, section: "credits" },
   { href: "/month-end", label: "Month End", icon: CalendarCheck, section: "month-end" },
   { href: "/reports", label: "Reports", icon: BarChart3, section: "reports" },
+  { href: "/accounting", label: "Accounting", icon: Calculator, section: "accounting" },
   { href: "/admin", label: "Admin", icon: Shield, section: "admin" },
 ];
 

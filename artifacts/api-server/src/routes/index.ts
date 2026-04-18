@@ -16,6 +16,7 @@ import aiRouter from "./ai";
 import reportsRouter from "./reports";
 import creditsRouter from "./credits";
 import notificationsRouter from "./notifications";
+import accountingRouter from "./accounting";
 
 const router: IRouter = Router();
 
@@ -36,5 +37,6 @@ router.use(aiRouter);
 router.use(reportsRouter);
 router.use(creditsRouter);
 router.use(notificationsRouter);
+router.use(accountingRouter);
 
 export default router;
