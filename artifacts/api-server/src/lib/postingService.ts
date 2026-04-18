@@ -215,8 +215,15 @@ type SanitizeResult =
  * resolved CoA id alongside the immutable `account` text. Rejects unknown
  * accounts, archived accounts, and accounts with allow_manual_posting=false.
  */
+// Drizzle's transaction object exposes the same query-builder surface
+// as `db` but is a different concrete type. We model only what
+// sanitizeLines actually uses (a `select(...).from(...).where(...)`
+// chain) so callers can pass either `db` or a `tx` without an
+// `as unknown as typeof db` escape hatch.
+type DbReader = Pick<typeof db, "select">;
+
 async function sanitizeLines(
-  tx: typeof db,
+  tx: DbReader,
   rawLines: unknown,
 ): Promise<SanitizeResult> {
   if (!Array.isArray(rawLines) || rawLines.length === 0) {
@@ -226,8 +233,9 @@ async function sanitizeLines(
     lineNo: number;
     type: "debit" | "credit";
     cents: number;
+    accountId: number | null;
     accountRaw: string;
-    accountKey: string;
+    accountKey: string | null;
     program: string | null;
     fund: string | null;
     memo: string | null;
@@ -461,7 +469,7 @@ export async function postApprovedJournalEntry(
       };
     }
     const sanitized = await sanitizeLines(
-      tx as unknown as typeof db,
+      tx,
       payload["lines"],
     );
     if (!sanitized.ok) {

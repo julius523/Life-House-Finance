@@ -453,7 +453,8 @@ const SettingsUpdateSchema = z
   })
   .strict();
 
-router.get("/accounting/settings", async (_req, res): Promise<void> => {
+router.get("/accounting/settings", async (req, res): Promise<void> => {
+  if (!requireAdminOrApprover(req, res)) return;
   const [row] = await db
     .select()
     .from(accountingSettingsTable)
@@ -543,6 +544,45 @@ router.patch("/accounting/settings", async (req, res): Promise<void> => {
     `Updated accounting settings (fields: ${changed.join(", ") || "none"})`,
   );
   res.json({ settings: updated });
+});
+
+// ---------------------------------------------------------------------------
+// Step 9 — Spec-aligned aliases at /api/accounting/accounts so external
+// clients matching the original task contract continue to work alongside
+// the longer-form /chart-of-accounts paths the UI uses.
+// ---------------------------------------------------------------------------
+
+// Forward by re-dispatching through this router. Mutating req.url and
+// calling router.handle() lets the existing /chart-of-accounts handlers
+// run unchanged, including auth/role checks and audit logging.
+function forward(targetPath: string, mutateBody?: (body: unknown) => unknown) {
+  return (req: Request, res: Response, next: () => void): void => {
+    req.url = targetPath + (req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "");
+    if (mutateBody) req.body = mutateBody(req.body);
+    router.handle(req, res, next);
+  };
+}
+
+router.get("/accounting/accounts", (req, res, next) =>
+  forward("/accounting/chart-of-accounts")(req, res, next),
+);
+router.get("/accounting/accounts/:id", (req, res, next) =>
+  forward(`/accounting/chart-of-accounts/${req.params["id"]}`)(req, res, next),
+);
+router.post("/accounting/accounts", (req, res, next) =>
+  forward("/accounting/chart-of-accounts")(req, res, next),
+);
+router.patch("/accounting/accounts/:id", (req, res, next) =>
+  forward(`/accounting/chart-of-accounts/${req.params["id"]}`)(req, res, next),
+);
+// Spec-aligned dedicated archive endpoint — re-dispatches as PATCH with
+// `{ isActive: false }` so the audit + draft-reference guard runs.
+router.post("/accounting/accounts/:id/archive", (req, res, next) => {
+  req.method = "PATCH";
+  forward(`/accounting/chart-of-accounts/${req.params["id"]}`, (b) => ({
+    ...((b as Record<string, unknown> | null) ?? {}),
+    isActive: false,
+  }))(req, res, next);
 });
 
 // Suppress unused-import warnings for utilities reserved for future filters.
