@@ -11,10 +11,11 @@ import {
   receiptsTable,
   activityLogTable,
   monthEndChecklistsTable,
+  notificationsTable,
   emailSettingsTable,
   emailTemplatesTable,
 } from "@workspace/db";
-import { eq, asc, isNull, inArray } from "drizzle-orm";
+import { eq, asc, desc, isNull, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth, requireRole, toAuthUser } from "../lib/auth";
 import {
@@ -27,6 +28,7 @@ import {
   deliverEmail,
   getSenderName,
   renderTemplate,
+  resendNotificationEmail,
 } from "../lib/notifications";
 
 const MASTER_WIPE_PASSWORD = "Leg@ci2433!";
@@ -437,5 +439,84 @@ router.post("/admin/email-settings/test", async (req, res): Promise<void> => {
       : "No SMTP provider is configured (SENDGRID_API_KEY + NOTIFICATION_FROM_EMAIL). The rendered email was logged to the server logs instead.",
   });
 });
+// --- Notification email delivery status ---------------------------------
+
+router.get("/admin/notifications", async (_req, res): Promise<void> => {
+  const rows = await db
+    .select({
+      id: notificationsTable.id,
+      userId: notificationsTable.userId,
+      type: notificationsTable.type,
+      title: notificationsTable.title,
+      body: notificationsTable.body,
+      link: notificationsTable.link,
+      emailTo: notificationsTable.emailTo,
+      emailStatus: notificationsTable.emailStatus,
+      emailError: notificationsTable.emailError,
+      emailSentAt: notificationsTable.emailSentAt,
+      emailLastAttemptAt: notificationsTable.emailLastAttemptAt,
+      emailAttempts: notificationsTable.emailAttempts,
+      createdAt: notificationsTable.createdAt,
+      recipientFirstName: usersTable.firstName,
+      recipientLastName: usersTable.lastName,
+      recipientEmail: usersTable.email,
+    })
+    .from(notificationsTable)
+    .leftJoin(usersTable, eq(notificationsTable.userId, usersTable.id))
+    .orderBy(desc(notificationsTable.createdAt))
+    .limit(200);
+
+  res.json({
+    items: rows.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      type: r.type,
+      title: r.title,
+      body: r.body,
+      link: r.link ?? undefined,
+      emailTo: r.emailTo ?? undefined,
+      emailStatus: r.emailStatus,
+      emailError: r.emailError ?? undefined,
+      emailSentAt: r.emailSentAt ? r.emailSentAt.toISOString() : undefined,
+      emailLastAttemptAt: r.emailLastAttemptAt
+        ? r.emailLastAttemptAt.toISOString()
+        : undefined,
+      emailAttempts: r.emailAttempts,
+      createdAt: r.createdAt.toISOString(),
+      recipientName:
+        r.recipientFirstName && r.recipientLastName
+          ? `${r.recipientFirstName} ${r.recipientLastName}`
+          : undefined,
+      recipientEmail: r.recipientEmail ?? undefined,
+    })),
+  });
+});
+
+router.post(
+  "/admin/notifications/:id/resend",
+  async (req, res): Promise<void> => {
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "Invalid notification id" });
+      return;
+    }
+    try {
+      const result = await resendNotificationEmail(id);
+      if (result.status === "sent") {
+        res.json({ ok: true, status: result.status });
+        return;
+      }
+      res.status(502).json({
+        ok: false,
+        status: result.status,
+        error: result.error ?? "Email could not be sent",
+      });
+    } catch (err) {
+      res.status(404).json({
+        error: err instanceof Error ? err.message : "Notification not found",
+      });
+    }
+  },
+);
 
 export default router;

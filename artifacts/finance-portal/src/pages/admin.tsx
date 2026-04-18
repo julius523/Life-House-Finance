@@ -27,8 +27,22 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, UserPlus, KeyRound, AlertTriangle, History, Mail, Send, RotateCcw } from "lucide-react";
+import {
+  Shield,
+  UserPlus,
+  KeyRound,
+  AlertTriangle,
+  History,
+  Mail,
+  MailCheck,
+  MailX,
+  MailWarning,
+  RefreshCw,
+  Send,
+  RotateCcw,
+} from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import { formatDistanceToNow } from "date-fns";
 
 const ROLE_LABEL: Record<UserRole, string> = {
   admin: "Admin",
@@ -143,6 +157,8 @@ export default function AdminPage() {
       )}
 
       <EmailSettingsCard />
+
+      <EmailDeliveryCard />
 
       <Card className="border-amber-500/40">
         <CardHeader>
@@ -596,6 +612,7 @@ function ChangePasswordDialog({
   );
 }
 
+
 type TemplateForm = {
   type: string;
   subject: string;
@@ -897,5 +914,293 @@ function EmailSettingsCard() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+type AdminNotification = {
+  id: number;
+  userId: number;
+  type: string;
+  title: string;
+  body: string;
+  link?: string;
+  emailTo?: string;
+  emailStatus: "sent" | "failed" | "not_attempted";
+  emailError?: string;
+  emailSentAt?: string;
+  emailLastAttemptAt?: string;
+  emailAttempts: number;
+  createdAt: string;
+  recipientName?: string;
+  recipientEmail?: string;
+};
+
+function EmailDeliveryCard() {
+  const { toast } = useToast();
+  const [items, setItems] = useState<AdminNotification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<"all" | "failed" | "not_attempted" | "sent">(
+    "all",
+  );
+  const [resendingId, setResendingId] = useState<number | null>(null);
+
+  const refresh = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/admin/notifications", {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const json = (await res.json()) as { items: AdminNotification[] };
+      setItems(json.items);
+    } catch (e) {
+      toast({
+        title: "Could not load notification history",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const resend = async (id: number) => {
+    setResendingId(id);
+    try {
+      const res = await fetch(`/api/admin/notifications/${id}/resend`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        status?: string;
+        ok?: boolean;
+      };
+      if (res.ok && body.ok) {
+        toast({ title: "Email resent successfully" });
+      } else {
+        toast({
+          title: "Resend failed",
+          description: body.error ?? `Request failed (${res.status})`,
+          variant: "destructive",
+        });
+      }
+      await refresh();
+    } catch (e) {
+      toast({
+        title: "Resend failed",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setResendingId(null);
+    }
+  };
+
+  const counts = {
+    sent: items.filter((i) => i.emailStatus === "sent").length,
+    failed: items.filter((i) => i.emailStatus === "failed").length,
+    not_attempted: items.filter((i) => i.emailStatus === "not_attempted").length,
+  };
+
+  const filtered =
+    filter === "all" ? items : items.filter((i) => i.emailStatus === filter);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5 text-primary" />
+              Email delivery
+            </CardTitle>
+            <CardDescription>
+              The most recent 200 notifications and whether their emails
+              reached the recipient. Use Resend to retry failed deliveries.
+            </CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={refresh}
+            disabled={loading}
+          >
+            <RefreshCw
+              className={`mr-2 h-3 w-3 ${loading ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
+        </div>
+        <div className="flex flex-wrap gap-2 mt-3">
+          <FilterChip
+            label={`All (${items.length})`}
+            active={filter === "all"}
+            onClick={() => setFilter("all")}
+          />
+          <FilterChip
+            label={`Sent (${counts.sent})`}
+            active={filter === "sent"}
+            onClick={() => setFilter("sent")}
+          />
+          <FilterChip
+            label={`Failed (${counts.failed})`}
+            active={filter === "failed"}
+            onClick={() => setFilter("failed")}
+          />
+          <FilterChip
+            label={`Not attempted (${counts.not_attempted})`}
+            active={filter === "not_attempted"}
+            onClick={() => setFilter("not_attempted")}
+          />
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        {loading ? (
+          <div className="p-6 text-muted-foreground">Loading…</div>
+        ) : filtered.length === 0 ? (
+          <div className="p-6 text-muted-foreground text-center text-sm">
+            No notifications match this filter.
+          </div>
+        ) : (
+          <div className="divide-y">
+            {filtered.map((n) => (
+              <NotificationRow
+                key={n.id}
+                n={n}
+                onResend={() => resend(n.id)}
+                resending={resendingId === n.id}
+              />
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function FilterChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-xs px-3 py-1 rounded-full border transition-colors ${
+        active
+          ? "bg-primary text-primary-foreground border-primary"
+          : "bg-background text-foreground border-border hover:bg-muted"
+      }`}
+      data-testid={`filter-${label.split(" ")[0]?.toLowerCase()}`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function NotificationRow({
+  n,
+  onResend,
+  resending,
+}: {
+  n: AdminNotification;
+  onResend: () => void;
+  resending: boolean;
+}) {
+  const statusBadge = (() => {
+    if (n.emailStatus === "sent") {
+      return (
+        <Badge className="bg-green-100 text-green-800 hover:bg-green-100 border-green-200">
+          <MailCheck className="h-3 w-3 mr-1" />
+          Sent
+        </Badge>
+      );
+    }
+    if (n.emailStatus === "failed") {
+      return (
+        <Badge variant="destructive">
+          <MailX className="h-3 w-3 mr-1" />
+          Failed
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="secondary">
+        <MailWarning className="h-3 w-3 mr-1" />
+        Not attempted
+      </Badge>
+    );
+  })();
+
+  const lastAttempt = n.emailLastAttemptAt ?? n.emailSentAt;
+
+  return (
+    <div
+      className="p-4 hover:bg-muted/30"
+      data-testid={`notification-row-${n.id}`}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            {statusBadge}
+            <span className="text-sm font-semibold truncate">{n.title}</span>
+          </div>
+          <div className="text-xs text-muted-foreground mt-1">
+            To{" "}
+            <span className="font-medium text-foreground">
+              {n.recipientName ?? "Unknown user"}
+            </span>{" "}
+            &lt;{n.emailTo ?? n.recipientEmail ?? "no email on file"}&gt;
+          </div>
+          <div className="text-xs text-muted-foreground mt-0.5">
+            Created{" "}
+            {formatDistanceToNow(new Date(n.createdAt), { addSuffix: true })}
+            {lastAttempt && (
+              <>
+                {" · Last attempt "}
+                {formatDistanceToNow(new Date(lastAttempt), {
+                  addSuffix: true,
+                })}
+              </>
+            )}
+            {n.emailAttempts > 0 && (
+              <>
+                {" · "}
+                {n.emailAttempts} attempt{n.emailAttempts === 1 ? "" : "s"}
+              </>
+            )}
+          </div>
+          {n.emailError && (
+            <div className="mt-2 text-xs bg-destructive/10 text-destructive rounded px-2 py-1 font-mono break-words">
+              {n.emailError}
+            </div>
+          )}
+        </div>
+        <div className="shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onResend}
+            disabled={resending}
+            data-testid={`button-resend-${n.id}`}
+          >
+            <RefreshCw
+              className={`mr-2 h-3 w-3 ${resending ? "animate-spin" : ""}`}
+            />
+            {resending ? "Resending…" : "Resend"}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }

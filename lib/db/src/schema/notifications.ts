@@ -2,6 +2,14 @@ import { pgTable, text, serial, integer, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
+export const NOTIFICATION_EMAIL_STATUSES = [
+  "not_attempted",
+  "sent",
+  "failed",
+] as const;
+export type NotificationEmailStatus =
+  (typeof NOTIFICATION_EMAIL_STATUSES)[number];
+
 export const notificationsTable = pgTable("notifications", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
@@ -13,6 +21,10 @@ export const notificationsTable = pgTable("notifications", {
   referenceId: integer("reference_id"),
   emailTo: text("email_to"),
   emailSentAt: timestamp("email_sent_at"),
+  emailStatus: text("email_status").notNull().default("not_attempted"),
+  emailError: text("email_error"),
+  emailLastAttemptAt: timestamp("email_last_attempt_at"),
+  emailAttempts: integer("email_attempts").notNull().default(0),
   readAt: timestamp("read_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

@@ -37,6 +37,11 @@ export const DEFAULT_EMAIL_TEMPLATES: Record<
   },
 };
 
+type DeliveryResult =
+  | { status: "sent" }
+  | { status: "failed"; error: string }
+  | { status: "not_attempted"; reason: string };
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -172,11 +177,7 @@ export async function deliverEmail(opts: {
   subject: string;
   body: string;
   link?: string | null;
-}): Promise<boolean> {
-  // Real outbound email requires an SMTP/transactional provider. When one is
-  // configured (SENDGRID_API_KEY + NOTIFICATION_FROM_EMAIL), we send through
-  // it; otherwise we log the message so it shows up in dev and is auditable in
-  // prod logs. Failures are logged but never thrown — email is best-effort.
+}): Promise<DeliveryResult> {
   const apiKey = process.env["SENDGRID_API_KEY"];
   const fromAddress = process.env["NOTIFICATION_FROM_EMAIL"];
   const fromName = await getSenderName();
@@ -185,7 +186,10 @@ export async function deliverEmail(opts: {
       { to: opts.to, subject: opts.subject, link: opts.link, fromName },
       `[notification email] ${opts.subject} -> ${opts.to}`,
     );
-    return false;
+    return {
+      status: "not_attempted",
+      reason: "Email provider not configured (missing SENDGRID_API_KEY or NOTIFICATION_FROM_EMAIL).",
+    };
   }
 
   const absoluteLink = opts.link ? resolveAbsoluteLink(opts.link) : null;
@@ -224,19 +228,58 @@ export async function deliverEmail(opts: {
         },
         "Failed to send notification email via SendGrid",
       );
-      return false;
+      return {
+        status: "failed",
+        error: `SendGrid responded ${res.status}: ${
+          responseBody.slice(0, 300) || "no body"
+        }`,
+      };
     }
     logger.info(
       { to: opts.to, subject: opts.subject },
       "Notification email sent via SendGrid",
     );
-    return true;
+    return { status: "sent" };
   } catch (err) {
     logger.warn(
       { err, to: opts.to, subject: opts.subject },
       "Error sending notification email",
     );
-    return false;
+    return {
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function attemptDelivery(opts: {
+  to: string | null;
+  subject: string;
+  body: string;
+  link?: string | null;
+}): Promise<DeliveryResult> {
+  if (!opts.to) {
+    return {
+      status: "not_attempted",
+      reason: "Recipient has no email address on file.",
+    };
+  }
+  try {
+    return await deliverEmail({
+      to: opts.to,
+      subject: opts.subject,
+      body: opts.body,
+      link: opts.link ?? null,
+    });
+  } catch (err) {
+    logger.warn(
+      { err, to: opts.to, subject: opts.subject },
+      "Unexpected error while delivering notification email",
+    );
+    return {
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -263,25 +306,15 @@ export async function createNotification(
     ? renderTemplate(template.body, variables)
     : input.body;
 
-  let emailSent = false;
-  if (emailTo) {
-    try {
-      emailSent = await deliverEmail({
-        to: emailTo,
-        subject,
-        body,
-        link: input.link ?? null,
-      });
-    } catch (err) {
-      // Defense in depth: deliverEmail already swallows its own errors, but
-      // ensure email failures never break the calling API request.
-      logger.warn(
-        { err, to: emailTo, subject },
-        "Unexpected error while delivering notification email",
-      );
-      emailSent = false;
-    }
-  }
+  const result = await attemptDelivery({
+    to: emailTo,
+    subject,
+    body,
+    link: input.link ?? null,
+  });
+
+  const attempted = result.status !== "not_attempted" || !!emailTo;
+  const now = new Date();
 
   await db.insert(notificationsTable).values({
     userId: input.userId,
@@ -292,8 +325,77 @@ export async function createNotification(
     referenceType: input.referenceType ?? null,
     referenceId: input.referenceId ?? null,
     emailTo,
-    emailSentAt: emailSent ? new Date() : null,
+    emailSentAt: result.status === "sent" ? now : null,
+    emailStatus: result.status,
+    emailError:
+      result.status === "failed"
+        ? result.error
+        : result.status === "not_attempted"
+          ? result.reason
+          : null,
+    emailLastAttemptAt: attempted ? now : null,
+    emailAttempts: attempted ? 1 : 0,
   });
+}
+
+export type ResendResult = {
+  status: "sent" | "failed" | "not_attempted";
+  error?: string;
+};
+
+export async function resendNotificationEmail(
+  notificationId: number,
+): Promise<ResendResult> {
+  const [notification] = await db
+    .select()
+    .from(notificationsTable)
+    .where(eq(notificationsTable.id, notificationId));
+  if (!notification) {
+    throw new Error("Notification not found");
+  }
+
+  // Refresh the recipient address from the user record in case it changed.
+  const [user] = await db
+    .select({ email: usersTable.email })
+    .from(usersTable)
+    .where(eq(usersTable.id, notification.userId));
+  const emailTo = user?.email ?? notification.emailTo ?? null;
+
+  const result = await attemptDelivery({
+    to: emailTo,
+    subject: notification.title,
+    body: notification.body,
+    link: notification.link ?? null,
+  });
+
+  const now = new Date();
+  const attempted = result.status !== "not_attempted" || !!emailTo;
+
+  await db
+    .update(notificationsTable)
+    .set({
+      emailTo,
+      emailStatus: result.status,
+      emailError:
+        result.status === "failed"
+          ? result.error
+          : result.status === "not_attempted"
+            ? result.reason
+            : null,
+      emailSentAt:
+        result.status === "sent" ? now : notification.emailSentAt,
+      emailLastAttemptAt: attempted ? now : notification.emailLastAttemptAt,
+      emailAttempts: attempted
+        ? (notification.emailAttempts ?? 0) + 1
+        : notification.emailAttempts ?? 0,
+    })
+    .where(eq(notificationsTable.id, notificationId));
+
+  if (result.status === "sent") return { status: "sent" };
+  if (result.status === "failed") {
+    return { status: "failed", error: result.error };
+  }
+  return { status: "not_attempted", error: result.reason };
 }
 
 export async function findUserByEmail(
