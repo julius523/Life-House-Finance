@@ -348,23 +348,29 @@ type CreditSummary = {
   byStatus: { status: CreditStatus; amount: number; count: number }[];
 };
 
-type AccountingStatus = {
-  coa: { total: number; active: number; system: number };
-  trialBalance: {
-    fromDate: string;
-    toDate: string;
-    totals: {
-      debits: string;
-      credits: string;
-      balanced: boolean;
-      differenceCents: number;
-    };
+type AccountingDashboardStatus = {
+  openPeriod: {
+    id: number;
+    label: string;
+    startDate: string;
+    endDate: string;
+  } | null;
+  unpostedDrafts: { count: number };
+  trialBalanceStatus: {
+    debitsCents: number;
+    creditsCents: number;
+    inBalance: boolean;
   };
-  settings: { accountingMethod: string };
+  lastClosedPeriod: {
+    id: number;
+    label: string;
+    endDate: string;
+    closedAt: string | null;
+  } | null;
 };
 
 function AccountingStatusCard() {
-  const [status, setStatus] = useState<AccountingStatus | null>(null);
+  const [status, setStatus] = useState<AccountingDashboardStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -372,31 +378,10 @@ function AccountingStatusCard() {
     let cancelled = false;
     (async () => {
       try {
-        const today = new Date();
-        const fy0 = new Date(today.getFullYear(), 0, 1);
-        const toDate = today.toISOString().slice(0, 10);
-        const fromDate = fy0.toISOString().slice(0, 10);
-        const [coa, tb, settings] = await Promise.all([
-          apiJson<{ accounts: Array<{ isActive: boolean; isSystem: boolean }> }>(
-            `/accounting/chart-of-accounts?includeArchived=true`,
-          ),
-          apiJson<AccountingStatus["trialBalance"]>(
-            `/reports/trial-balance?fromDate=${fromDate}&toDate=${toDate}`,
-          ),
-          apiJson<{ settings: { accountingMethod: string } }>(
-            `/accounting/settings`,
-          ),
-        ]);
-        if (cancelled) return;
-        setStatus({
-          coa: {
-            total: coa.accounts.length,
-            active: coa.accounts.filter((a) => a.isActive).length,
-            system: coa.accounts.filter((a) => a.isSystem).length,
-          },
-          trialBalance: tb,
-          settings: settings.settings,
-        });
+        const data = await apiJson<AccountingDashboardStatus>(
+          `/accounting/dashboard-status`,
+        );
+        if (!cancelled) setStatus(data);
       } catch (err) {
         if (!cancelled) setError(String((err as Error)?.message ?? err));
       } finally {
@@ -408,13 +393,16 @@ function AccountingStatusCard() {
     };
   }, []);
 
+  const fmtUsd = (cents: number) =>
+    `$${(cents / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <div>
           <CardTitle>Accounting status</CardTitle>
           <CardDescription>
-            Chart of Accounts, Trial Balance, and posting method.
+            Open period, drafts awaiting posting, ledger balance, last close.
           </CardDescription>
         </div>
         <div className="flex gap-2">
@@ -423,9 +411,9 @@ function AccountingStatusCard() {
               Chart of Accounts
             </Button>
           </Link>
-          <Link href="/reports">
+          <Link href="/accounting/settings">
             <Button variant="outline" size="sm">
-              Trial Balance
+              Settings
             </Button>
           </Link>
         </div>
@@ -436,40 +424,67 @@ function AccountingStatusCard() {
         ) : error ? (
           <div className="text-sm text-muted-foreground">{error}</div>
         ) : status ? (
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div>
-              <div className="text-xs text-muted-foreground">CoA accounts</div>
-              <div className="text-2xl font-bold">{status.coa.active}</div>
-              <div className="text-xs text-muted-foreground">
-                {status.coa.system} system · {status.coa.total} total
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Link href="/accounting">
+              <div className="rounded-lg border p-3 cursor-pointer hover:border-primary transition-colors">
+                <div className="text-xs text-muted-foreground">Open period</div>
+                <div className="text-lg font-bold">
+                  {status.openPeriod ? status.openPeriod.label : "None"}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {status.openPeriod
+                    ? `${status.openPeriod.startDate} → ${status.openPeriod.endDate}`
+                    : "No open period covers today"}
+                </div>
               </div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">
-                Trial Balance YTD
+            </Link>
+            <Link href="/accounting?tab=approvals">
+              <div className="rounded-lg border p-3 cursor-pointer hover:border-primary transition-colors">
+                <div className="text-xs text-muted-foreground">
+                  Unposted drafts
+                </div>
+                <div className="text-2xl font-bold">
+                  {status.unpostedDrafts.count}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Pending review
+                </div>
               </div>
-              <div className="text-2xl font-bold">
-                ${Number(status.trialBalance.totals.debits).toLocaleString()}
+            </Link>
+            <Link href="/reports">
+              <div className="rounded-lg border p-3 cursor-pointer hover:border-primary transition-colors">
+                <div className="text-xs text-muted-foreground">
+                  Trial Balance
+                </div>
+                <div className="text-lg font-bold">
+                  {fmtUsd(status.trialBalanceStatus.debitsCents)}
+                </div>
+                <div
+                  className={`text-xs ${status.trialBalanceStatus.inBalance ? "text-success" : "text-destructive"}`}
+                >
+                  {status.trialBalanceStatus.inBalance
+                    ? "Debits = Credits"
+                    : `Out of balance by ${fmtUsd(Math.abs(status.trialBalanceStatus.debitsCents - status.trialBalanceStatus.creditsCents))}`}
+                </div>
               </div>
-              <div
-                className={`text-xs ${status.trialBalance.totals.balanced ? "text-success" : "text-destructive"}`}
-              >
-                {status.trialBalance.totals.balanced
-                  ? "Debits = Credits"
-                  : `Out of balance by $${(status.trialBalance.totals.differenceCents / 100).toLocaleString()}`}
+            </Link>
+            <Link href="/accounting">
+              <div className="rounded-lg border p-3 cursor-pointer hover:border-primary transition-colors">
+                <div className="text-xs text-muted-foreground">
+                  Last close date
+                </div>
+                <div className="text-lg font-bold">
+                  {status.lastClosedPeriod
+                    ? status.lastClosedPeriod.endDate
+                    : "—"}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {status.lastClosedPeriod
+                    ? status.lastClosedPeriod.label
+                    : "No closed periods yet"}
+                </div>
               </div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Method</div>
-              <div className="text-2xl font-bold capitalize">
-                {status.settings.accountingMethod}
-              </div>
-              <Link href="/accounting/settings">
-                <span className="text-xs text-primary hover:underline cursor-pointer">
-                  Edit settings →
-                </span>
-              </Link>
-            </div>
+            </Link>
           </div>
         ) : null}
       </CardContent>

@@ -21,7 +21,9 @@ import {
   db,
   chartOfAccountsTable,
   accountingSettingsTable,
+  journalEntriesTable,
   journalEntryLinesTable,
+  accountingPeriodsTable,
   activityLogTable,
   agentActionsTable,
   ACCOUNT_TYPES,
@@ -545,6 +547,122 @@ router.patch("/accounting/settings", async (req, res): Promise<void> => {
   );
   res.json({ settings: updated });
 });
+
+// ---------------------------------------------------------------------------
+// Step 9 — CoA detail (account metadata + recent posted ledger activity)
+// ---------------------------------------------------------------------------
+router.get(
+  "/accounting/chart-of-accounts/:id/activity",
+  async (req, res): Promise<void> => {
+    if (!requireAdminOrApprover(req, res)) return;
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "Invalid account id" });
+      return;
+    }
+    const [account] = await db
+      .select()
+      .from(chartOfAccountsTable)
+      .where(eq(chartOfAccountsTable.id, id));
+    if (!account) {
+      res.status(404).json({ error: "Account not found" });
+      return;
+    }
+    const limit = Math.min(Number(req.query["limit"] ?? 50), 200);
+    const rows = await db
+      .select({
+        lineId: journalEntryLinesTable.id,
+        journalEntryId: journalEntryLinesTable.journalEntryId,
+        type: journalEntryLinesTable.type,
+        amountCents: journalEntryLinesTable.amountCents,
+        memo: journalEntryLinesTable.memo,
+        program: journalEntryLinesTable.program,
+        fund: journalEntryLinesTable.fund,
+        entryDate: journalEntriesTable.entryDate,
+        entryMemo: journalEntriesTable.memo,
+        entryStatus: journalEntriesTable.status,
+        postedAt: journalEntriesTable.postedAt,
+      })
+      .from(journalEntryLinesTable)
+      .innerJoin(
+        journalEntriesTable,
+        eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+      )
+      .where(eq(journalEntryLinesTable.accountId, id))
+      .orderBy(sql`${journalEntriesTable.entryDate} desc, ${journalEntryLinesTable.id} desc`)
+      .limit(limit);
+    res.json({ account, activity: rows });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Step 9 — Dashboard accounting status block
+// Returns: openPeriod, unpostedDrafts, trialBalanceStatus, lastClosedPeriod
+// ---------------------------------------------------------------------------
+router.get(
+  "/accounting/dashboard-status",
+  async (_req, res): Promise<void> => {
+    const today = new Date().toISOString().slice(0, 10);
+    const [openPeriod] = await db
+      .select()
+      .from(accountingPeriodsTable)
+      .where(
+        and(
+          eq(accountingPeriodsTable.status, "open"),
+          sql`${accountingPeriodsTable.periodStart} <= ${today}`,
+          sql`${accountingPeriodsTable.periodEnd} >= ${today}`,
+        ),
+      )
+      .limit(1);
+    const [lastClosed] = await db
+      .select()
+      .from(accountingPeriodsTable)
+      .where(eq(accountingPeriodsTable.status, "closed"))
+      .orderBy(sql`${accountingPeriodsTable.periodEnd} desc`)
+      .limit(1);
+    const [draftRow] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(agentActionsTable)
+      .where(
+        and(
+          eq(agentActionsTable.actionType, "draft_journal_entry"),
+          eq(agentActionsTable.status, "pending_review"),
+        ),
+      );
+    const [tbAgg] = await db
+      .select({
+        debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::bigint`,
+        credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::bigint`,
+      })
+      .from(journalEntryLinesTable)
+      .innerJoin(
+        journalEntriesTable,
+        eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+      )
+      .where(eq(journalEntriesTable.status, "posted"));
+    const debits = Number(tbAgg?.debits ?? 0);
+    const credits = Number(tbAgg?.credits ?? 0);
+    res.json({
+      openPeriod: openPeriod
+        ? {
+            id: openPeriod.id,
+            label: openPeriod.label,
+            startDate: openPeriod.periodStart,
+            endDate: openPeriod.periodEnd,
+          }
+        : null,
+      unpostedDrafts: { count: Number(draftRow?.n ?? 0) },
+      trialBalanceStatus: {
+        debitsCents: debits,
+        creditsCents: credits,
+        inBalance: debits === credits,
+      },
+      lastClosedPeriod: lastClosed
+        ? { id: lastClosed.id, label: lastClosed.label, endDate: lastClosed.endDate, closedAt: lastClosed.closedAt }
+        : null,
+    });
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Step 9 — Spec-aligned aliases at /api/accounting/accounts so external

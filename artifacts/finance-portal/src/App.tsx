@@ -31,6 +31,7 @@ import AdminPage from "@/pages/admin";
 import CreditsPage from "@/pages/credits";
 import AccountingPage from "@/pages/accounting";
 import AccountingCoaPage from "@/pages/accounting-coa";
+import AccountingCoaDetail from "@/pages/accounting-coa-detail";
 import AccountingSettingsPage from "@/pages/accounting-settings";
 
 const queryClient = new QueryClient();
@@ -95,6 +96,7 @@ function AppRoutes() {
         {route("/reports", "reports", ReportsPage)}
         {route("/accounting", "accounting", AccountingPage)}
         {route("/accounting/coa", "accounting", AccountingCoaPage)}
+        {route("/accounting/coa/:id", "accounting", AccountingCoaDetail)}
         {route("/accounting/settings", "accounting", AccountingSettingsPage)}
         {route("/admin", "admin", AdminPage)}
 

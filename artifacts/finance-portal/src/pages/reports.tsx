@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useGetFinancialSummaryReport } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -214,6 +214,33 @@ export default function ReportsPage() {
   const [tb, setTb] = useState<TrialBalanceResponse | null>(null);
   const [tbLoading, setTbLoading] = useState(false);
   const [tbError, setTbError] = useState<string | null>(null);
+  type TbSortKey = "code" | "name" | "type" | "debits" | "credits" | "balance";
+  const [tbSort, setTbSort] = useState<{ key: TbSortKey; dir: "asc" | "desc" }>({
+    key: "code",
+    dir: "asc",
+  });
+  const toggleTbSort = (key: TbSortKey) => {
+    setTbSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: key === "code" || key === "name" || key === "type" ? "asc" : "desc" },
+    );
+  };
+  const sortedTbRows = useMemo(() => {
+    if (!tb) return [];
+    const rows = [...tb.rows];
+    const dir = tbSort.dir === "asc" ? 1 : -1;
+    rows.sort((a, b) => {
+      const k = tbSort.key;
+      if (k === "debits" || k === "credits" || k === "balance") {
+        return (parseFloat(a[k]) - parseFloat(b[k])) * dir;
+      }
+      const av = (a[k] ?? "") as string;
+      const bv = (b[k] ?? "") as string;
+      return av.localeCompare(bv) * dir;
+    });
+    return rows;
+  }, [tb, tbSort]);
   useEffect(() => {
     let cancelled = false;
     setTbLoading(true);
@@ -701,19 +728,39 @@ export default function ReportsPage() {
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
+                        <table className="w-full text-sm" data-testid="trial-balance-table">
                           <thead>
                             <tr className="text-left border-b">
-                              <th className="py-2 pr-3">Code</th>
-                              <th className="py-2 pr-3">Account</th>
-                              <th className="py-2 pr-3">Type</th>
-                              <th className="py-2 pr-3 text-right">Debits</th>
-                              <th className="py-2 pr-3 text-right">Credits</th>
-                              <th className="py-2 pr-3 text-right">Balance</th>
+                              {([
+                                ["code", "Code"],
+                                ["name", "Account"],
+                                ["type", "Type"],
+                                ["debits", "Debits", "right"],
+                                ["credits", "Credits", "right"],
+                                ["balance", "Balance", "right"],
+                              ] as const).map(([key, label, align]) => {
+                                const active = tbSort.key === key;
+                                const dir = active ? tbSort.dir : null;
+                                return (
+                                  <th
+                                    key={key}
+                                    className={`py-2 pr-3 cursor-pointer select-none ${align === "right" ? "text-right" : ""}`}
+                                    onClick={() => toggleTbSort(key)}
+                                    data-testid={`tb-sort-${key}`}
+                                  >
+                                    <span className="inline-flex items-center gap-1">
+                                      {label}
+                                      <span className="text-xs text-muted-foreground">
+                                        {dir === "asc" ? "▲" : dir === "desc" ? "▼" : "↕"}
+                                      </span>
+                                    </span>
+                                  </th>
+                                );
+                              })}
                             </tr>
                           </thead>
                           <tbody>
-                            {tb.rows.map((r) => (
+                            {sortedTbRows.map((r) => (
                               <tr
                                 key={`${r.accountId ?? "x"}-${r.code}`}
                                 className="border-b last:border-0"
