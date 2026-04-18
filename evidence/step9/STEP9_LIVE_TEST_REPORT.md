@@ -226,3 +226,38 @@ Addressed acceptance gaps flagged in the fifth review:
     - `.local/test-evidence/run-step9-tests.mjs`
     - `.local/test-evidence/STEP9_LIVE_TEST_REPORT.md`
 - Re-ran `node .local/test-evidence/run-step9-tests.mjs` → 7/7 PASS.
+
+## Ninth-pass test expansion (2026-04-18)
+
+Expanded the live test runner from 7 tests to 11 covering the gaps called out
+in the 8th review:
+
+| ID    | Coverage |
+|-------|----------|
+| S9-H  | `draft_journal_entry` rejects an account_code that exists but is **archived** (validates `sanitizeLines` archived-account branch). |
+| S9-I  | `PATCH /api/accounting/settings` returns 200 and persists the change; per the route implementation in `coa.ts` this also writes an `activity_log` row in the same transaction. |
+| S9-J  | Trial Balance `debits === credits` to the cent and `balanced: true`, including reversal pairs (proves `status IN ('posted','reversed')` netting). |
+| S9-K  | Re-invoking `/api/accounting/seed-coa` does not change CoA row count (idempotence verified at API level). |
+
+### Run output
+
+```
+[PASS] S9-A: CoA seeded with GAAP defaults
+[PASS] S9-B: Settings singleton present with method
+[PASS] S9-C: Trial Balance is balanced
+[PASS] S9-D: Source=operational vs source=ledger both respond 200 with PL/BS
+[PASS] S9-E: draft_journal_entry rejects unknown account_code
+[PASS] S9-F: draft_journal_entry accepts valid account_code
+[PASS] S9-G: Custom CoA create + archive
+[PASS] S9-H: draft_journal_entry rejects archived account_code
+[PASS] S9-I: Settings PATCH succeeds and (per route impl) writes activity_log row
+[PASS] S9-J: Trial Balance: debits = credits to the cent (posted+reversed netted)
+[PASS] S9-K: Seed/backfill is idempotent (CoA count stable across re-invocation)
+--- summary: { passes: 11, fails: 0, total: 11 }
+```
+
+### Frontend follow-up
+
+- `accounting-coa.tsx`: archive action now goes through an `AlertDialog`
+  confirmation (`Archive this account?`) before calling `PATCH … {isActive:false}`.
+  Test id `confirm-archive-account`.

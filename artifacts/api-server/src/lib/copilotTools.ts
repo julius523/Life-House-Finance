@@ -268,11 +268,24 @@ const getAccountingDimensions: ToolDefinition<Record<string, never>> = {
       .from(vendorsTable)
       .where(eq(vendorsTable.isActive, true))
       .orderBy(asc(vendorsTable.name));
+    const accounts = await db
+      .select({
+        id: chartOfAccountsTable.id,
+        code: chartOfAccountsTable.code,
+        name: chartOfAccountsTable.name,
+        type: chartOfAccountsTable.type,
+        subtype: chartOfAccountsTable.subtype,
+        normalBalance: chartOfAccountsTable.normalBalance,
+        allowManualPosting: chartOfAccountsTable.allowManualPosting,
+      })
+      .from(chartOfAccountsTable)
+      .where(eq(chartOfAccountsTable.isActive, true))
+      .orderBy(asc(chartOfAccountsTable.code));
     return {
       ok: true,
       data: clampResult({
-        chart_of_accounts_status:
-          "Not yet integrated. Programs serve as fund/cost-center dimensions; vendors serve as payee dimensions.",
+        chart_of_accounts: accounts,
+        chart_of_accounts_count: accounts.length,
         programs,
         vendors,
         program_count: programs.length,

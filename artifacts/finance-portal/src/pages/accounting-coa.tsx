@@ -30,6 +30,16 @@ import { useAuth } from "@/lib/auth";
 import { apiJson } from "@/lib/api";
 import { Plus, Pencil, Archive, ArchiveRestore, Eye } from "lucide-react";
 import { Link } from "wouter";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type Account = {
   id: number;
@@ -182,7 +192,18 @@ export default function AccountingCoaPage() {
     }
   }
 
-  async function toggleArchive(a: Account) {
+  const [archiveTarget, setArchiveTarget] = useState<Account | null>(null);
+
+  function requestArchive(a: Account) {
+    if (!a.isActive) {
+      // Restoring is non-destructive — no confirmation needed.
+      void doArchive(a);
+      return;
+    }
+    setArchiveTarget(a);
+  }
+
+  async function doArchive(a: Account) {
     try {
       await apiJson(`/accounting/chart-of-accounts/${a.id}`, {
         method: "PATCH",
@@ -198,6 +219,8 @@ export default function AccountingCoaPage() {
         title: "Update failed",
         description: String((err as Error)?.message ?? err),
       });
+    } finally {
+      setArchiveTarget(null);
     }
   }
 
@@ -337,7 +360,7 @@ export default function AccountingCoaPage() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => toggleArchive(a)}
+                              onClick={() => requestArchive(a)}
                               title={a.isActive ? "Archive" : "Restore"}
                             >
                               {a.isActive ? (
@@ -482,6 +505,35 @@ export default function AccountingCoaPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={!!archiveTarget}
+        onOpenChange={(o) => !o && setArchiveTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive this account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {archiveTarget ? (
+                <>
+                  Archiving <strong>{archiveTarget.code} — {archiveTarget.name}</strong>{" "}
+                  hides it from new postings and from the active CoA list. Posted
+                  history is preserved. You can restore the account later.
+                </>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="confirm-archive-account"
+              onClick={() => archiveTarget && doArchive(archiveTarget)}
+            >
+              Archive
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

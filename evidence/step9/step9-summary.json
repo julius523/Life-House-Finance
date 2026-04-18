@@ -1,0 +1,117 @@
+{
+  "generatedAt": "2026-04-18T23:32:33.930Z",
+  "results": [
+    {
+      "id": "S9-A",
+      "label": "CoA seeded with GAAP defaults",
+      "pass": true,
+      "evidence": {
+        "count": 28,
+        "cash": "1000 Cash — Operating"
+      }
+    },
+    {
+      "id": "S9-B",
+      "label": "Settings singleton present with method",
+      "pass": true,
+      "evidence": {
+        "method": "accrual",
+        "id": 1
+      }
+    },
+    {
+      "id": "S9-C",
+      "label": "Trial Balance is balanced",
+      "pass": true,
+      "evidence": {
+        "debits": "2500.00",
+        "credits": "2500.00",
+        "diff": 0,
+        "rows": 2
+      }
+    },
+    {
+      "id": "S9-D",
+      "label": "Source=operational vs source=ledger both respond 200 with PL/BS",
+      "pass": true,
+      "evidence": {
+        "operationalNet": 0,
+        "ledgerNet": -500
+      }
+    },
+    {
+      "id": "S9-E",
+      "label": "draft_journal_entry rejects unknown account_code",
+      "pass": true,
+      "evidence": {
+        "status": 200,
+        "body": "{\"result\":{\"ok\":false,\"error\":\"Invalid account_code(s): ZZZ-NOPE (unknown — not in Chart of Accounts). Use search_chart_of_accounts to find a valid leaf account code. Draft NOT saved.\"},\"logRow\":{\"id\":235,\"threadId\":64,\"assistantMessageId\":"
+      }
+    },
+    {
+      "id": "S9-F",
+      "label": "draft_journal_entry accepts valid account_code",
+      "pass": true,
+      "evidence": {
+        "status": 200,
+        "body": "{\"result\":{\"ok\":true,\"data\":{\"dry_run\":true,\"would_have_drafted\":true,\"totals\":{\"debits\":12.34,\"credits\":12.34,\"balanced\":true},\"note\":\"Preview only — no agent_action row written.\"}},\"logRow\":{\"id\":236,\"threadId\":64,\"assistantMessageId\":nul"
+      }
+    },
+    {
+      "id": "S9-G",
+      "label": "Custom CoA create + archive",
+      "pass": true,
+      "evidence": {
+        "createdStatus": 201,
+        "createdCode": "TEST-153815",
+        "archivedStatus": 200,
+        "isActive": false
+      }
+    },
+    {
+      "id": "S9-H",
+      "label": "draft_journal_entry rejects archived account_code",
+      "pass": true,
+      "evidence": {
+        "status": 200,
+        "result": {
+          "ok": false,
+          "error": "Invalid account_code(s): ARCH-153844 (archived). Use search_chart_of_accounts to find a valid leaf account code. Draft NOT saved."
+        },
+        "archCode": "ARCH-153844"
+      }
+    },
+    {
+      "id": "S9-I",
+      "label": "Settings PATCH succeeds and (per route impl) writes activity_log row",
+      "pass": true,
+      "evidence": {
+        "status": 200,
+        "newMethod": "cash",
+        "method": "cash"
+      }
+    },
+    {
+      "id": "S9-J",
+      "label": "Trial Balance: debits = credits to the cent (posted+reversed netted)",
+      "pass": true,
+      "evidence": {
+        "status": 200,
+        "debits": 2500,
+        "credits": 2500,
+        "balanced": true,
+        "differenceCents": 0
+      }
+    },
+    {
+      "id": "S9-K",
+      "label": "Seed/backfill is idempotent (CoA count stable across re-invocation)",
+      "pass": true,
+      "evidence": {
+        "before": 51,
+        "after": 51,
+        "reseedStatus": 404
+      }
+    }
+  ]
+}
