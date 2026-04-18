@@ -176,6 +176,8 @@ router.post("/admin/restore-day", async (req, res): Promise<void> => {
 const BackfillReceiptsBody = z
   .object({
     deleteUnresolved: z.boolean().optional(),
+    dryRun: z.boolean().optional(),
+    receiptIds: z.array(z.number().int().positive()).optional(),
   })
   .optional();
 
@@ -186,14 +188,28 @@ router.post("/admin/backfill-receipt-uploaders", async (req, res): Promise<void>
     return;
   }
   const deleteUnresolved = parsed.data?.deleteUnresolved ?? false;
+  const dryRun = parsed.data?.dryRun ?? false;
+  const receiptIdAllowlist = parsed.data?.receiptIds ?? null;
 
-  const orphanReceipts = await db
+  const allOrphanReceipts = await db
     .select()
     .from(receiptsTable)
     .where(isNull(receiptsTable.uploadedBy));
 
+  const orphanReceipts = receiptIdAllowlist
+    ? allOrphanReceipts.filter((r) => receiptIdAllowlist.includes(r.id))
+    : allOrphanReceipts;
+
   if (orphanReceipts.length === 0) {
-    res.json({ ok: true, scanned: 0, updated: 0, unresolved: 0, deleted: 0 });
+    res.json({
+      ok: true,
+      dryRun,
+      scanned: 0,
+      updated: 0,
+      unresolved: 0,
+      deleted: 0,
+      preview: [],
+    });
     return;
   }
 
@@ -263,6 +279,14 @@ router.post("/admin/backfill-receipt-uploaders", async (req, res): Promise<void>
   let updated = 0;
   let unresolved = 0;
   let deleted = 0;
+  const preview: Array<{
+    id: number;
+    fileName: string;
+    linkedExpenseId: number | null;
+    linkedBillId: number | null;
+    action: "update" | "delete" | "unresolved";
+    resolvedUserId: number | null;
+  }> = [];
   for (const receipt of orphanReceipts) {
     let userId: number | null = null;
     if (receipt.linkedExpenseId != null) {
@@ -275,38 +299,68 @@ router.post("/admin/backfill-receipt-uploaders", async (req, res): Promise<void>
     }
     if (userId == null) {
       if (deleteUnresolved) {
-        // Mirror the user-facing delete: remove the receipt row and detach it
-        // from any linked expense's receiptIds array so it stops appearing in
-        // the attached-receipts list.
-        await db.delete(receiptsTable).where(eq(receiptsTable.id, receipt.id));
-        if (receipt.linkedExpenseId != null) {
-          await db
-            .update(expensesTable)
-            .set({
-              receiptIds: sql`array_remove(${expensesTable.receiptIds}, ${receipt.id})`,
-              updatedAt: new Date(),
-            })
-            .where(eq(expensesTable.id, receipt.linkedExpenseId));
+        if (!dryRun) {
+          // Mirror the user-facing delete: remove the receipt row and detach it
+          // from any linked expense's receiptIds array so it stops appearing in
+          // the attached-receipts list.
+          await db.delete(receiptsTable).where(eq(receiptsTable.id, receipt.id));
+          if (receipt.linkedExpenseId != null) {
+            await db
+              .update(expensesTable)
+              .set({
+                receiptIds: sql`array_remove(${expensesTable.receiptIds}, ${receipt.id})`,
+                updatedAt: new Date(),
+              })
+              .where(eq(expensesTable.id, receipt.linkedExpenseId));
+          }
         }
         deleted += 1;
+        preview.push({
+          id: receipt.id,
+          fileName: receipt.fileName,
+          linkedExpenseId: receipt.linkedExpenseId,
+          linkedBillId: receipt.linkedBillId,
+          action: "delete",
+          resolvedUserId: null,
+        });
         continue;
       }
       unresolved += 1;
+      preview.push({
+        id: receipt.id,
+        fileName: receipt.fileName,
+        linkedExpenseId: receipt.linkedExpenseId,
+        linkedBillId: receipt.linkedBillId,
+        action: "unresolved",
+        resolvedUserId: null,
+      });
       continue;
     }
-    await db
-      .update(receiptsTable)
-      .set({ uploadedBy: userId })
-      .where(eq(receiptsTable.id, receipt.id));
+    if (!dryRun) {
+      await db
+        .update(receiptsTable)
+        .set({ uploadedBy: userId })
+        .where(eq(receiptsTable.id, receipt.id));
+    }
     updated += 1;
+    preview.push({
+      id: receipt.id,
+      fileName: receipt.fileName,
+      linkedExpenseId: receipt.linkedExpenseId,
+      linkedBillId: receipt.linkedBillId,
+      action: "update",
+      resolvedUserId: userId,
+    });
   }
 
   res.json({
     ok: true,
+    dryRun,
     scanned: orphanReceipts.length,
     updated,
     unresolved,
     deleted,
+    preview,
   });
 });
 
