@@ -658,7 +658,12 @@ router.get(
         inBalance: debits === credits,
       },
       lastClosedPeriod: lastClosed
-        ? { id: lastClosed.id, label: lastClosed.label, endDate: lastClosed.endDate, closedAt: lastClosed.closedAt }
+        ? {
+            id: lastClosed.id,
+            label: lastClosed.label,
+            endDate: lastClosed.periodEnd,
+            closedAt: lastClosed.closedAt,
+          }
         : null,
     });
   },

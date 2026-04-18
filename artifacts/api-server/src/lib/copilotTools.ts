@@ -238,7 +238,7 @@ const getCurrentRecord: ToolDefinition<{
 const getAccountingDimensions: ToolDefinition<Record<string, never>> = {
   name: "get_accounting_dimensions",
   description:
-    "Returns Life House's available accounting dimensions: programs (used as fund/cost-center) and active vendors. Note: a formal chart of accounts is not yet integrated.",
+    "Returns Life House's available accounting dimensions: programs (used as fund/cost-center), active vendors, and the live Chart of Accounts. Use the active CoA codes when drafting journal entries.",
   argsSchema: z.object({}).strict(),
   parametersJsonSchema: {
     type: "object",
