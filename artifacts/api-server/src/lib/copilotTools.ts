@@ -12,13 +12,28 @@ import {
   transactionsTable,
   creditsTable,
   usersTable,
+  copilotDocumentsTable,
 } from "@workspace/db";
 import type { AuthUser } from "./auth";
+
+export type RetrievedSnippet = {
+  snippetId: string;
+  documentId: number;
+  documentTitle: string;
+  chunkId: number;
+  snippet: string;
+  rank: number;
+};
 
 export type CopilotToolContext = {
   user: AuthUser;
   pageContext: PageContextLike | null;
   threadId: number;
+  // Mutated by retrieval tools so the route handler can validate citations.
+  retrievedSnippets: Map<string, RetrievedSnippet>;
+  // When true, side-effecting tools must short-circuit and return a structured
+  // preview of what they WOULD do, without writing any rows.
+  dryRun?: boolean;
 };
 
 export type PageContextLike = {
@@ -397,7 +412,7 @@ const searchChartOfAccounts: ToolDefinition<{ query: string }> = {
   },
   async execute(args) {
     const q = `%${args.query}%`;
-    const matches = await db
+    const programMatches = await db
       .select({
         id: programsTable.id,
         name: programsTable.name,
@@ -406,17 +421,116 @@ const searchChartOfAccounts: ToolDefinition<{ query: string }> = {
         isActive: programsTable.isActive,
       })
       .from(programsTable)
-      .where(
-        or(ilike(programsTable.name, q), ilike(programsTable.code, q)),
-      )
+      .where(or(ilike(programsTable.name, q), ilike(programsTable.code, q)))
       .limit(20);
     return {
       ok: true,
       data: {
-        chart_of_accounts_status:
-          "Not yet integrated. Returned matches are programs only.",
+        no_formal_chart_of_accounts: true,
+        official_matches: [],
+        related_internal_mappings: programMatches.map((p) => ({
+          mapping_type: "program",
+          ...p,
+        })),
+        disclosure:
+          "No formal chart of accounts is configured yet. Programs are NOT a chart of accounts — they are internal cost-center / fund codes. Do not present them as official GL accounts.",
+        query: args.query,
+      },
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// 11. search_internal_policies (Step 5 — document-backed retrieval)
+// ---------------------------------------------------------------------------
+const searchInternalPolicies: ToolDefinition<{
+  query: string;
+  limit?: number;
+}> = {
+  name: "search_internal_policies",
+  description:
+    "Searches Life House's internal accounting policies, procedures, memos, and other ingested documents using full-text search. Returns ranked snippets, each with a stable snippet_id you MUST cite verbatim in any source you list. Citing a snippet_id you did not receive from this tool is a hard error and your response will be rejected. If no documents are indexed yet, say so explicitly in missing_information.",
+  argsSchema: z
+    .object({
+      query: z.string().min(2).max(300),
+      limit: z.number().int().min(1).max(8).optional(),
+    })
+    .strict(),
+  parametersJsonSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["query"],
+    properties: {
+      query: { type: "string", minLength: 2, maxLength: 300 },
+      limit: { type: "integer", minimum: 1, maximum: 8, default: 5 },
+    },
+  },
+  async execute(args, ctx) {
+    const limit = args.limit ?? 5;
+    const [{ totalDocs }] = await db
+      .select({
+        totalDocs: sql<number>`count(*)::int`,
+      })
+      .from(copilotDocumentsTable)
+      .where(eq(copilotDocumentsTable.isActive, true));
+    if (!totalDocs || totalDocs === 0) {
+      return {
+        ok: true,
+        data: {
+          no_documents_indexed: true,
+          query: args.query,
+          matches: [],
+          disclosure:
+            "No internal policy documents have been ingested yet. Do NOT cite internal sources.",
+        },
+      };
+    }
+    const rows = await db.execute(sql`
+      SELECT
+        c.id            AS chunk_id,
+        c.document_id   AS document_id,
+        c.chunk_index   AS chunk_index,
+        c.content       AS content,
+        d.title         AS document_title,
+        ts_rank(to_tsvector('english', c.content),
+                plainto_tsquery('english', ${args.query})) AS rank
+      FROM copilot_document_chunks c
+      JOIN copilot_documents d ON d.id = c.document_id
+      WHERE d.is_active = true
+        AND to_tsvector('english', c.content) @@ plainto_tsquery('english', ${args.query})
+      ORDER BY rank DESC
+      LIMIT ${limit}
+    `);
+    const matches = (rows.rows as Array<Record<string, unknown>>).map((r) => {
+      const documentId = Number(r["document_id"]);
+      const chunkId = Number(r["chunk_id"]);
+      const chunkIndex = Number(r["chunk_index"]);
+      const snippetId = `doc${documentId}-chunk${chunkIndex}`;
+      const snippet: RetrievedSnippet = {
+        snippetId,
+        documentId,
+        documentTitle: String(r["document_title"]),
+        chunkId,
+        snippet: String(r["content"]),
+        rank: Number(r["rank"]),
+      };
+      ctx.retrievedSnippets.set(snippetId, snippet);
+      return {
+        snippet_id: snippetId,
+        document_id: documentId,
+        document_title: snippet.documentTitle,
+        snippet: snippet.snippet,
+        rank: snippet.rank,
+      };
+    });
+    return {
+      ok: true,
+      data: {
+        no_documents_indexed: false,
         query: args.query,
         matches,
+        instructions:
+          "If you cite any of these in your answer, list each one in the top-level `sources` array with its exact snippet_id.",
       },
     };
   },
@@ -463,6 +577,19 @@ const escalateToHuman: ToolDefinition<{
     }
     const title = `Copilot escalation (${args.severity}) from ${ctx.user.firstName} ${ctx.user.lastName}`;
     const body = args.reason;
+    if (ctx.dryRun) {
+      return {
+        ok: true,
+        data: {
+          dry_run: true,
+          would_have_escalated: true,
+          severity: args.severity,
+          would_have_notified_user_ids: admins.map((a) => a.id),
+          recipient_count: admins.length,
+          note: "No notifications were created because this call ran in preview mode.",
+        },
+      };
+    }
     const inserted = await db
       .insert(notificationsTable)
       .values(
@@ -519,6 +646,19 @@ const createFollowupTask: ToolDefinition<{
     },
   },
   async execute(args, ctx) {
+    if (ctx.dryRun) {
+      return {
+        ok: true,
+        data: {
+          dry_run: true,
+          would_have_created: true,
+          would_have_assigned_to_user_id: ctx.user.id,
+          title: `Follow-up: ${args.title}`,
+          body: args.body,
+          note: "No notification was created because this call ran in preview mode.",
+        },
+      };
+    }
     const [n] = await db
       .insert(notificationsTable)
       .values({
@@ -598,6 +738,7 @@ const TOOLS = [
   getMissingReceipts,
   getReconciliationStatus,
   searchChartOfAccounts,
+  searchInternalPolicies,
   escalateToHuman,
   createFollowupTask,
   draftMemo,

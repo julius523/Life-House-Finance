@@ -1,15 +1,19 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
 import OpenAI from "openai";
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   db,
   copilotThreadsTable,
   copilotMessagesTable,
   copilotToolCallsTable,
+  copilotDocumentsTable,
+  copilotDocumentChunksTable,
+  copilotMessageSourcesTable,
   type CopilotMessageRow,
   type CopilotThreadRow,
   type CopilotToolCallRow,
+  type CopilotMessageSourceRow,
 } from "@workspace/db";
 import { requireAuth } from "../lib/auth";
 import {
@@ -17,6 +21,7 @@ import {
   runTool,
   type CopilotToolContext,
   type PageContextLike,
+  type RetrievedSnippet,
 } from "../lib/copilotTools";
 
 const MAX_TOOL_ITERATIONS = 5;
@@ -41,7 +46,12 @@ Non-negotiable rules:
 1. Never guess.
 2. If evidence is missing, say so clearly in "missing_information" and lower your confidence.
 3. Never invent GAAP rules, ASC references, balances, vendors, receipts, approvals, journal entries, or financial statement results.
-4. You currently have NO access to internal Life House documents, policies, chart of accounts, or transaction data. The "why" field must therefore reflect general accounting reasoning only — do NOT cite internal sources, file names, or document ids. Do NOT pretend to have looked anything up.
+4. Internal evidence rules:
+   a. You may cite internal Life House policies/memos/documents in the "why" field ONLY if you obtained the supporting snippet from search_internal_policies in this same turn.
+   b. Every internal claim must be supported by an entry in the top-level "sources" array.
+   c. Each "sources" entry's snippet_id MUST be an exact snippet_id returned by search_internal_policies on this turn. The server will reject your response if any snippet_id was not actually returned.
+   d. If search_internal_policies returns no_documents_indexed=true or no relevant matches, you have no internal evidence — say so in "missing_information" and leave "sources" as an empty array. General accounting reasoning is still allowed in "why" but must not claim to be based on internal documents.
+   e. Never reference a chart of accounts as if Life House had one — there is no formal CoA configured.
 5. Be conservative and audit-ready.
 6. If the question affects filed financials, taxes, payroll, external reporting, bank movement, or final journal posting, set "human_review_needed" to true.
 7. If a user asks for a classification decision without enough detail, ask for the missing facts in "missing_information".
@@ -49,8 +59,9 @@ Non-negotiable rules:
 9. Note when nonprofit treatment may differ from for-profit presentation.
 10. When the user provides page context describing what they are currently looking at, treat it as authoritative read-only background — do not invent details beyond what is provided.
 11. You have read-only tools to inspect Life House records (current page record, programs, vendors, open approvals, missing receipts, reconciliation status, search). Call them whenever the user's question depends on actual Life House data — do NOT guess at what records exist. Tool results are the only authoritative internal data source you currently have.
-12. There is no formal chart of accounts integration yet. If a question depends on a chart of accounts, call search_chart_of_accounts (which returns programs as a proxy) AND state the limitation explicitly in "missing_information".
-13. Use escalate_to_human only when human accountant judgment, oversight, or sign-off is genuinely required. Use create_followup_task to leave the current user an actionable reminder. Use draft_memo to produce a draft document the user can copy — never claim a memo was sent or saved.
+12. For policy / procedure / memo questions, ALWAYS call search_internal_policies first. Cite the snippets you actually used in "sources". If nothing relevant comes back, say so in "missing_information" and do not pretend to have internal sources.
+13a. There is no formal chart of accounts integration yet. search_chart_of_accounts returns no_formal_chart_of_accounts=true with related internal mappings (programs) for context only. Programs are NOT GL accounts. State the limitation explicitly in "missing_information".
+13b. Use escalate_to_human only when human accountant judgment, oversight, or sign-off is genuinely required. Use create_followup_task to leave the current user an actionable reminder. Use draft_memo to produce a draft document the user can copy — never claim a memo was sent or saved.
 14. Tool side effects are limited to creating notification records (escalations / follow-ups). Tools cannot post journal entries, change balances, change approval status, send email externally, or alter any record.
 
 You MUST respond with a single JSON object that strictly matches the response schema. Use the literal string "None" in any narrative field that genuinely does not apply. Do not use Markdown headings inside fields — the UI provides the structure.`;
@@ -66,6 +77,7 @@ const RESPONSE_SCHEMA = {
     "recommended_next_step",
     "human_review_needed",
     "confidence",
+    "sources",
   ],
   properties: {
     answer: { type: "string", minLength: 1 },
@@ -75,6 +87,20 @@ const RESPONSE_SCHEMA = {
     recommended_next_step: { type: "string" },
     human_review_needed: { type: "boolean" },
     confidence: { type: "string", enum: ["low", "medium", "high"] },
+    sources: {
+      type: "array",
+      description:
+        "Internal evidence cited in this answer. Each entry MUST be an exact snippet_id returned by search_internal_policies on this turn. Empty array if no internal documents were used.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["snippet_id", "why_relevant"],
+        properties: {
+          snippet_id: { type: "string", minLength: 1, maxLength: 200 },
+          why_relevant: { type: "string", minLength: 1, maxLength: 600 },
+        },
+      },
+    },
   },
 } as const;
 
@@ -302,6 +328,19 @@ async function linkToolCallsToMessage(
     .where(sql`${copilotToolCallsTable.id} = ANY(${toolCallIds})`);
 }
 
+function serializeSource(s: CopilotMessageSourceRow): Record<string, unknown> {
+  return {
+    id: s.id,
+    snippetId: s.snippetId,
+    documentId: s.documentId,
+    documentTitle: s.documentTitle,
+    snippetText: s.snippetText,
+    rank: s.rank,
+    whyRelevant: s.whyRelevant,
+    createdAt: s.createdAt,
+  };
+}
+
 function serializeToolCall(t: CopilotToolCallRow): Record<string, unknown> {
   return {
     id: t.id,
@@ -405,11 +444,28 @@ router.get("/accounting/threads/:id", async (req, res): Promise<void> => {
     .from(copilotMessagesTable)
     .where(eq(copilotMessagesTable.threadId, threadId))
     .orderBy(asc(copilotMessagesTable.id));
-  const toolCalls = await db
-    .select()
-    .from(copilotToolCallsTable)
-    .where(eq(copilotToolCallsTable.threadId, threadId))
-    .orderBy(asc(copilotToolCallsTable.id));
+  const assistantMsgIds = messages
+    .filter((m) => m.role === "assistant")
+    .map((m) => m.id);
+  const [toolCalls, sources] = await Promise.all([
+    db
+      .select()
+      .from(copilotToolCallsTable)
+      .where(eq(copilotToolCallsTable.threadId, threadId))
+      .orderBy(asc(copilotToolCallsTable.id)),
+    assistantMsgIds.length === 0
+      ? Promise.resolve([] as CopilotMessageSourceRow[])
+      : db
+          .select()
+          .from(copilotMessageSourcesTable)
+          .where(
+            inArray(
+              copilotMessageSourcesTable.assistantMessageId,
+              assistantMsgIds,
+            ),
+          )
+          .orderBy(asc(copilotMessageSourcesTable.id)),
+  ]);
   const callsByMsg = new Map<number, CopilotToolCallRow[]>();
   for (const c of toolCalls) {
     if (c.assistantMessageId == null) continue;
@@ -417,11 +473,18 @@ router.get("/accounting/threads/:id", async (req, res): Promise<void> => {
     arr.push(c);
     callsByMsg.set(c.assistantMessageId, arr);
   }
+  const sourcesByMsg = new Map<number, CopilotMessageSourceRow[]>();
+  for (const s of sources) {
+    const arr = sourcesByMsg.get(s.assistantMessageId) ?? [];
+    arr.push(s);
+    sourcesByMsg.set(s.assistantMessageId, arr);
+  }
   res.json({
     thread: serializeThread(thread),
     messages: messages.map((m) => ({
       ...serializeMessage(m),
       toolCalls: (callsByMsg.get(m.id) ?? []).map(serializeToolCall),
+      sources: (sourcesByMsg.get(m.id) ?? []).map(serializeSource),
     })),
   });
 });
@@ -574,10 +637,12 @@ router.post(
 
     const startedAt = Date.now();
     const toolCallLogIds: number[] = [];
+    const retrievedSnippets = new Map<string, RetrievedSnippet>();
     const toolCtx: CopilotToolContext = {
       user: req.authUser!,
       pageContext: (pageContext ?? null) as PageContextLike | null,
       threadId,
+      retrievedSnippets,
     };
     try {
       let response = await openai.responses.create({
@@ -719,6 +784,14 @@ router.post(
         recommended_next_step: z.string(),
         human_review_needed: z.boolean(),
         confidence: z.enum(["low", "medium", "high"]),
+        sources: z
+          .array(
+            z.object({
+              snippet_id: z.string().min(1).max(200),
+              why_relevant: z.string().min(1).max(600),
+            }),
+          )
+          .default([]),
       });
       const shaped = Shape.safeParse(parsedJson);
       if (!shaped.success) {
@@ -747,32 +820,112 @@ router.post(
         return;
       }
 
-      const [assistantRow] = await db
-        .insert(copilotMessagesTable)
-        .values({
-          threadId,
-          role: "assistant",
-          status: "ok",
-          answer: shaped.data.answer,
-          why: shaped.data.why,
-          missingInformation: shaped.data.missing_information,
-          riskFlags: shaped.data.risk_flags,
-          recommendedNextStep: shaped.data.recommended_next_step,
-          humanReviewNeeded: shaped.data.human_review_needed,
-          confidence: shaped.data.confidence,
-          rawResponseJson: parsedJson as Record<string, unknown>,
-          modelName: response.model ?? AGENT_MODEL,
-          latencyMs,
-        })
-        .returning();
+      // Citation validation — every cited snippet_id MUST have actually been
+      // returned by search_internal_policies in this turn. Otherwise the
+      // model is fabricating evidence and the response must be rejected.
+      const fabricated: string[] = [];
+      for (const s of shaped.data.sources) {
+        if (!retrievedSnippets.has(s.snippet_id)) {
+          fabricated.push(s.snippet_id);
+        }
+      }
+      if (fabricated.length > 0) {
+        req.log.error(
+          {
+            fabricated,
+            retrieved: Array.from(retrievedSnippets.keys()),
+          },
+          "Copilot cited snippet ids that were not retrieved this turn",
+        );
+        const [assistantRow] = await db
+          .insert(copilotMessagesTable)
+          .values({
+            threadId,
+            role: "assistant",
+            status: "error",
+            errorCode: "fabricated_citation",
+            modelName: response.model ?? AGENT_MODEL,
+            latencyMs,
+            rawResponseJson: parsedJson as Record<string, unknown>,
+          })
+          .returning();
+        await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
+        res.status(502).json({
+          userMessage: serializeMessage(userMessage!),
+          assistantMessage: serializeMessage(assistantRow!),
+          error:
+            "The copilot cited internal evidence that was never retrieved. The response was rejected.",
+          fabricatedSnippetIds: fabricated,
+        });
+        return;
+      }
 
-      await linkToolCallsToMessage(toolCallLogIds, assistantRow!.id);
+      // De-duplicate citations by snippet_id (keep the first whyRelevant)
+      // so the model can't bloat the sources list by repeating the same id.
+      const seenSnippetIds = new Set<string>();
+      const dedupedSources = shaped.data.sources.filter((s) => {
+        if (seenSnippetIds.has(s.snippet_id)) return false;
+        seenSnippetIds.add(s.snippet_id);
+        return true;
+      });
 
-      const linkedToolCalls = await db
-        .select()
-        .from(copilotToolCallsTable)
-        .where(eq(copilotToolCallsTable.assistantMessageId, assistantRow!.id))
-        .orderBy(asc(copilotToolCallsTable.id));
+      // Persist message and its sources atomically — never let an assistant
+      // answer survive without its supporting evidence rows.
+      const assistantRow = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(copilotMessagesTable)
+          .values({
+            threadId,
+            role: "assistant",
+            status: "ok",
+            answer: shaped.data.answer,
+            why: shaped.data.why,
+            missingInformation: shaped.data.missing_information,
+            riskFlags: shaped.data.risk_flags,
+            recommendedNextStep: shaped.data.recommended_next_step,
+            humanReviewNeeded: shaped.data.human_review_needed,
+            confidence: shaped.data.confidence,
+            rawResponseJson: parsedJson as Record<string, unknown>,
+            modelName: response.model ?? AGENT_MODEL,
+            latencyMs,
+          })
+          .returning();
+        if (dedupedSources.length > 0) {
+          await tx.insert(copilotMessageSourcesTable).values(
+            dedupedSources.map((s) => {
+              const snip = retrievedSnippets.get(s.snippet_id)!;
+              return {
+                assistantMessageId: row!.id,
+                chunkId: snip.chunkId,
+                documentId: snip.documentId,
+                snippetText: snip.snippet,
+                documentTitle: snip.documentTitle,
+                snippetId: snip.snippetId,
+                rank: String(snip.rank),
+                whyRelevant: s.why_relevant,
+              };
+            }),
+          );
+        }
+        return row!;
+      });
+
+      await linkToolCallsToMessage(toolCallLogIds, assistantRow.id);
+
+      const [linkedToolCalls, linkedSources] = await Promise.all([
+        db
+          .select()
+          .from(copilotToolCallsTable)
+          .where(eq(copilotToolCallsTable.assistantMessageId, assistantRow.id))
+          .orderBy(asc(copilotToolCallsTable.id)),
+        db
+          .select()
+          .from(copilotMessageSourcesTable)
+          .where(
+            eq(copilotMessageSourcesTable.assistantMessageId, assistantRow.id),
+          )
+          .orderBy(asc(copilotMessageSourcesTable.id)),
+      ]);
 
       await db
         .update(copilotThreadsTable)
@@ -782,8 +935,9 @@ router.post(
       res.json({
         userMessage: serializeMessage(userMessage!),
         assistantMessage: {
-          ...serializeMessage(assistantRow!),
+          ...serializeMessage(assistantRow),
           toolCalls: linkedToolCalls.map(serializeToolCall),
+          sources: linkedSources.map(serializeSource),
         },
       });
     } catch (err) {
@@ -811,13 +965,14 @@ router.post(
   },
 );
 
-// Admin diagnostics — exercise a single tool without invoking the model.
-// Useful when OpenAI billing is unavailable but you still want to verify the
-// tool registry, validation, and audit-log path. Tool side effects DO occur
-// (escalations / follow-ups will create real notification rows). The call is
-// logged to copilot_tool_calls just like any model-driven call.
+// Admin diagnostics — preview a single tool without invoking the model.
+// This endpoint is TRULY non-mutating: it forces dryRun=true so the three
+// side-effecting tools (escalate_to_human, create_followup_task, draft_memo)
+// short-circuit and return a structured "what would have happened" preview
+// without writing any rows. Read tools execute as normal. Calls are still
+// logged to copilot_tool_calls for traceability, with status="preview".
 router.post(
-  "/accounting/diagnostics/tool-dry-run",
+  "/accounting/diagnostics/tool-preview",
   async (req, res): Promise<void> => {
     if (req.authUser?.role !== "admin") {
       res.status(403).json({ error: "Admins only" });
@@ -849,6 +1004,8 @@ router.post(
       user: req.authUser!,
       pageContext: (pageContext ?? null) as PageContextLike | null,
       threadId,
+      retrievedSnippets: new Map(),
+      dryRun: true,
     });
     const latencyMs = Date.now() - t0;
     const [logRow] = await db
@@ -861,14 +1018,164 @@ router.post(
         result: result.ok
           ? (result.data as Record<string, unknown>)
           : { error: result.error },
-        status: result.ok ? "ok" : "error",
+        status: result.ok ? "preview" : "error",
         errorMessage: result.ok ? null : result.error,
         latencyMs,
       })
       .returning();
-    res.json({ result, logRow });
+    res.json({ result, logRow, dryRun: true });
   },
 );
+
+// ---------------------------------------------------------------------------
+// Document ingest (Step 5) — admin only. Documents are chunked and stored
+// for full-text search via search_internal_policies.
+// ---------------------------------------------------------------------------
+const CHUNK_SIZE = 800;
+const CHUNK_OVERLAP = 100;
+
+function chunkText(content: string): Array<{
+  chunkIndex: number;
+  content: string;
+  charStart: number;
+  charEnd: number;
+}> {
+  const out: Array<{
+    chunkIndex: number;
+    content: string;
+    charStart: number;
+    charEnd: number;
+  }> = [];
+  if (content.length === 0) return out;
+  let start = 0;
+  let idx = 0;
+  while (start < content.length) {
+    let end = Math.min(start + CHUNK_SIZE, content.length);
+    if (end < content.length) {
+      // try to break at a paragraph or sentence boundary within the last 200 chars
+      const tail = content.slice(end - 200, end);
+      const breakRe = /[\n.!?]\s/g;
+      let lastBreak = -1;
+      let m: RegExpExecArray | null;
+      while ((m = breakRe.exec(tail))) lastBreak = m.index + m[0].length;
+      if (lastBreak > 0) end = end - 200 + lastBreak;
+    }
+    const slice = content.slice(start, end).trim();
+    if (slice.length > 0) {
+      out.push({
+        chunkIndex: idx++,
+        content: slice,
+        charStart: start,
+        charEnd: end,
+      });
+    }
+    if (end >= content.length) break;
+    start = Math.max(end - CHUNK_OVERLAP, start + 1);
+  }
+  return out;
+}
+
+router.post("/accounting/documents", async (req, res): Promise<void> => {
+  if (req.authUser?.role !== "admin") {
+    res.status(403).json({ error: "Admins only" });
+    return;
+  }
+  const Body = z
+    .object({
+      title: z.string().min(1).max(300),
+      sourceType: z.string().min(1).max(40).default("policy"),
+      sourceUrl: z.string().max(1000).optional().nullable(),
+      content: z.string().min(20).max(500_000),
+    })
+    .strict();
+  const parsed = Body.safeParse(req.body);
+  if (!parsed.success) {
+    res
+      .status(400)
+      .json({ error: parsed.error.issues[0]?.message ?? "Invalid body" });
+    return;
+  }
+  const chunks = chunkText(parsed.data.content);
+  if (chunks.length === 0) {
+    res.status(400).json({ error: "Document produced zero usable chunks." });
+    return;
+  }
+  const [doc] = await db
+    .insert(copilotDocumentsTable)
+    .values({
+      title: parsed.data.title,
+      sourceType: parsed.data.sourceType,
+      sourceUrl: parsed.data.sourceUrl ?? null,
+      content: parsed.data.content,
+      createdBy: req.authUser!.id,
+    })
+    .returning();
+  await db.insert(copilotDocumentChunksTable).values(
+    chunks.map((c) => ({
+      documentId: doc!.id,
+      chunkIndex: c.chunkIndex,
+      content: c.content,
+      charStart: c.charStart,
+      charEnd: c.charEnd,
+    })),
+  );
+  res.status(201).json({
+    document: {
+      id: doc!.id,
+      title: doc!.title,
+      sourceType: doc!.sourceType,
+      sourceUrl: doc!.sourceUrl,
+      isActive: doc!.isActive,
+      createdAt: doc!.createdAt,
+      chunkCount: chunks.length,
+    },
+  });
+});
+
+router.get("/accounting/documents", async (req, res): Promise<void> => {
+  if (req.authUser?.role !== "admin") {
+    res.status(403).json({ error: "Admins only" });
+    return;
+  }
+  const docs = await db
+    .select({
+      id: copilotDocumentsTable.id,
+      title: copilotDocumentsTable.title,
+      sourceType: copilotDocumentsTable.sourceType,
+      sourceUrl: copilotDocumentsTable.sourceUrl,
+      isActive: copilotDocumentsTable.isActive,
+      createdAt: copilotDocumentsTable.createdAt,
+      updatedAt: copilotDocumentsTable.updatedAt,
+      chunkCount: sql<number>`(SELECT count(*)::int FROM copilot_document_chunks c WHERE c.document_id = ${copilotDocumentsTable.id})`,
+    })
+    .from(copilotDocumentsTable)
+    .orderBy(desc(copilotDocumentsTable.createdAt));
+  res.json({ documents: docs });
+});
+
+router.delete("/accounting/documents/:id", async (req, res): Promise<void> => {
+  if (req.authUser?.role !== "admin") {
+    res.status(403).json({ error: "Admins only" });
+    return;
+  }
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  // Soft-delete: keep the document row so historical citations on past
+  // assistant messages still resolve, but exclude it from future searches.
+  const [updated] = await db
+    .update(copilotDocumentsTable)
+    .set({ isActive: false, updatedAt: new Date() })
+    .where(eq(copilotDocumentsTable.id, id))
+    .returning();
+  if (!updated) {
+    res.status(404).json({ error: "Document not found" });
+    return;
+  }
+  res.json({ ok: true, id, isActive: updated.isActive });
+});
 
 // Admin diagnostics — explicit ping only, never auto-pinged.
 router.post("/accounting/diagnostics/ping", async (req, res): Promise<void> => {

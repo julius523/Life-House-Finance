@@ -16,3 +16,6 @@ export * from "./email_settings";
 export * from "./copilot_threads";
 export * from "./copilot_messages";
 export * from "./copilot_tool_calls";
+export * from "./copilot_documents";
+export * from "./copilot_document_chunks";
+export * from "./copilot_message_sources";

@@ -60,6 +60,18 @@ type CopilotMessage = {
   errorCode: string | null;
   createdAt: string;
   toolCalls?: ToolCall[];
+  sources?: SourceCitation[];
+};
+
+type SourceCitation = {
+  id: number;
+  snippetId: string;
+  documentId: number;
+  documentTitle: string;
+  snippetText: string;
+  rank: string | number | null;
+  whyRelevant: string | null;
+  createdAt: string;
 };
 
 type ToolCall = {
@@ -588,7 +600,9 @@ function AssistantCard({ m }: { m: CopilotMessage }) {
                   ? "The model returned an unexpected response. Retry the message."
                   : m.errorCode === "key_missing"
                     ? "OPENAI_API_KEY is not configured."
-                    : "Try again, or check the diagnostics above."}
+                    : m.errorCode === "fabricated_citation"
+                      ? "The copilot cited internal evidence that was never retrieved. The response was rejected — please retry."
+                      : "Try again, or check the diagnostics above."}
           </div>
         </div>
       </div>
@@ -651,6 +665,23 @@ function AssistantCard({ m }: { m: CopilotMessage }) {
           })}
         </div>
 
+        {/* Sources (Step 5) */}
+        {m.sources && m.sources.length > 0 && (
+          <Collapsible defaultOpen={true}>
+            <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900 pt-1">
+              <ChevronDown className="h-3 w-3 transition-transform data-[state=closed]:-rotate-90" />
+              Sources ({m.sources.length})
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="space-y-1.5 mt-1 pl-4">
+                {m.sources.map((s) => (
+                  <SourceRow key={s.id} s={s} />
+                ))}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+
         {/* Tool calls */}
         {m.toolCalls && m.toolCalls.length > 0 && (
           <Collapsible defaultOpen={false}>
@@ -675,6 +706,49 @@ function AssistantCard({ m }: { m: CopilotMessage }) {
           {m.toolCalls && m.toolCalls.length > 0 && ` · ${m.toolCalls.length} tool call${m.toolCalls.length === 1 ? "" : "s"}`}
         </div>
       </div>
+    </div>
+  );
+}
+
+function SourceRow({ s }: { s: SourceCitation }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded border border-emerald-200 bg-emerald-50/40 p-2 text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 w-full text-left"
+      >
+        <ChevronDown
+          className={`h-3 w-3 transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300">
+          {s.snippetId}
+        </Badge>
+        <span className="font-medium text-foreground truncate">
+          {s.documentTitle}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2 pl-5">
+          {s.whyRelevant && (
+            <div>
+              <div className="text-[10px] uppercase text-muted-foreground mb-1">
+                Why cited
+              </div>
+              <div className="text-xs text-foreground/90">{s.whyRelevant}</div>
+            </div>
+          )}
+          <div>
+            <div className="text-[10px] uppercase text-muted-foreground mb-1">
+              Snippet
+            </div>
+            <div className="rounded border bg-background p-2 text-xs whitespace-pre-wrap break-words font-sans text-foreground/90 max-h-48 overflow-auto">
+              {s.snippetText}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
