@@ -13,6 +13,7 @@ import {
   agentActionsTable,
   activityLogTable,
   notificationsTable,
+  usersTable,
   type CopilotMessageRow,
   type CopilotThreadRow,
   type CopilotToolCallRow,

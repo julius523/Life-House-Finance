@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "kh-_F2cEL71oY022twadu"
+uri = "file://.local/test-evidence/STEP6_LIVE_TEST_REPORT.md"
+type = "text"
+title = "Step 6 — Live Acceptance Test Report"

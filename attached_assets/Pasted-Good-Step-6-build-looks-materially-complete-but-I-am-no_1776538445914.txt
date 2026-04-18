@@ -1,0 +1,61 @@
+Good. Step 6 build looks materially complete, but I am **not marking Step 6 done** until the live acceptance tests pass in a logged-in browser session.
+
+Please run and document these tests with screenshots or exact outcomes:
+
+1. **Draft memo creation**
+
+   * Ask the copilot to draft a memo.
+   * Confirm an `agent_action` row is created.
+   * Confirm it appears in the approvals queue.
+   * Confirm the assistant message shows the draft badge.
+
+2. **Draft follow-up task creation**
+
+   * Ask the copilot to create a follow-up task.
+   * Confirm persistence, approvals visibility, and audit log entry.
+
+3. **Draft escalation creation**
+
+   * Ask the copilot to escalate to a human.
+   * Confirm persistence, approvals visibility, and audit log entry.
+
+4. **Balanced journal entry draft**
+
+   * Ask the copilot to draft a valid journal entry.
+   * Confirm debits = credits to the cent.
+   * Confirm no ledger posting occurs before approval.
+
+5. **Unbalanced journal entry rejection**
+
+   * Force a draft that does not balance.
+   * Confirm the tool rejects it cleanly.
+   * Confirm no draft is approved or posted accidentally.
+
+6. **Self-approval block**
+
+   * Create a draft as User A.
+   * Attempt approval as the same user.
+   * Confirm UI blocks it and API blocks it.
+
+7. **Approve / reject / cancel flow**
+
+   * Approve one draft, reject one draft, cancel one draft.
+   * Confirm status transitions, reviewer notes, timestamps, and audit logs all persist correctly.
+
+8. **Thread reload persistence**
+
+   * Refresh the accounting thread.
+   * Confirm draft badges, linked actions, and evidence still render correctly.
+
+9. **Idempotency / double-click protection**
+
+   * Double-submit an approval action.
+   * Confirm only one state change occurs.
+
+10. **Role enforcement**
+
+* Verify submitter, approver, and unauthorized user behavior separately.
+* Confirm unauthorized users cannot approve/reject/cancel.
+
+Do not move to the next step until all of the above are documented as pass/fail with evidence.
+Also give me one short note on whether the dual-Drizzle issue is harmless technical debt or a real production risk.
