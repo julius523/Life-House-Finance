@@ -15,7 +15,9 @@ A full-stack nonprofit finance management portal for Life House Reentry. Built w
 - **Vendor Directory**: Manage vendor relationships and track total spend
 - **Approval Queue**: Centralized view of all pending approvals sorted by urgency
 - **Month-End Close**: Checklist-driven month-end close process with progress tracking
-- **Notifications**: In-app bell + email hook (SendGrid via SENDGRID_API_KEY/NOTIFICATION_FROM_EMAIL, otherwise logs) when bills/expenses are sent back for correction
+- **Notifications**: In-app bell + transactional email (SendGrid) when bills/expenses are sent back for correction. Sends a branded HTML email with a deep link to the item; failures are logged but never break the API call. Configure via `SENDGRID_API_KEY` (secret), `NOTIFICATION_FROM_EMAIL` (must be a SendGrid-verified sender), and optional `NOTIFICATION_FROM_NAME` (defaults to "Life House Finance Portal"). If credentials are missing, emails fall back to log-only.
+
+  Note: The user prefers configuring SendGrid directly via secrets rather than the Replit SendGrid/Resend integration connectors.
 
 ## Branding
 
