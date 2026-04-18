@@ -641,6 +641,116 @@ function renderTemplatePreview(
   });
 }
 
+function escapeHtmlPreview(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function resolvePreviewLink(link: string): string {
+  if (/^https?:\/\//i.test(link)) return link;
+  if (typeof window === "undefined") return link;
+  return `${window.location.origin}${link.startsWith("/") ? "" : "/"}${link}`;
+}
+
+// Mirrors renderHtmlEmail in artifacts/api-server/src/lib/notifications.ts so
+// admins see the same branded wrapper, CTA button, and footer that recipients
+// will receive. Kept in sync manually; update both places together.
+function renderEmailHtmlPreview(opts: {
+  subject: string;
+  body: string;
+  link?: string | null;
+}): string {
+  const safeSubject = escapeHtmlPreview(opts.subject || "(empty)");
+  const safeBodyParagraphs = (opts.body || "")
+    .split(/\n{2,}/)
+    .map(
+      (p) =>
+        `<p style="margin:0 0 16px 0;color:#1f2937;font-size:15px;line-height:1.55;">${escapeHtmlPreview(
+          p,
+        ).replace(/\n/g, "<br />")}</p>`,
+    )
+    .join("");
+  const absoluteLink = opts.link ? resolvePreviewLink(opts.link) : null;
+  const button = absoluteLink
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;">
+        <tr>
+          <td bgcolor="#4175f4" style="border-radius:6px;">
+            <a href="${escapeHtmlPreview(absoluteLink)}"
+               style="display:inline-block;padding:12px 22px;font-family:Montserrat,Arial,sans-serif;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;">
+              View item
+            </a>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0 0 8px 0;color:#6b7280;font-size:12px;line-height:1.5;">
+        If the button does not work, copy and paste this link into your browser:<br />
+        <a href="${escapeHtmlPreview(absoluteLink)}" style="color:#4175f4;word-break:break-all;">${escapeHtmlPreview(absoluteLink)}</a>
+      </p>`
+    : "";
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>${safeSubject}</title>
+    <base target="_blank" />
+  </head>
+  <body style="margin:0;padding:0;background-color:#f3f4f6;font-family:Montserrat,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f4f6;padding:16px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background-color:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+            <tr>
+              <td style="background-color:#1800ad;padding:20px 28px;">
+                <div style="color:#ffffff;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;">Life House Reentry</div>
+                <div style="color:#ffffff;font-size:18px;font-weight:600;margin-top:4px;">Finance Portal</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:28px;">
+                <h1 style="margin:0 0 16px 0;font-size:20px;line-height:1.3;color:#111827;">${safeSubject}</h1>
+                ${safeBodyParagraphs}
+                ${button}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 28px 24px 28px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;line-height:1.5;">
+                You're receiving this email because you have an account on the Life House Finance Portal.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+function EmailHtmlPreview({
+  subject,
+  body,
+  link,
+}: {
+  subject: string;
+  body: string;
+  link?: string | null;
+}) {
+  const html = renderEmailHtmlPreview({ subject, body, link: link ?? null });
+  return (
+    <iframe
+      title="Email preview"
+      sandbox="allow-popups"
+      srcDoc={html}
+      className="w-full h-[520px] rounded-md border bg-muted/30"
+    />
+  );
+}
+
 function EmailSettingsCard() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -870,33 +980,33 @@ function EmailSettingsCard() {
                           Sample — not sent
                         </span>
                       </Label>
-                      <div className="rounded-md border bg-muted/30 overflow-hidden">
-                        <div className="border-b bg-background/60 px-3 py-2 text-xs">
-                          <div className="text-muted-foreground">Subject</div>
-                          <div className="font-semibold break-words">
-                            {renderTemplatePreview(
-                              t.subject,
-                              t.sampleVariables,
-                            ) || (
-                              <span className="text-muted-foreground italic font-normal">
-                                (empty)
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="px-3 py-2 text-sm whitespace-pre-wrap break-words min-h-[7rem]">
+                      <div className="rounded-md border bg-background/60 px-3 py-2 text-xs">
+                        <div className="text-muted-foreground">Subject</div>
+                        <div className="font-semibold break-words">
                           {renderTemplatePreview(
-                            t.body,
+                            t.subject,
                             t.sampleVariables,
                           ) || (
-                            <span className="text-muted-foreground italic">
+                            <span className="text-muted-foreground italic font-normal">
                               (empty)
                             </span>
                           )}
                         </div>
                       </div>
+                      <EmailHtmlPreview
+                        subject={renderTemplatePreview(
+                          t.subject,
+                          t.sampleVariables,
+                        )}
+                        body={renderTemplatePreview(
+                          t.body,
+                          t.sampleVariables,
+                        )}
+                        link={t.sampleVariables["link"] ?? null}
+                      />
                       <p className="text-xs text-muted-foreground">
-                        Filled in with the same sample values used by{" "}
+                        Full HTML email a recipient sees, filled in with the
+                        same sample values used by{" "}
                         <span className="font-medium">Send test to me</span>.
                       </p>
                     </div>
