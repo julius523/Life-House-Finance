@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import { Agent, Runner, withTrace, type AgentInputItem } from "@openai/agents";
+import OpenAI from "openai";
 import { requireAuth } from "../lib/auth";
 
 const router: IRouter = Router();
@@ -42,22 +42,9 @@ Risk flags:
 Recommended next step:`;
 
 const AGENT_MODEL = process.env["ACCOUNTING_AGENT_MODEL"] ?? "gpt-5.4";
-const WORKFLOW_ID =
-  process.env["ACCOUNTING_AGENT_WORKFLOW_ID"] ??
-  "wf_69e3afbdffe4819087b733d793cfd9c40d20075cce2ac38a";
 
-const lifeHouseGaapCopilot = new Agent({
-  name: "Life House GAAP Copilot",
-  instructions: AGENT_INSTRUCTIONS,
-  model: AGENT_MODEL,
-  modelSettings: {
-    reasoning: {
-      effort: "low",
-      summary: "auto",
-    },
-    store: true,
-  },
-});
+const apiKey = process.env["OPENAI_API_KEY"];
+const openai = apiKey ? new OpenAI({ apiKey }) : null;
 
 const ChatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
@@ -69,34 +56,8 @@ const ChatBody = z.object({
   history: z.array(ChatMessageSchema).max(40).default([]),
 });
 
-function buildConversation(
-  history: z.infer<typeof ChatMessageSchema>[],
-  userMessage: string,
-): AgentInputItem[] {
-  const items: AgentInputItem[] = [];
-  for (const msg of history) {
-    if (msg.role === "user") {
-      items.push({
-        role: "user",
-        content: [{ type: "input_text", text: msg.content }],
-      });
-    } else {
-      items.push({
-        role: "assistant",
-        status: "completed",
-        content: [{ type: "output_text", text: msg.content }],
-      });
-    }
-  }
-  items.push({
-    role: "user",
-    content: [{ type: "input_text", text: userMessage }],
-  });
-  return items;
-}
-
 router.post("/accounting/chat", async (req, res): Promise<void> => {
-  if (!process.env["OPENAI_API_KEY"]) {
+  if (!openai) {
     res.status(503).json({
       error:
         "OPENAI_API_KEY is not configured on this server. Please add it as a secret to enable the accounting copilot.",
@@ -113,24 +74,36 @@ router.post("/accounting/chat", async (req, res): Promise<void> => {
   }
 
   const { message, history } = parsed.data;
-  const conversation = buildConversation(history, message);
+
+  const MAX_TOTAL_CHARS = 60_000;
+  const trimmed: typeof history = [];
+  let total = message.length;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const item = history[i]!;
+    if (total + item.content.length > MAX_TOTAL_CHARS) break;
+    total += item.content.length;
+    trimmed.unshift(item);
+  }
+
+  const input = [
+    ...trimmed.map((m) => ({ role: m.role, content: m.content })),
+    { role: "user" as const, content: message },
+  ];
 
   try {
-    const result = await withTrace("Life House GAAP Copilot", async () => {
-      const runner = new Runner({
-        traceMetadata: {
-          __trace_source__: "agent-builder",
-          workflow_id: WORKFLOW_ID,
-        },
-      });
-      return runner.run(lifeHouseGaapCopilot, conversation);
+    const response = await openai.responses.create({
+      model: AGENT_MODEL,
+      instructions: AGENT_INSTRUCTIONS,
+      input,
+      reasoning: { effort: "low", summary: "auto" },
+      store: true,
+      metadata: {
+        agent_name: "Life House GAAP Copilot",
+        user_id: String(req.authUser?.id ?? ""),
+      },
     });
 
-    const text =
-      typeof result.finalOutput === "string"
-        ? result.finalOutput
-        : JSON.stringify(result.finalOutput);
-
+    const text = (response.output_text ?? "").trim();
     if (!text) {
       res.status(502).json({ error: "Empty response from copilot." });
       return;
@@ -139,9 +112,17 @@ router.post("/accounting/chat", async (req, res): Promise<void> => {
     res.json({ reply: text });
   } catch (err) {
     req.log.error({ err }, "Accounting copilot run failed");
-    const message =
-      err instanceof Error ? err.message : "Unknown error from copilot";
-    res.status(502).json({ error: message });
+    const status =
+      err && typeof err === "object" && "status" in err && typeof err.status === "number"
+        ? err.status
+        : null;
+    const userMessage =
+      status === 429
+        ? "The copilot is temporarily unavailable (rate or quota limit). Please try again shortly."
+        : status === 401 || status === 403
+          ? "The copilot is not configured correctly. Please contact an administrator."
+          : "The copilot could not respond. Please try again.";
+    res.status(502).json({ error: userMessage });
   }
 });
 
