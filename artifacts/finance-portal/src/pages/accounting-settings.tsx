@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Redirect } from "wouter";
 import {
   Card,
   CardContent,
@@ -47,6 +48,13 @@ export default function AccountingSettingsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const isAdmin = user?.role === "admin";
+
+  // Step 9 9th-pass tightening: settings is admin-only at the page level too.
+  // Approver/staff users get redirected to the dashboard rather than seeing
+  // a disabled form whose GET would 403 anyway.
+  if (user && !isAdmin) {
+    return <Redirect to="/dashboard" />;
+  }
 
   const [settings, setSettings] = useState<Settings | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);

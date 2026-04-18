@@ -1,0 +1,122 @@
+:::writing{variant=“chat_message” id=“51842”}
+Choose B.
+
+Audit the merged Step 9 implementation against the hard acceptance gates and tightened rules, fix only the real gaps, re-run tests, then stop. Do not start the manual journal entry feature in this pass.
+
+Use these tightened rules as the source of truth:
+
+1) Account type enum is locked
+
+Allowed type values:
+
+* asset
+* liability
+* equity
+* revenue
+* expense
+* contra_asset
+* contra_liability
+* contra_revenue
+* other
+
+Allowed normal_balance values:
+
+* debit
+* credit
+
+Default normal balances for Sprint 1:
+
+* asset, expense, contra_liability, contra_revenue => debit
+* liability, equity, revenue, contra_asset => credit
+* other => explicit choice required
+
+2) Historical backfill matching is explicit
+
+Backfill matching rules:
+
+* If journal_entry_lines.account begins with a 3–6 digit code followed by -, first try exact code match against chart_of_accounts.code.
+* If exact code match exists, link that account_id.
+* If no exact code match exists, create a new non-system CoA row using:
+    * code = parsed numeric prefix if unique, otherwise LEGACY-<stable_hash>
+    * name = remaining text after separator, or full string if no remaining text
+* If no parseable code prefix exists:
+    * code = LEGACY-<stable_hash>
+    * name = full legacy string
+* Backfill must be idempotent. Re-running must not create duplicate CoA rows.
+
+3) Archive behavior is explicit
+
+Archive means:
+
+* set is_active=false
+* never hard delete
+* archived accounts remain visible in historical reports and JE detail
+* archived accounts cannot be used for new drafts or new postings
+* historical posted lines may still reference archived accounts
+
+4) UI access matrix is explicit
+
+* /accounting/coa list/detail: admin + approver
+* create/edit/archive controls: admin only
+* /accounting/settings: admin only
+* Trial Balance: admin + approver
+
+5) Trial Balance source rule is explicit
+
+Use:
+
+* posted journal entries only for live accounting activity
+* exclude draft and approved-but-not-posted
+* posted reversal entries are included normally so original + reversal net correctly within the selected range
+* do not invent special-case reversal suppression
+
+If the schema uses status='reversed' for already-posted reversal activity, then include the statuses necessary to reflect the actual posted ledger truth. The goal is accounting correctness, not literal wording games.
+
+6) allow_manual_posting rule is explicit
+
+For Step 9:
+
+* any human-created or Copilot-drafted JE line counts as manual posting
+* accounts with allow_manual_posting=false must be rejected in manual JE draft/post flows
+* those accounts are reserved for future automated/system flows only
+
+7) Settings storage is a singleton
+
+* one row only
+* GET returns the singleton, creating defaults if absent
+* PATCH updates that same row only
+* no list/create-many behavior
+
+8) Explicit non-goal
+
+Do not refactor existing expenses, bills, or operational transaction tables in Step 9 except where required for side-by-side report toggling.
+
+Hard acceptance gates
+
+Step 9 is not complete unless all are true:
+
+1. A posted JE is rejected if any line resolves to:
+    * unknown account
+    * archived account
+    * allow_manual_posting=false account
+2. Historical journal_entry_lines are backfilled with account_id without duplicate CoA rows across repeated runs.
+3. Trial Balance totals balance exactly to the cent.
+4. Trial Balance reflects posted ledger activity correctly for the selected range, including posted reversals as applicable.
+5. Existing P&L and Balance Sheet still default to operational mode.
+6. Ledger mode can be selected for P&L and Balance Sheet without breaking current behavior.
+7. CoA create/edit/archive actions are audit-logged.
+8. Settings edits are audit-logged.
+9. Step 8 posting/reversal/period-lock tests still pass unchanged.
+10. Step 9 tests and live report are present in .local/test-evidence/.
+
+Deliverables for this pass:
+
+* gap audit summary: what was already compliant vs what required code changes
+* code fixes only where required
+* re-run Step 8 + Step 9 suites
+* updated live test report
+
+After that, stop and wait. Manual journal entries will be the next task.
+:::
+
+That is the clean move here. Step 9 is already merged, so the smartest thing is not to sprint forward blindly — it is to lock the accounting foundation before staff get a bigger button to press.

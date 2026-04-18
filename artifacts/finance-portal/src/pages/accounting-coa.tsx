@@ -46,7 +46,16 @@ type Account = {
   code: string;
   name: string;
   description: string | null;
-  type: "asset" | "liability" | "equity" | "revenue" | "expense";
+  type:
+    | "asset"
+    | "liability"
+    | "equity"
+    | "revenue"
+    | "expense"
+    | "contra_asset"
+    | "contra_liability"
+    | "contra_revenue"
+    | "other";
   subtype: string | null;
   normalBalance: "debit" | "credit";
   parentAccountId: number | null;

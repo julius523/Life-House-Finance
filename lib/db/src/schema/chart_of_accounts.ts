@@ -20,17 +20,51 @@ import {
  * fall back to the string when the FK is null (Step 9 backfill aims to
  * eliminate nulls but never mutates the immutable text column).
  */
+/**
+ * Locked enum (Step 9 9th-pass tightening). Adding contra-* and "other" so
+ * the schema can express the full chart most nonprofits actually need
+ * without a future migration. The DB column stays `text`, so this is a
+ * pure application-level validation list — no DB migration required.
+ */
 export const ACCOUNT_TYPES = [
   "asset",
   "liability",
   "equity",
   "revenue",
   "expense",
+  "contra_asset",
+  "contra_liability",
+  "contra_revenue",
+  "other",
 ] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 
 export const NORMAL_BALANCES = ["debit", "credit"] as const;
 export type NormalBalance = (typeof NORMAL_BALANCES)[number];
+
+/**
+ * Default normal balance for a given account type, per the Sprint 1
+ * tightening rules. `other` returns null because the user must pick
+ * explicitly.
+ */
+export function defaultNormalBalanceFor(
+  type: AccountType,
+): NormalBalance | null {
+  switch (type) {
+    case "asset":
+    case "expense":
+    case "contra_liability":
+    case "contra_revenue":
+      return "debit";
+    case "liability":
+    case "equity":
+    case "revenue":
+    case "contra_asset":
+      return "credit";
+    case "other":
+      return null;
+  }
+}
 
 export const chartOfAccountsTable = pgTable(
   "chart_of_accounts",

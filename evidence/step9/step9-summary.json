@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-18T23:32:33.930Z",
+  "generatedAt": "2026-04-18T23:44:51.625Z",
   "results": [
     {
       "id": "S9-A",
@@ -45,7 +45,7 @@
       "pass": true,
       "evidence": {
         "status": 200,
-        "body": "{\"result\":{\"ok\":false,\"error\":\"Invalid account_code(s): ZZZ-NOPE (unknown — not in Chart of Accounts). Use search_chart_of_accounts to find a valid leaf account code. Draft NOT saved.\"},\"logRow\":{\"id\":235,\"threadId\":64,\"assistantMessageId\":"
+        "body": "{\"result\":{\"ok\":false,\"error\":\"Invalid account_code(s): ZZZ-NOPE (unknown — not in Chart of Accounts). Use search_chart_of_accounts to find a valid leaf account code. Draft NOT saved.\"},\"logRow\":{\"id\":238,\"threadId\":65,\"assistantMessageId\":"
       }
     },
     {
@@ -54,7 +54,7 @@
       "pass": true,
       "evidence": {
         "status": 200,
-        "body": "{\"result\":{\"ok\":true,\"data\":{\"dry_run\":true,\"would_have_drafted\":true,\"totals\":{\"debits\":12.34,\"credits\":12.34,\"balanced\":true},\"note\":\"Preview only — no agent_action row written.\"}},\"logRow\":{\"id\":236,\"threadId\":64,\"assistantMessageId\":nul"
+        "body": "{\"result\":{\"ok\":true,\"data\":{\"dry_run\":true,\"would_have_drafted\":true,\"totals\":{\"debits\":12.34,\"credits\":12.34,\"balanced\":true},\"note\":\"Preview only — no agent_action row written.\"}},\"logRow\":{\"id\":239,\"threadId\":65,\"assistantMessageId\":nul"
       }
     },
     {
@@ -63,7 +63,7 @@
       "pass": true,
       "evidence": {
         "createdStatus": 201,
-        "createdCode": "TEST-153815",
+        "createdCode": "TEST-891459",
         "archivedStatus": 200,
         "isActive": false
       }
@@ -76,9 +76,9 @@
         "status": 200,
         "result": {
           "ok": false,
-          "error": "Invalid account_code(s): ARCH-153844 (archived). Use search_chart_of_accounts to find a valid leaf account code. Draft NOT saved."
+          "error": "Invalid account_code(s): ARCH-891534 (archived). Use search_chart_of_accounts to find a valid leaf account code. Draft NOT saved."
         },
-        "archCode": "ARCH-153844"
+        "archCode": "ARCH-891534"
       }
     },
     {
@@ -108,8 +108,8 @@
       "label": "Seed/backfill is idempotent (CoA count stable across re-invocation)",
       "pass": true,
       "evidence": {
-        "before": 51,
-        "after": 51,
+        "before": 53,
+        "after": 53,
         "reseedStatus": 404
       }
     }

@@ -456,7 +456,9 @@ const SettingsUpdateSchema = z
   .strict();
 
 router.get("/accounting/settings", async (req, res): Promise<void> => {
-  if (!requireAdminOrApprover(req, res)) return;
+  // Step 9 9th-pass tightening: settings is admin-only on both read and
+  // write to match the UI access matrix.
+  if (!requireAdmin(req, res)) return;
   const [row] = await db
     .select()
     .from(accountingSettingsTable)

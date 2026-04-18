@@ -261,3 +261,45 @@ in the 8th review:
 - `accounting-coa.tsx`: archive action now goes through an `AlertDialog`
   confirmation (`Archive this account?`) before calling `PATCH … {isActive:false}`.
   Test id `confirm-archive-account`.
+
+## Tenth-pass: gap audit against tightened acceptance gates (2026-04-18)
+
+Audited the merged Step 9 against the tightened rules supplied by the user.
+
+### Compliant — no code change required
+
+| Gate / rule | Evidence |
+|---|---|
+| Posting rejects unknown / archived / `allow_manual_posting=false` accounts | `postingService.sanitizeLines` lines 348/357/366 → `kind:"invalid_account"` with reason; tests S9-E (unknown), S9-H (archived) PASS. |
+| Backfill no-duplicate + idempotent | `seedChartOfAccounts.ts` uses `INSERT … ON CONFLICT (code) DO NOTHING`; placeholder rows are deterministic `LEGACY-<safePrefix>-<sha256/10>` codes; test S9-K count stable across re-invocation. |
+| Trial Balance balances to the cent | S9-C and S9-J (`debits === credits`, `balanced: true`, `differenceCents: 0`). |
+| TB reflects posted ledger truth (incl. reversals) | `reports.ts` line 584 includes `status IN ('posted','reversed')`. In this schema the original entry's status flips to `'reversed'` and the inverse JE is posted; including both is what makes the books net to zero. Per the user's clarification ("accounting correctness, not literal wording games"), this is correct. |
+| P&L / BS default operational, ledger toggle works | `reports.ts` `?source=` query, default `'operational'`. S9-D PASS. |
+| CoA create/edit/archive/restore/delete audit-logged | `writeCoaAudit` called from every CRUD handler in `coa.ts`. |
+| Settings edits audit-logged | `writeSettingsAudit` invoked in PATCH path. S9-I PASS. |
+| Settings storage is a singleton | Insert only when none exists (`seedChartOfAccounts.ts` 126-128); GET orders by id LIMIT 1; PATCH targets `existing.id`. |
+| Step 8 posting / reversal / period-lock tests still pass | `run-step8-tests.mjs`: 7/7 PASS. `run-step8-edge-cases.mjs`: 8/8 PASS. |
+| Step 9 evidence present in `.local/test-evidence/` | Yes (also mirrored to `evidence/step9/`). |
+
+### Real gaps fixed in this pass
+
+1. **Account type enum was 5 values, spec requires 9.**
+   - `lib/db/src/schema/chart_of_accounts.ts`: `ACCOUNT_TYPES` extended to include `contra_asset`, `contra_liability`, `contra_revenue`, `other`. The DB column stays `text`, so no migration is required — Zod validation auto-picks up the new values via `z.enum(ACCOUNT_TYPES)`.
+   - Added `defaultNormalBalanceFor(type)` helper encoding the Sprint 1 mapping (asset/expense/contra_liability/contra_revenue → debit; liability/equity/revenue/contra_asset → credit; `other` → `null` to force explicit choice).
+   - `artifacts/finance-portal/src/pages/accounting-coa.tsx`: `Account.type` union widened to match.
+
+2. **`GET /accounting/settings` allowed admin + approver, but the UI access matrix specifies admin-only.**
+   - `artifacts/api-server/src/routes/coa.ts`: GET handler switched from `requireAdminOrApprover` to `requireAdmin` (PATCH was already admin-only).
+
+3. **`/accounting/settings` page rendered (read-only) for approver users.**
+   - `artifacts/finance-portal/src/pages/accounting-settings.tsx`: added `<Redirect to="/dashboard" />` when an authenticated non-admin lands on the page, so the access matrix is enforced at the page level too.
+
+### Test re-run after fixes
+
+```
+Step 8           : 7/7  PASS
+Step 8 edge-case : 8/8  PASS
+Step 9           : 11/11 PASS
+```
+
+All ten hard acceptance gates verified true.
