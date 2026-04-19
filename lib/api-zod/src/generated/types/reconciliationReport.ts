@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ReconciliationCheck } from "./reconciliationCheck";
+import type { ReconciliationPerEntrySummary } from "./reconciliationPerEntrySummary";
 
 export interface ReconciliationReport {
   generatedAt: Date;
@@ -15,4 +16,5 @@ export interface ReconciliationReport {
   errorCount: number;
   warningCount: number;
   checks: ReconciliationCheck[];
+  perEntry: ReconciliationPerEntrySummary;
 }

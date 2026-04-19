@@ -16,6 +16,7 @@ import {
   useListAdminNotifications,
   useResendAdminNotification,
   getListAdminNotificationsQueryKey,
+  getGetEmailSettingsQueryKey,
   type EmailTemplate,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -738,6 +739,7 @@ function EmailSettingsCard() {
   const [defaultSenderName, setDefaultSenderName] = useState("");
   const [templates, setTemplates] = useState<TemplateForm[]>([]);
 
+  const queryClient = useQueryClient();
   const { data: settings, isLoading: loading, error: loadError } =
     useGetEmailSettings();
   const saveMut = useUpdateEmailSettings();
@@ -779,6 +781,11 @@ function EmailSettingsCard() {
             body: t.body,
           })),
         },
+      });
+      // Refetch so the form re-syncs with whatever the server normalized
+      // (trimmed sender name, defaulted blanks, template ordering, etc.).
+      await queryClient.invalidateQueries({
+        queryKey: getGetEmailSettingsQueryKey(),
       });
       toast({ title: "Email settings saved" });
     } catch (e) {

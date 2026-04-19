@@ -107,43 +107,180 @@ function ReconciliationCard({
         ) : isLoading || !data ? (
           <Skeleton className="h-32" />
         ) : (
-          <ul className="space-y-2 text-sm">
-            {data.checks.map((c) => {
-              const icon = c.ok ? "✓" : c.severity === "warning" ? "⚠" : "✗";
-              const colorCls = c.ok
-                ? "text-emerald-700"
-                : c.severity === "warning"
-                ? "text-amber-700"
-                : "text-red-700";
-              return (
-                <li
-                  key={c.id}
-                  data-testid={`reconciliation-check-${c.id}`}
-                  className="flex items-start justify-between gap-3 rounded border border-border/60 px-3 py-2"
-                  title={
-                    c.ok
-                      ? "Pass"
-                      : `Expected ${fmtDelta(c.expectedCents)}, got ${fmtDelta(c.actualCents)} — drift ${fmtDelta(c.deltaCents)}`
-                  }
-                >
-                  <span className={`flex items-baseline gap-2 ${colorCls}`}>
-                    <span aria-hidden className="font-bold">
-                      {icon}
+          <>
+            <ul className="space-y-2 text-sm">
+              {data.checks.map((c) => {
+                const icon = c.ok ? "✓" : c.severity === "warning" ? "⚠" : "✗";
+                const colorCls = c.ok
+                  ? "text-emerald-700"
+                  : c.severity === "warning"
+                  ? "text-amber-700"
+                  : "text-red-700";
+                return (
+                  <li
+                    key={c.id}
+                    data-testid={`reconciliation-check-${c.id}`}
+                    className="flex items-start justify-between gap-3 rounded border border-border/60 px-3 py-2"
+                    title={
+                      c.ok
+                        ? "Pass"
+                        : `Expected ${fmtDelta(c.expectedCents)}, got ${fmtDelta(c.actualCents)} — drift ${fmtDelta(c.deltaCents)}`
+                    }
+                  >
+                    <span className={`flex items-baseline gap-2 ${colorCls}`}>
+                      <span aria-hidden className="font-bold">
+                        {icon}
+                      </span>
+                      <span className="text-foreground">{c.label}</span>
                     </span>
-                    <span className="text-foreground">{c.label}</span>
-                  </span>
-                  {!c.ok && (
-                    <span className={`font-mono text-xs ${colorCls}`}>
-                      Δ {fmtDelta(c.deltaCents)}
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+                    {!c.ok && (
+                      <span className={`font-mono text-xs ${colorCls}`}>
+                        Δ {fmtDelta(c.deltaCents)}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <PerEntryIntegritySection
+              perEntry={data.perEntry}
+              fmtDelta={fmtDelta}
+            />
+          </>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+const PER_ENTRY_CHECK_LABELS: Record<string, string> = {
+  je_unbalanced: "Debits ≠ credits",
+  je_missing_account: "Missing account mapping",
+  je_zero_lines: "No lines",
+  je_invalid_line_amount: "Non-positive line amount",
+};
+
+/**
+ * Per-entry integrity subsection of the Reconciliation card. Surfaces the
+ * specific posted/reversed JEs that fail any per-entry check (balanced,
+ * mapped, non-empty, positive line amounts) so finance can drill straight
+ * into the offending entry. Defensive: if the API response somehow lacks
+ * the perEntry block, the section renders nothing rather than crashing.
+ */
+function PerEntryIntegritySection({
+  perEntry,
+  fmtDelta,
+}: {
+  perEntry:
+    | {
+        totalEntriesChecked: number;
+        failingEntryCount: number;
+        failingEntries: Array<{
+          journalEntryId: number;
+          entryNumber: string;
+          entryDate: string;
+          checkCode: string;
+          status: string;
+          deltaCents: number | null;
+          shortMessage: string;
+        }>;
+      }
+    | undefined;
+  fmtDelta: (cents: number) => string;
+}) {
+  const VISIBLE_CAP = 25;
+  const [showAll, setShowAll] = useState(false);
+  if (!perEntry) return null;
+  const ok = perEntry.failingEntries.length === 0;
+  const visible = showAll
+    ? perEntry.failingEntries
+    : perEntry.failingEntries.slice(0, VISIBLE_CAP);
+  const hidden = perEntry.failingEntries.length - visible.length;
+
+  return (
+    <div
+      data-testid="reconciliation-per-entry"
+      className="mt-6 border-t border-border/60 pt-4"
+    >
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold">Per-entry integrity</h3>
+          <p className="text-xs text-muted-foreground">
+            Each posted/reversed JE in this window checked individually for
+            balance, account mapping, line presence, and amount shape.
+          </p>
+        </div>
+        <span
+          data-testid="reconciliation-per-entry-status"
+          className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
+            ok ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
+          }`}
+        >
+          {ok
+            ? `All ${perEntry.totalEntriesChecked} entries pass`
+            : `${perEntry.failingEntryCount} of ${perEntry.totalEntriesChecked} failing`}
+        </span>
+      </div>
+      {ok ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          ✓ All journal entries balanced and mapped.
+        </div>
+      ) : (
+        <>
+          <div className="overflow-hidden rounded-md border border-border/60">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Entry</th>
+                  <th className="px-3 py-2 text-left font-medium">Date</th>
+                  <th className="px-3 py-2 text-left font-medium">Check</th>
+                  <th className="px-3 py-2 text-left font-medium">Detail</th>
+                  <th className="px-3 py-2 text-right font-medium">Δ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((f, i) => (
+                  <tr
+                    key={`${f.journalEntryId}-${f.checkCode}-${i}`}
+                    data-testid={`reconciliation-per-entry-row-${f.journalEntryId}-${f.checkCode}`}
+                    className="border-t border-border/60"
+                  >
+                    <td className="px-3 py-2 font-mono text-xs">
+                      <a
+                        href={`/accounting/journal-entries/${f.journalEntryId}`}
+                        className="text-blue-700 underline-offset-2 hover:underline"
+                      >
+                        {f.entryNumber}
+                      </a>
+                    </td>
+                    <td className="px-3 py-2 text-xs">{f.entryDate}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {PER_ENTRY_CHECK_LABELS[f.checkCode] ?? f.checkCode}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {f.shortMessage}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-xs text-red-700">
+                      {f.deltaCents !== null ? fmtDelta(f.deltaCents) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {hidden > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              className="mt-2 text-xs font-medium text-blue-700 underline-offset-2 hover:underline"
+              data-testid="reconciliation-per-entry-show-more"
+            >
+              Show {hidden} more
+            </button>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 

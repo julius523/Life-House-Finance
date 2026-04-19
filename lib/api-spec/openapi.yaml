@@ -5576,6 +5576,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReconciliationCheck"
+        perEntry:
+          $ref: "#/components/schemas/ReconciliationPerEntrySummary"
       required:
         [
           generatedAt,
@@ -5585,7 +5587,68 @@ components:
           errorCount,
           warningCount,
           checks,
+          perEntry,
         ]
+
+    ReconciliationPerEntryFailure:
+      type: object
+      description: >
+        A single integrity failure for one posted/reversed journal entry in
+        the reconciliation window. A JE may produce more than one failure
+        row (e.g. unbalanced AND missing-account).
+      properties:
+        journalEntryId:
+          type: integer
+        entryNumber:
+          type: string
+        entryDate:
+          type: string
+          format: date
+        checkCode:
+          type: string
+          enum:
+            [
+              je_unbalanced,
+              je_missing_account,
+              je_zero_lines,
+              je_invalid_line_amount,
+            ]
+        status:
+          type: string
+          enum: [fail]
+        deltaCents:
+          type: integer
+          nullable: true
+          description: Signed cent delta for je_unbalanced; null for other codes.
+        shortMessage:
+          type: string
+      required:
+        [
+          journalEntryId,
+          entryNumber,
+          entryDate,
+          checkCode,
+          status,
+          deltaCents,
+          shortMessage,
+        ]
+
+    ReconciliationPerEntrySummary:
+      type: object
+      description: >
+        Per-journal-entry integrity tie-out section. Walks every
+        posted/reversed JE in the reconciliation window and surfaces
+        localized corruption that aggregate checks would miss.
+      properties:
+        totalEntriesChecked:
+          type: integer
+        failingEntryCount:
+          type: integer
+        failingEntries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReconciliationPerEntryFailure"
+      required: [totalEntriesChecked, failingEntryCount, failingEntries]
 
     AccountingDashboardOpenPeriod:
       type: object

@@ -1255,6 +1255,135 @@ router.get("/reports/reconciliation", async (req, res): Promise<void> => {
     sumBalanceCents(ls.otherLiabilityAccounts),
   );
 
+  // -------------------------------------------------------------------------
+  // Per-entry integrity checks (Task #66 follow-on).
+  //
+  // Aggregate-level checks above can hide localized corruption when offsets
+  // happen to cancel out (e.g. one JE off by +$10, another off by −$10).
+  // This pass walks every posted/reversed JE in the same window and flags:
+  //   * je_unbalanced         — Σ debits ≠ Σ credits at the cent level
+  //   * je_missing_account    — at least one line has no valid CoA reference
+  //   * je_zero_lines         — JE has no journal_entry_lines rows at all
+  //   * je_invalid_line_amount— at least one line has amount_cents <= 0
+  // Same status semantics + entry_date range as the aggregate checks.
+  // -------------------------------------------------------------------------
+  const perEntryRows = await db
+    .select({
+      journalEntryId: journalEntriesTable.id,
+      entryNo: journalEntriesTable.entryNo,
+      entryDate: journalEntriesTable.entryDate,
+      lineCount: sql<number>`coalesce(count(${journalEntryLinesTable.id}), 0)::int`,
+      debitsCents: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      creditsCents: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      missingAccountLineCount: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.id} is not null and ${chartOfAccountsTable.id} is null then 1 else 0 end), 0)::int`,
+      invalidAmountLineCount: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.id} is not null and ${journalEntryLinesTable.amountCents} <= 0 then 1 else 0 end), 0)::int`,
+    })
+    .from(journalEntriesTable)
+    .leftJoin(
+      journalEntryLinesTable,
+      eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+    )
+    .leftJoin(
+      chartOfAccountsTable,
+      eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
+    )
+    .where(and(...tbConds))
+    .groupBy(
+      journalEntriesTable.id,
+      journalEntriesTable.entryNo,
+      journalEntriesTable.entryDate,
+    );
+
+  type PerEntryCheckCode =
+    | "je_unbalanced"
+    | "je_missing_account"
+    | "je_zero_lines"
+    | "je_invalid_line_amount";
+
+  type PerEntryFailure = {
+    journalEntryId: number;
+    entryNumber: string;
+    entryDate: string;
+    checkCode: PerEntryCheckCode;
+    status: "fail";
+    deltaCents: number | null;
+    shortMessage: string;
+  };
+
+  const failingEntries: PerEntryFailure[] = [];
+  let totalEntriesChecked = 0;
+  for (const row of perEntryRows) {
+    totalEntriesChecked += 1;
+    const lineCount = Number(row.lineCount);
+    const debits = Number(row.debitsCents);
+    const credits = Number(row.creditsCents);
+    const missing = Number(row.missingAccountLineCount);
+    const badAmount = Number(row.invalidAmountLineCount);
+    const base = {
+      journalEntryId: row.journalEntryId,
+      entryNumber: row.entryNo,
+      entryDate: row.entryDate,
+      status: "fail" as const,
+    };
+    if (lineCount === 0) {
+      // Schema in principle should prevent this (lines FK back to entries
+      // and the posting service inserts at least two), but legacy/manual
+      // db edits could leave an orphan JE row. Surface it explicitly rather
+      // than silently passing the balance check (0 == 0).
+      failingEntries.push({
+        ...base,
+        checkCode: "je_zero_lines",
+        deltaCents: null,
+        shortMessage: "Journal entry has no lines.",
+      });
+      continue;
+    }
+    const delta = debits - credits;
+    if (delta !== 0) {
+      failingEntries.push({
+        ...base,
+        checkCode: "je_unbalanced",
+        deltaCents: delta,
+        shortMessage: `Debits ${(debits / 100).toFixed(2)} ≠ credits ${(credits / 100).toFixed(2)}.`,
+      });
+    }
+    if (missing > 0) {
+      failingEntries.push({
+        ...base,
+        checkCode: "je_missing_account",
+        deltaCents: null,
+        shortMessage:
+          missing === 1
+            ? "1 line is missing a valid chart-of-accounts reference."
+            : `${missing} lines are missing a valid chart-of-accounts reference.`,
+      });
+    }
+    if (badAmount > 0) {
+      failingEntries.push({
+        ...base,
+        checkCode: "je_invalid_line_amount",
+        deltaCents: null,
+        shortMessage:
+          badAmount === 1
+            ? "1 line has a non-positive amount."
+            : `${badAmount} lines have a non-positive amount.`,
+      });
+    }
+  }
+
+  const failingEntryCount = new Set(failingEntries.map((f) => f.journalEntryId)).size;
+  const perEntryOk = failingEntries.length === 0;
+
+  // Promote the per-entry pass/fail into the aggregate `checks` list so the
+  // overall `allOk` flag and the existing UI status badge stay accurate
+  // without needing to know about the per-entry section specifically.
+  push(
+    "per_entry_integrity",
+    "Per-entry integrity: every posted/reversed JE balanced & mapped",
+    0,
+    perEntryOk ? 0 : failingEntries.length,
+  );
+
   const allOk = checks.every((c) => c.ok);
   const errorCount = checks.filter((c) => !c.ok && c.severity === "error").length;
   const warningCount = checks.filter((c) => !c.ok && c.severity === "warning").length;
@@ -1267,6 +1396,11 @@ router.get("/reports/reconciliation", async (req, res): Promise<void> => {
     errorCount,
     warningCount,
     checks,
+    perEntry: {
+      totalEntriesChecked,
+      failingEntryCount,
+      failingEntries,
+    },
   });
 });
 

@@ -1289,6 +1289,48 @@ export interface ReconciliationCheck {
   severity: ReconciliationCheckSeverity;
 }
 
+export type ReconciliationPerEntryFailureCheckCode =
+  (typeof ReconciliationPerEntryFailureCheckCode)[keyof typeof ReconciliationPerEntryFailureCheckCode];
+
+export const ReconciliationPerEntryFailureCheckCode = {
+  je_unbalanced: "je_unbalanced",
+  je_missing_account: "je_missing_account",
+  je_zero_lines: "je_zero_lines",
+  je_invalid_line_amount: "je_invalid_line_amount",
+} as const;
+
+export type ReconciliationPerEntryFailureStatus =
+  (typeof ReconciliationPerEntryFailureStatus)[keyof typeof ReconciliationPerEntryFailureStatus];
+
+export const ReconciliationPerEntryFailureStatus = {
+  fail: "fail",
+} as const;
+
+/**
+ * A single integrity failure for one posted/reversed journal entry in the reconciliation window. A JE may produce more than one failure row (e.g. unbalanced AND missing-account).
+
+ */
+export interface ReconciliationPerEntryFailure {
+  journalEntryId: number;
+  entryNumber: string;
+  entryDate: string;
+  checkCode: ReconciliationPerEntryFailureCheckCode;
+  status: ReconciliationPerEntryFailureStatus;
+  /** Signed cent delta for je_unbalanced; null for other codes. */
+  deltaCents: number | null;
+  shortMessage: string;
+}
+
+/**
+ * Per-journal-entry integrity tie-out section. Walks every posted/reversed JE in the reconciliation window and surfaces localized corruption that aggregate checks would miss.
+
+ */
+export interface ReconciliationPerEntrySummary {
+  totalEntriesChecked: number;
+  failingEntryCount: number;
+  failingEntries: ReconciliationPerEntryFailure[];
+}
+
 export interface ReconciliationReport {
   generatedAt: string;
   fromDate: string | null;
@@ -1297,6 +1339,7 @@ export interface ReconciliationReport {
   errorCount: number;
   warningCount: number;
   checks: ReconciliationCheck[];
+  perEntry: ReconciliationPerEntrySummary;
 }
 
 export interface AccountingDashboardOpenPeriod {

@@ -2634,6 +2634,39 @@ export const GetReconciliationReportResponse = zod.object({
       severity: zod.enum(["error", "warning"]),
     }),
   ),
+  perEntry: zod
+    .object({
+      totalEntriesChecked: zod.number(),
+      failingEntryCount: zod.number(),
+      failingEntries: zod.array(
+        zod
+          .object({
+            journalEntryId: zod.number(),
+            entryNumber: zod.string(),
+            entryDate: zod.coerce.date(),
+            checkCode: zod.enum([
+              "je_unbalanced",
+              "je_missing_account",
+              "je_zero_lines",
+              "je_invalid_line_amount",
+            ]),
+            status: zod.enum(["fail"]),
+            deltaCents: zod
+              .number()
+              .nullable()
+              .describe(
+                "Signed cent delta for je_unbalanced; null for other codes.",
+              ),
+            shortMessage: zod.string(),
+          })
+          .describe(
+            "A single integrity failure for one posted\/reversed journal entry in the reconciliation window. A JE may produce more than one failure row (e.g. unbalanced AND missing-account).\n",
+          ),
+      ),
+    })
+    .describe(
+      "Per-journal-entry integrity tie-out section. Walks every posted\/reversed JE in the reconciliation window and surfaces localized corruption that aggregate checks would miss.\n",
+    ),
 });
 
 /**

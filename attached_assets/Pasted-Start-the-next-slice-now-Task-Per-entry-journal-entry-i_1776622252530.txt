@@ -1,0 +1,124 @@
+Start the next slice now.
+
+Task: Per-entry journal-entry integrity checks + two cleanup fixes
+
+Why this next:
+- It is the smallest high-value follow-on to the reconciliation work already shipped.
+- It extends the existing reconciliation engine instead of opening a new broad scope.
+- It gives finance immediate, concrete visibility into exactly which posted JEs are bad instead of only showing aggregate pass/fail.
+
+Scope
+This slice has 3 parts:
+1. Add per-entry JE integrity checks to the reconciliation backend and UI.
+2. Fix the small email-settings invalidation gap found in the typed-client audit.
+3. Delete dead src/lib/api.ts.
+
+Do not scope a new copilot project in this slice.
+Do not start Task #74 here.
+Do not broaden into unmapped-lines remediation yet.
+
+Acceptance criteria
+
+A. Reconciliation backend gains per-entry integrity checks
+Add a new reconciliation section focused on individual posted journal entries in the selected range.
+
+Checks to include:
+1. Every posted/reversed journal entry is balanced to the cent.
+   - Per entry: sum(debits) == sum(credits)
+   - Return failing entry ids/numbers and the delta in cents.
+2. No journal-entry line is missing a valid chart_of_accounts reference.
+   - If accountId is null, missing, or points to a non-existent account, fail it.
+3. Optional but preferred if cheap from current schema:
+   - No entry has zero lines.
+   - No line has a zero/negative invalid amount shape if your schema permits malformed legacy rows.
+Only include checks that can actually fail and are not tautologies of the current query shape.
+
+API requirements:
+- Extend GET /reports/reconciliation.
+- Preserve existing response fields.
+- Add a machine-readable perEntry section.
+- Include:
+  - totalEntriesChecked
+  - failingEntryCount
+  - failingEntries[] with:
+    - journalEntryId
+    - entryNumber
+    - entryDate
+    - checkCode
+    - status
+    - deltaCents where relevant
+    - shortMessage
+- Keep admin/approver auth exactly as today.
+
+Important:
+- Use the same posted/reversed status semantics and entry_date filters as the rest of ledger reporting.
+- Do not create a second source of truth. Reuse existing helper/query patterns where possible.
+
+B. Reconciliation UI surfaces the failing entries clearly
+On the Reports page reconciliation card:
+- Keep the current overall pass/fail summary.
+- Add a “Per-entry integrity” subsection.
+- Show:
+  - total entries checked
+  - failing count
+  - pass/fail badge
+- If failures exist, render a compact table/list of failing entries with:
+  - entry number (linked to JE detail)
+  - date
+  - failed check
+  - delta if applicable
+  - short explanation
+- If no failures, show a clean “All journal entries balanced and mapped” state.
+
+UI rules:
+- Ledger mode only, same as the current reconciliation card.
+- No noisy wall of data; cap initial visible failures at a reasonable number like 25 with a “show more” affordance if needed.
+- Use typed hooks only.
+- Keep the card resilient: if the per-entry subsection errors, it must not white-screen the page.
+
+C. Bundle the two cleanup fixes
+1. admin.tsx email-settings save:
+   After saveMut.mutateAsync, invalidate/refetch getGetEmailSettingsQueryKey() so UI re-syncs with server-normalized values.
+2. Delete src/lib/api.ts:
+   - Confirm zero importers.
+   - Remove it cleanly.
+
+Implementation notes
+Backend:
+- Extend the reconciliation computation in the same module that owns the current ledger tie-out logic.
+- Avoid tautological checks.
+- Prefer returning structured codes, for example:
+  - je_unbalanced
+  - je_missing_account
+  - je_zero_lines
+  - je_invalid_line_amount
+Only use codes for checks you actually implement.
+
+Frontend:
+- Reuse the existing reconciliation card area on /reports.
+- Keep links consistent with the JE detail route already used elsewhere.
+- Do not introduce raw fetch/apiJson.
+
+Testing / validation
+1. Happy path:
+   - Existing live dataset still shows all checks passing if nothing is broken.
+2. Failure path:
+   - Create or simulate at least one malformed posted JE in a safe/dev way, or use a targeted test fixture.
+   - Verify the reconciliation endpoint returns the failing entry.
+   - Verify the Reports page shows it and links to the JE detail.
+3. Regression:
+   - Existing reconciliation checks still render correctly.
+   - Reports page still does not crash on bad date input.
+   - Email settings save still works and now reflects server-normalized values after save.
+4. Cleanup:
+   - Confirm src/lib/api.ts is removed and no imports break.
+
+Deliverable format
+When you report back, give:
+1. What changed
+2. Exact files touched
+3. Acceptance results
+4. Any deferred follow-ups that are truly new
+
+Revision rule
+If you hit issues and need to revise the implementation plan, give the full revised prompt in one message, not partial fragments.
