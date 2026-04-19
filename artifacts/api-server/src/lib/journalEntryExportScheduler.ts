@@ -467,71 +467,90 @@ async function tick(): Promise<void> {
   if (inFlight) return;
   inFlight = true;
   try {
-    const now = new Date();
-    // Two-phase claim: first list due rows, then for each row run a
-    // conditional UPDATE that advances next_run_at to the *correctly
-    // computed* next boundary. The UPDATE's WHERE includes the
-    // pre-claim next_run_at predicate, so only one process / one tick
-    // wins; if it returns 0 rows, another worker already claimed the
-    // schedule and we skip. Critically, even if the process crashes
-    // between this UPDATE and runSchedule(), the row simply does not
-    // re-fire until the legitimate next boundary — bounded skip, no
-    // year-long stranding (vs. a sentinel approach), and no double-send.
-    const due = await db
-      .select()
-      .from(journalEntryExportSchedulesTable)
-      .where(
-        and(
-          eq(journalEntryExportSchedulesTable.enabled, true),
-          isNotNull(journalEntryExportSchedulesTable.nextRunAt),
-          lte(journalEntryExportSchedulesTable.nextRunAt, now),
-        ),
-      );
-
-    for (const schedule of due) {
-      if (!isExportCadence(schedule.cadence)) {
-        logger.error(
-          { scheduleId: schedule.id, cadence: schedule.cadence },
-          "Skipping schedule with invalid cadence; admin must edit/fix",
-        );
-        // Stamp last_run_* so the row is visibly broken in the UI but
-        // do NOT advance next_run_at (so the admin's fix takes effect
-        // immediately).
-        await db
-          .update(journalEntryExportSchedulesTable)
-          .set({
-            lastRunAt: now,
-            lastRunStatus: "failed",
-            lastRunError: `Invalid cadence: ${schedule.cadence}`,
-            updatedAt: now,
-          })
-          .where(eq(journalEntryExportSchedulesTable.id, schedule.id));
-        continue;
-      }
-      const nextRun = computeNextRunAt(schedule.cadence, now);
-      const claimed = await db
-        .update(journalEntryExportSchedulesTable)
-        .set({ nextRunAt: nextRun, lastRunAt: now, updatedAt: now })
-        .where(
-          and(
-            eq(journalEntryExportSchedulesTable.id, schedule.id),
-            isNotNull(journalEntryExportSchedulesTable.nextRunAt),
-            lte(journalEntryExportSchedulesTable.nextRunAt, now),
-          ),
-        )
-        .returning({ id: journalEntryExportSchedulesTable.id });
-      if (claimed.length === 0) continue;
-
-      const result = await runSchedule(schedule, {
-        triggeredBy: "schedule",
-        runAt: now,
-      });
-      await applyRunOutcome(schedule, result);
-    }
+    await tickBody(runSchedule);
   } catch (err) {
     logger.error({ err }, "Journal-entry export scheduler tick failed");
   } finally {
     inFlight = false;
+  }
+}
+
+/**
+ * Internal: one pass of the scheduler — list due rows, atomically claim
+ * each, dispatch. Exposed (with the leading underscore) for tests that
+ * need to inject a counter for `runScheduleFn` and exercise the full
+ * tick path concurrently. Production callers should use `tick()` (which
+ * adds the per-process in-flight guard).
+ */
+export async function _tickOnceForTests(
+  runScheduleFn: typeof runSchedule = runSchedule,
+): Promise<void> {
+  await tickBody(runScheduleFn);
+}
+
+async function tickBody(
+  runScheduleFn: typeof runSchedule,
+): Promise<void> {
+  const now = new Date();
+  // Two-phase claim: first list due rows, then for each row run a
+  // conditional UPDATE that advances next_run_at to the *correctly
+  // computed* next boundary. The UPDATE's WHERE includes the
+  // pre-claim next_run_at predicate, so only one process / one tick
+  // wins; if it returns 0 rows, another worker already claimed the
+  // schedule and we skip. Critically, even if the process crashes
+  // between this UPDATE and runScheduleFn(), the row simply does not
+  // re-fire until the legitimate next boundary — bounded skip, no
+  // year-long stranding (vs. a sentinel approach), and no double-send.
+  const due = await db
+    .select()
+    .from(journalEntryExportSchedulesTable)
+    .where(
+      and(
+        eq(journalEntryExportSchedulesTable.enabled, true),
+        isNotNull(journalEntryExportSchedulesTable.nextRunAt),
+        lte(journalEntryExportSchedulesTable.nextRunAt, now),
+      ),
+    );
+
+  for (const schedule of due) {
+    if (!isExportCadence(schedule.cadence)) {
+      logger.error(
+        { scheduleId: schedule.id, cadence: schedule.cadence },
+        "Skipping schedule with invalid cadence; admin must edit/fix",
+      );
+      // Stamp last_run_* so the row is visibly broken in the UI but
+      // do NOT advance next_run_at (so the admin's fix takes effect
+      // immediately).
+      await db
+        .update(journalEntryExportSchedulesTable)
+        .set({
+          lastRunAt: now,
+          lastRunStatus: "failed",
+          lastRunError: `Invalid cadence: ${schedule.cadence}`,
+          updatedAt: now,
+        })
+        .where(eq(journalEntryExportSchedulesTable.id, schedule.id));
+      continue;
+    }
+    const nextRun = computeNextRunAt(schedule.cadence, now);
+    const claimed = await db
+      .update(journalEntryExportSchedulesTable)
+      .set({ nextRunAt: nextRun, lastRunAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(journalEntryExportSchedulesTable.id, schedule.id),
+          isNotNull(journalEntryExportSchedulesTable.nextRunAt),
+          lte(journalEntryExportSchedulesTable.nextRunAt, now),
+        ),
+      )
+      .returning({ id: journalEntryExportSchedulesTable.id });
+    if (claimed.length === 0) continue;
+
+    const result = await runScheduleFn(schedule, {
+      triggeredBy: "schedule",
+      runAt: now,
+    });
+    await applyRunOutcome(schedule, result);
   }
 }
 
