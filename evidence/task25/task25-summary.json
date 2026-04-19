@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-19T00:48:37.780Z",
+  "generatedAt": "2026-04-19T01:02:21.674Z",
   "base": "http://localhost:8080",
   "front": "https://88b8e478-c4e7-419d-b3d2-b2d3cf59bab0-00-zqnc2hhsn5k9.spock.replit.dev",
   "results": [
@@ -9,11 +9,11 @@
       "pass": true,
       "evidence": {
         "postStatus": 201,
-        "entryNo": "JE-2026-000025",
-        "jeId": 27,
+        "entryNo": "JE-2026-000039",
+        "jeId": 41,
         "foundInList": true,
         "postedByUserId": 2,
-        "postedAt": "2026-04-19T00:48:37.501Z"
+        "postedAt": "2026-04-19T01:02:21.434Z"
       }
     },
     {
@@ -35,10 +35,10 @@
       "evidence": {
         "status": 400,
         "body": {
-          "error": "Posting refused: line 1 — account 'ARCH-T25-717555' is archived.",
+          "error": "Posting refused: line 1 — account 'ARCH-T25-541462' is archived.",
           "code": "INVALID_ACCOUNT",
           "lineNo": 1,
-          "account": "ARCH-T25-717555",
+          "account": "ARCH-T25-541462",
           "reason": "archived_account"
         }
       }
@@ -50,10 +50,10 @@
       "evidence": {
         "status": 400,
         "body": {
-          "error": "Posting refused: line 1 — account 'NOMAN-T25-717585' is not allowed for manual posting.",
+          "error": "Posting refused: line 1 — account 'NOMAN-T25-541486' is not allowed for manual posting.",
           "code": "INVALID_ACCOUNT",
           "lineNo": 1,
-          "account": "NOMAN-T25-717585",
+          "account": "NOMAN-T25-541486",
           "reason": "manual_posting_disabled"
         }
       }
@@ -113,7 +113,7 @@
       "pass": true,
       "evidence": {
         "status": 201,
-        "entryNo": "JE-2026-000026"
+        "entryNo": "JE-2026-000040"
       }
     },
     {
@@ -131,8 +131,8 @@
       "evidence": {
         "dup1Status": 201,
         "dup2Status": 201,
-        "dup1Id": 29,
-        "dup2Id": 30,
+        "dup1Id": 43,
+        "dup2Id": 44,
         "distinctJeCount": 2,
         "gap": "BOTH submissions posted distinct JEs — the merged route has no idempotency key. Recommend adding one (e.g. Idempotency-Key header) when Task #29 introduces drafts."
       }
@@ -143,10 +143,10 @@
       "pass": true,
       "evidence": {
         "status": 200,
-        "jeId": 27,
-        "entryNo": "JE-2026-000025",
+        "jeId": 41,
+        "entryNo": "JE-2026-000039",
         "postedByUserId": 2,
-        "postedAt": "2026-04-19T00:48:37.501Z",
+        "postedAt": "2026-04-19T01:02:21.434Z",
         "evidenceSource": "manual_ui",
         "lineCount": 2
       }
@@ -157,11 +157,11 @@
       "pass": true,
       "evidence": {
         "status": 201,
-        "originalId": 27,
+        "originalId": 41,
         "originalStatus": "reversed",
-        "reversalId": 31,
-        "reversalEntryNo": "JE-2026-000029",
-        "reversesJournalEntryId": 27
+        "reversalId": 45,
+        "reversalEntryNo": "JE-2026-000043",
+        "reversesJournalEntryId": 41
       }
     },
     {
