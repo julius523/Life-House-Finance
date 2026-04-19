@@ -20,6 +20,7 @@ import {
 import { requireAuth, requireRole } from "../lib/auth";
 import { logger } from "../lib/logger";
 import {
+  applyRunOutcome,
   computeNextRunAt,
   runSchedule,
 } from "../lib/journalEntryExportScheduler";
@@ -151,6 +152,17 @@ router.patch(
         : null;
     }
 
+    // Task #68 — re-enabling a schedule (whether it was admin-disabled or
+    // auto-paused) clears the failure tracking so the next failure starts a
+    // fresh run-of-3 toward auto-pause. Without this an auto-paused row would
+    // re-pause itself after a single failure.
+    if (data.enabled === true && existing.enabled === false) {
+      next["consecutiveFailureCount"] = 0;
+      next["autoPausedAt"] = null;
+      next["autoPausedReason"] = null;
+      next["lastRunError"] = null;
+    }
+
     const [row] = await db
       .update(journalEntryExportSchedulesTable)
       .set(next)
@@ -203,14 +215,15 @@ router.post(
         triggeredByUserId: req.authUser?.id ?? null,
         runAt: now,
       });
-      // Manual run also stamps last_run_* so the UI reflects it, but
-      // only advance next_run_at when the row is enabled.
+      // Stamp last_run_at + advance next_run_at first; applyRunOutcome
+      // owns last_run_status / failure-counter / auto-pause book-keeping
+      // so manual runs and scheduled runs follow the same rules
+      // (Task #68 — manual "Run now" can also push a row past the
+      // auto-pause threshold).
       await db
         .update(journalEntryExportSchedulesTable)
         .set({
           lastRunAt: now,
-          lastRunStatus: result.status,
-          lastRunError: result.error ?? null,
           updatedAt: now,
           ...(schedule.enabled
             ? {
@@ -222,6 +235,7 @@ router.post(
             : {}),
         })
         .where(eq(journalEntryExportSchedulesTable.id, schedule.id));
+      await applyRunOutcome(schedule, result);
       res.json({ result });
     } catch (err) {
       logger.error({ err, scheduleId: id }, "Manual run-now failed");

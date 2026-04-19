@@ -5160,6 +5160,9 @@ export const ListJournalEntryExportSchedulesResponse = zod.object({
       lastRunStatus: zod.string().nullish(),
       lastRunError: zod.string().nullish(),
       nextRunAt: zod.string().nullish(),
+      consecutiveFailureCount: zod.number(),
+      autoPausedAt: zod.string().nullish(),
+      autoPausedReason: zod.string().nullish(),
     }),
   ),
 });
@@ -5211,6 +5214,9 @@ export const UpdateJournalEntryExportScheduleResponse = zod.object({
     lastRunStatus: zod.string().nullish(),
     lastRunError: zod.string().nullish(),
     nextRunAt: zod.string().nullish(),
+    consecutiveFailureCount: zod.number(),
+    autoPausedAt: zod.string().nullish(),
+    autoPausedReason: zod.string().nullish(),
   }),
 });
 

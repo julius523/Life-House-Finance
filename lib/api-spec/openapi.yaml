@@ -6836,6 +6836,14 @@ components:
         nextRunAt:
           type: string
           nullable: true
+        consecutiveFailureCount:
+          type: integer
+        autoPausedAt:
+          type: string
+          nullable: true
+        autoPausedReason:
+          type: string
+          nullable: true
       required:
         - id
         - name
@@ -6845,6 +6853,7 @@ components:
         - includeLines
         - createdAt
         - updatedAt
+        - consecutiveFailureCount
 
     JournalEntryExportSchedulesListResponse:
       type: object

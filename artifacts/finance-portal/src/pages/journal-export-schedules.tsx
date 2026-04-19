@@ -55,7 +55,8 @@ import {
   JournalEntryExportScheduleBodyFilterStatus,
   JournalEntryExportScheduleBodyFilterSource,
 } from "@workspace/api-client-react";
-import { Plus, Pencil, Trash2, Play, ArrowLeft } from "lucide-react";
+import { Plus, Pencil, Trash2, Play, ArrowLeft, AlertTriangle } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 type Cadence = "daily" | "weekly" | "monthly";
 type FilterStatus = "all" | "posted" | "reversed";
@@ -117,6 +118,13 @@ export default function JournalExportSchedulesPage() {
   const schedules = useMemo<JournalEntryExportSchedule[]>(
     () => data?.schedules ?? [],
     [data],
+  );
+  // Task #68 — schedules the backend auto-paused after consecutive
+  // SendGrid failures. Re-enabling resets the failure counter on the
+  // server, so the banner clears as soon as the row is turned back on.
+  const autoPaused = useMemo(
+    () => schedules.filter((s) => s.autoPausedAt && !s.enabled),
+    [schedules],
   );
 
   const logsQuery = useGetJournalEntryExportScheduleLog(
@@ -298,6 +306,56 @@ export default function JournalExportSchedulesPage() {
           </Button>
         ) : null}
       </div>
+
+      {autoPaused.length > 0 ? (
+        <Alert variant="destructive" data-testid="banner-auto-paused">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>
+            {autoPaused.length === 1
+              ? "1 schedule was auto-paused after repeated email failures"
+              : `${autoPaused.length} schedules were auto-paused after repeated email failures`}
+          </AlertTitle>
+          <AlertDescription>
+            <ul className="mt-1 list-disc pl-5 space-y-1">
+              {autoPaused.map((s) => (
+                <li key={s.id} data-testid={`auto-paused-${s.id}`}>
+                  <span className="font-medium">{s.name}</span>
+                  {s.autoPausedReason ? (
+                    <> — last error: {s.autoPausedReason}</>
+                  ) : null}
+                  {s.autoPausedAt ? (
+                    <span className="text-xs ml-2 opacity-80">
+                      paused {formatDate(s.autoPausedAt)}
+                    </span>
+                  ) : null}
+                  {isAdmin ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="ml-2 h-7"
+                      onClick={() =>
+                        updateMut.mutate({
+                          id: s.id,
+                          data: { enabled: true },
+                        })
+                      }
+                      disabled={updateMut.isPending}
+                      data-testid={`button-reenable-${s.id}`}
+                    >
+                      Re-enable
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs">
+              Re-enabling resets the failure counter. Fix the recipient list,
+              attachment, or SendGrid quota first to avoid an immediate
+              re-pause.
+            </p>
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <Card>
         <CardHeader className="pb-3">

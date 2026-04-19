@@ -3,13 +3,22 @@ import {
   journalEntryExportSchedulesTable,
   journalEntryExportSendLogTable,
   activityLogTable,
+  usersTable,
   type JournalEntryExportSchedule,
   type ExportCadence,
 } from "@workspace/db";
 import { eq, lte, isNotNull, and } from "drizzle-orm";
 import { logger } from "./logger";
 import { generateJournalEntryCsv } from "./journalEntryCsvService";
-import { deliverEmail } from "./notifications";
+import { createNotification, deliverEmail } from "./notifications";
+
+/**
+ * Task #68 — number of consecutive failed runs that will auto-pause the
+ * schedule. Picked at 3 so a transient SendGrid blip doesn't disable a
+ * working schedule, but a genuinely broken config (bad recipient, blocked
+ * attachment, quota exhausted) is caught quickly without spamming.
+ */
+export const MAX_CONSECUTIVE_FAILURES = 3;
 
 /**
  * Task #49 — Background scheduler that emits the configured CSV
@@ -267,6 +276,117 @@ export async function runSchedule(
   };
 }
 
+/**
+ * Task #68 — apply the result of a run to the schedule row.
+ *
+ * - sent / empty → reset the consecutive-failure counter (and clear any
+ *   prior auto-pause marker; an admin-initiated re-enable already cleared
+ *   it, but this keeps the row consistent if a flaky transport recovers).
+ * - failed       → bump the counter, and once we hit
+ *   MAX_CONSECUTIVE_FAILURES disable the schedule, null out next_run_at,
+ *   and notify every admin so they're not surprised by silence.
+ *
+ * This is shared by the scheduler tick and the manual "Run now" path so
+ * both observe identical pause semantics — admins testing a broken send
+ * shouldn't be able to thrash a row past the threshold without it pausing.
+ */
+export async function applyRunOutcome(
+  schedule: JournalEntryExportSchedule,
+  result: { status: "sent" | "empty" | "failed"; error?: string },
+): Promise<void> {
+  const now = new Date();
+  if (result.status === "failed") {
+    const nextCount = (schedule.consecutiveFailureCount ?? 0) + 1;
+    const shouldPause = nextCount >= MAX_CONSECUTIVE_FAILURES;
+    const reason = result.error ?? "Email delivery failed";
+    await db
+      .update(journalEntryExportSchedulesTable)
+      .set({
+        lastRunStatus: result.status,
+        lastRunError: result.error ?? null,
+        consecutiveFailureCount: nextCount,
+        ...(shouldPause
+          ? {
+              enabled: false,
+              nextRunAt: null,
+              autoPausedAt: now,
+              autoPausedReason: reason,
+            }
+          : {}),
+        updatedAt: now,
+      })
+      .where(eq(journalEntryExportSchedulesTable.id, schedule.id));
+    if (shouldPause) {
+      await onScheduleAutoPaused(schedule, nextCount, reason);
+    }
+    return;
+  }
+  // success / empty → reset failure tracking. Preserve the auto-pause
+  // marker when the schedule is currently disabled (e.g. an admin
+  // manually "Run now"s an auto-paused row to test the fix); the banner
+  // should keep nagging until they explicitly re-enable.
+  await db
+    .update(journalEntryExportSchedulesTable)
+    .set({
+      lastRunStatus: result.status,
+      lastRunError: null,
+      consecutiveFailureCount: 0,
+      ...(schedule.enabled
+        ? { autoPausedAt: null, autoPausedReason: null }
+        : {}),
+      updatedAt: now,
+    })
+    .where(eq(journalEntryExportSchedulesTable.id, schedule.id));
+}
+
+async function onScheduleAutoPaused(
+  schedule: JournalEntryExportSchedule,
+  failureCount: number,
+  reason: string,
+): Promise<void> {
+  logger.warn(
+    { scheduleId: schedule.id, failureCount, reason },
+    "Auto-paused journal-entry export schedule after consecutive failures",
+  );
+  await db.insert(activityLogTable).values({
+    type: "journal_export_auto_paused",
+    description:
+      `Scheduled CSV export "${schedule.name}" auto-paused after ` +
+      `${failureCount} consecutive failures: ${reason}`,
+    actor: "system",
+    referenceId: schedule.id,
+    referenceType: "journal_entry_export_schedule",
+  });
+  try {
+    const admins = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(eq(usersTable.role, "admin"));
+    const title = `CSV export "${schedule.name}" auto-paused`;
+    const body =
+      `The scheduled journal-entry CSV export "${schedule.name}" failed ` +
+      `${failureCount} times in a row and was paused so we stop retrying ` +
+      `the same broken send. Last error: ${reason}. Re-enable the ` +
+      `schedule to clear the failure counter and resume.`;
+    for (const admin of admins) {
+      await createNotification({
+        userId: admin.id,
+        type: "journal_export_auto_paused",
+        title,
+        body,
+        link: "/accounting/journal-export-schedules",
+        referenceType: "journal_entry_export_schedule",
+        referenceId: schedule.id,
+      });
+    }
+  } catch (err) {
+    logger.error(
+      { err, scheduleId: schedule.id },
+      "Failed to notify admins about auto-paused export schedule",
+    );
+  }
+}
+
 async function tick(): Promise<void> {
   if (inFlight) return;
   inFlight = true;
@@ -330,14 +450,7 @@ async function tick(): Promise<void> {
         triggeredBy: "schedule",
         runAt: now,
       });
-      await db
-        .update(journalEntryExportSchedulesTable)
-        .set({
-          lastRunStatus: result.status,
-          lastRunError: result.error ?? null,
-          updatedAt: new Date(),
-        })
-        .where(eq(journalEntryExportSchedulesTable.id, schedule.id));
+      await applyRunOutcome(schedule, result);
     }
   } catch (err) {
     logger.error({ err }, "Journal-entry export scheduler tick failed");

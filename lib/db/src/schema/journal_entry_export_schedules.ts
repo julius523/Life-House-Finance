@@ -65,6 +65,17 @@ export const journalEntryExportSchedulesTable = pgTable(
     lastRunError: text("last_run_error"),
     /** When NULL the schedule never runs; fill on enable. */
     nextRunAt: timestamp("next_run_at"),
+    /**
+     * Task #68 — count of *consecutive* failed runs (sent/empty resets to 0).
+     * When this hits MAX_CONSECUTIVE_FAILURES the scheduler auto-disables the
+     * row so we stop hammering SendGrid with the same broken send.
+     */
+    consecutiveFailureCount: integer("consecutive_failure_count")
+      .notNull()
+      .default(0),
+    /** Set when the scheduler auto-pauses; cleared when admin re-enables. */
+    autoPausedAt: timestamp("auto_paused_at"),
+    autoPausedReason: text("auto_paused_reason"),
   },
 );
 

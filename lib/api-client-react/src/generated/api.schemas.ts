@@ -2038,6 +2038,9 @@ export interface JournalEntryExportSchedule {
   lastRunStatus?: string | null;
   lastRunError?: string | null;
   nextRunAt?: string | null;
+  consecutiveFailureCount: number;
+  autoPausedAt?: string | null;
+  autoPausedReason?: string | null;
 }
 
 export interface JournalEntryExportSchedulesListResponse {
