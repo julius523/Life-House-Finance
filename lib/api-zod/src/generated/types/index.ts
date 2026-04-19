@@ -42,6 +42,8 @@ export * from "./createChartOfAccountBody";
 export * from "./createExpenseBody";
 export * from "./createExpenseBodyPaymentMethod";
 export * from "./createExpenseCategoryBody";
+export * from "./createExpenseCategoryBodyDefaultRule";
+export * from "./createExpenseCategoryBodyDefaultRulePaymentMethod";
 export * from "./createExpenseCategoryPaymentMethodRuleBody";
 export * from "./createExpenseCategoryPaymentMethodRuleBodyPaymentMethod";
 export * from "./createMonthEndChecklistBody";

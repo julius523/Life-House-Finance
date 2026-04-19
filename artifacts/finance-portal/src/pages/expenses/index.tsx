@@ -116,6 +116,15 @@ export default function ExpensesList() {
                             Possible Duplicate
                           </Badge>
                         )}
+                        {(expense.categoryId == null || expense.categoryName === "Uncategorized") && (
+                          <Badge
+                            variant="outline"
+                            className="bg-warning/10 text-warning border-warning/40"
+                            data-testid={`badge-uncategorized-${expense.id}`}
+                          >
+                            Uncategorized
+                          </Badge>
+                        )}
                       </div>
                       <div className="text-sm text-muted-foreground">
                         {expense.description || "No description"}

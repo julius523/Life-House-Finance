@@ -3888,6 +3888,12 @@ const CreateExpenseCategoryBodyZ = z.object({
   name: z.string().trim().min(1, "name is required").max(80),
   debitAccountId: z.number().int().positive(),
   isActive: z.boolean().optional(),
+  // Required: every new category must include a default credit-account
+  // rule so it is immediately usable for auto-draft generation.
+  defaultRule: z.object({
+    paymentMethod: PaymentMethodEnum,
+    creditAccountId: z.number().int().positive(),
+  }),
 });
 const UpdateExpenseCategoryBodyZ = z.object({
   name: z.string().trim().min(1).max(80).optional(),
@@ -4154,6 +4160,11 @@ router.post(
       res.status(debit.status).json({ error: debit.error, code: debit.code });
       return;
     }
+    const credit = await loadPostableAccount(parsed.data.defaultRule.creditAccountId);
+    if (!credit.ok) {
+      res.status(credit.status).json({ error: credit.error, code: credit.code });
+      return;
+    }
     // UNIQUE(name) — surface 409 instead of crashing on PG error.
     const [dupe] = await db
       .select({ id: expenseCategoriesTable.id })
@@ -4167,30 +4178,44 @@ router.post(
       });
       return;
     }
-    const [row] = await db
-      .insert(expenseCategoriesTable)
-      .values({
-        name: parsed.data.name,
-        debitAccountId: parsed.data.debitAccountId,
-        isActive: parsed.data.isActive ?? true,
-        isSystem: false,
-      })
-      .returning();
+    const row = await db.transaction(async (tx) => {
+      const [cat] = await tx
+        .insert(expenseCategoriesTable)
+        .values({
+          name: parsed.data.name,
+          debitAccountId: parsed.data.debitAccountId,
+          isActive: parsed.data.isActive ?? true,
+          isSystem: false,
+        })
+        .returning();
+      // Always create the seeded default rule alongside the category so the
+      // mapping is never half-configured (>=1 default rule invariant).
+      await tx
+        .insert(expenseCategoryPaymentMethodRulesTable)
+        .values({
+          categoryId: cat!.id,
+          paymentMethod: parsed.data.defaultRule.paymentMethod,
+          creditAccountId: parsed.data.defaultRule.creditAccountId,
+          isDefault: true,
+        });
+      return cat!;
+    });
     const actor = req.authUser!;
     await db.insert(activityLogTable).values({
       type: "expense_category_created",
-      description: `${actor.firstName} ${actor.lastName} created expense category "${row!.name}"`,
+      description: `${actor.firstName} ${actor.lastName} created expense category "${row.name}"`,
       actor: `${actor.firstName} ${actor.lastName}`,
       actorUserId: actor.id,
-      referenceId: row!.id,
+      referenceId: row.id,
       referenceType: "expense_category",
       metadata: {
-        name: row!.name,
-        debitAccountId: row!.debitAccountId,
-        isActive: row!.isActive,
+        name: row.name,
+        debitAccountId: row.debitAccountId,
+        isActive: row.isActive,
+        defaultRule: parsed.data.defaultRule,
       },
     });
-    const serialized = await loadCategoryById(row!.id);
+    const serialized = await loadCategoryById(row.id);
     res.status(201).json({ category: serialized });
   },
 );

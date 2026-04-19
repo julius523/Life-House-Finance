@@ -418,6 +418,8 @@ function CategoryEditor({
     category?.debitAccountId ? String(category.debitAccountId) : "",
   );
   const [isActive, setIsActive] = useState(category?.isActive ?? true);
+  const [defaultPaymentMethod, setDefaultPaymentMethod] = useState<PaymentMethod>("cash");
+  const [defaultCreditId, setDefaultCreditId] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async () => {
@@ -429,6 +431,14 @@ function CategoryEditor({
       toast({ title: "Debit account is required", variant: "destructive" });
       return;
     }
+    if (mode === "create" && !defaultCreditId) {
+      toast({
+        title: "Default credit account is required",
+        description: "New categories must include a default payment-method rule.",
+        variant: "destructive",
+      });
+      return;
+    }
     setSubmitting(true);
     try {
       const body: Record<string, unknown> = {
@@ -437,6 +447,10 @@ function CategoryEditor({
         isActive,
       };
       if (mode === "create") {
+        body["defaultRule"] = {
+          paymentMethod: defaultPaymentMethod,
+          creditAccountId: Number(defaultCreditId),
+        };
         await apiJson(`/accounting/expense-categories`, {
           method: "POST",
           body: JSON.stringify(body),
@@ -510,6 +524,48 @@ function CategoryEditor({
             />
             Active
           </label>
+          {mode === "create" ? (
+            <div className="border-t pt-3 space-y-3">
+              <p className="text-sm font-medium">Default payment-method rule</p>
+              <p className="text-xs text-muted-foreground">
+                Required so the category is immediately usable for auto-draft generation.
+                You can add more rules after creation.
+              </p>
+              <div>
+                <label className="text-sm">Payment method</label>
+                <Select
+                  value={defaultPaymentMethod}
+                  onValueChange={(v) => setDefaultPaymentMethod(v as PaymentMethod)}
+                >
+                  <SelectTrigger data-testid="select-default-payment-method">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAYMENT_METHODS.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm">Credit account</label>
+                <Select value={defaultCreditId} onValueChange={setDefaultCreditId}>
+                  <SelectTrigger data-testid="select-default-credit-account">
+                    <SelectValue placeholder="Select an account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={String(a.id)}>
+                        {a.code} — {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          ) : null}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>

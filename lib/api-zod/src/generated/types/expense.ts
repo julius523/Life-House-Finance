@@ -20,6 +20,8 @@ export interface Expense {
   programId?: number;
   programName?: string;
   categoryId?: number | null;
+  /** Resolved category display name. Null when categoryId is null (legacy uncategorized expense). */
+  categoryName?: string | null;
   status: ExpenseStatus;
   managerApprovedBy?: string;
   financeApprovedBy?: string;

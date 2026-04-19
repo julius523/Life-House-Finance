@@ -99,6 +99,8 @@ export interface Expense {
   programId?: number;
   programName?: string;
   categoryId?: number | null;
+  /** Resolved category display name. Null when categoryId is null (legacy uncategorized expense). */
+  categoryName?: string | null;
   status: ExpenseStatus;
   managerApprovedBy?: string;
   financeApprovedBy?: string;
@@ -1075,10 +1077,28 @@ export interface ExpenseCategoryMissingMappingResponse {
   categories: ExpenseCategoryMissingMappingResponseCategoriesItem[];
 }
 
+export type CreateExpenseCategoryBodyDefaultRulePaymentMethod =
+  (typeof CreateExpenseCategoryBodyDefaultRulePaymentMethod)[keyof typeof CreateExpenseCategoryBodyDefaultRulePaymentMethod];
+
+export const CreateExpenseCategoryBodyDefaultRulePaymentMethod = {
+  cash: "cash",
+  check: "check",
+  credit_card: "credit_card",
+  debit_card: "debit_card",
+  bank_transfer: "bank_transfer",
+  other: "other",
+} as const;
+
+export type CreateExpenseCategoryBodyDefaultRule = {
+  paymentMethod: CreateExpenseCategoryBodyDefaultRulePaymentMethod;
+  creditAccountId: number;
+};
+
 export interface CreateExpenseCategoryBody {
   name: string;
   debitAccountId: number;
   isActive?: boolean;
+  defaultRule: CreateExpenseCategoryBodyDefaultRule;
 }
 
 export interface UpdateExpenseCategoryBody {

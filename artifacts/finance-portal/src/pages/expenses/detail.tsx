@@ -322,6 +322,15 @@ export default function ExpenseDetail() {
               <Badge className={getStatusColor(expense.status)}>
                 {expense.status.replace("_", " ").toUpperCase()}
               </Badge>
+              {(expense.categoryId == null || expense.categoryName === "Uncategorized") && (
+                <Badge
+                  variant="outline"
+                  className="bg-warning/10 text-warning border-warning/40"
+                  data-testid="badge-uncategorized"
+                >
+                  Uncategorized
+                </Badge>
+              )}
             </div>
             <p className="text-muted-foreground mt-1">
               Submitted on {format(new Date(expense.createdAt), "MMMM d, yyyy")}

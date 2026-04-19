@@ -7,7 +7,7 @@ import {
   activityLogTable,
   expenseCategoriesTable,
 } from "@workspace/db";
-import { eq, and, desc, count, sql, ne } from "drizzle-orm";
+import { eq, and, desc, count, sql, ne, inArray } from "drizzle-orm";
 import { createNotification, findUserByEmail } from "../lib/notifications";
 import {
   ListExpensesQueryParams,
@@ -55,6 +55,7 @@ function formatExpense(
   e: typeof expensesTable.$inferSelect,
   programName?: string,
   potentialDuplicateIds: number[] = [],
+  categoryName?: string | null,
 ) {
   return {
     id: e.id,
@@ -68,6 +69,7 @@ function formatExpense(
     programId: e.programId ?? undefined,
     programName,
     categoryId: e.categoryId ?? undefined,
+    categoryName: categoryName ?? undefined,
     status: e.status as "draft" | "submitted" | "approved" | "rejected" | "reimbursed" | "needs_correction",
     managerApprovedBy: e.managerApprovedBy ?? undefined,
     financeApprovedBy: e.financeApprovedBy ?? undefined,
@@ -144,10 +146,21 @@ router.get("/expenses", async (req, res): Promise<void> => {
   ]);
 
   const dupMap = await buildDuplicateMap(expenses);
+  const catIds = Array.from(
+    new Set(expenses.map((e) => e.categoryId).filter((id): id is number => id !== null)),
+  );
+  const catRows = catIds.length
+    ? await db
+        .select({ id: expenseCategoriesTable.id, name: expenseCategoriesTable.name })
+        .from(expenseCategoriesTable)
+        .where(inArray(expenseCategoriesTable.id, catIds))
+    : [];
+  const catName = new Map(catRows.map((r) => [r.id, r.name]));
   const items = await Promise.all(
     expenses.map(async (e) => {
       const programName = await getProgramName(e.programId);
-      return formatExpense(e, programName, dupMap.get(e.id) ?? []);
+      const cName = e.categoryId === null ? null : catName.get(e.categoryId) ?? null;
+      return formatExpense(e, programName, dupMap.get(e.id) ?? [], cName);
     })
   );
 
@@ -230,12 +243,22 @@ router.get("/expenses/:id", async (req, res): Promise<void> => {
         ne(expensesTable.id, expense.id),
       ),
     );
+  let cName: string | null = null;
+  if (expense.categoryId !== null) {
+    const [c] = await db
+      .select({ name: expenseCategoriesTable.name })
+      .from(expenseCategoriesTable)
+      .where(eq(expenseCategoriesTable.id, expense.categoryId))
+      .limit(1);
+    cName = c?.name ?? null;
+  }
   res.json(
     GetExpenseResponse.parse(
       formatExpense(
         expense,
         programName,
         dups.map((d) => d.id),
+        cName,
       ),
     ),
   );
@@ -260,13 +283,20 @@ router.put("/expenses/:id", async (req, res): Promise<void> => {
   if (data.expenseDate !== undefined) updates["expenseDate"] = data.expenseDate;
   if (data.paymentMethod !== undefined) updates["paymentMethod"] = data.paymentMethod;
   if (data.programId !== undefined) updates["programId"] = data.programId;
-  if (data.categoryId !== undefined && data.categoryId !== null) {
-    const resolved = await validateCategoryId(data.categoryId);
-    if (!resolved.ok) {
-      res.status(400).json({ error: resolved.error });
-      return;
+  if (data.categoryId !== undefined) {
+    if (data.categoryId === null) {
+      // Allow explicit clear so submitters/admins can detach a legacy
+      // expense from its category; the next read will surface an
+      // "Uncategorized" badge in the UI.
+      updates["categoryId"] = null;
+    } else {
+      const resolved = await validateCategoryId(data.categoryId);
+      if (!resolved.ok) {
+        res.status(400).json({ error: resolved.error });
+        return;
+      }
+      updates["categoryId"] = resolved.categoryId;
     }
-    updates["categoryId"] = resolved.categoryId;
   }
   if (data.receiptIds !== undefined) updates["receiptIds"] = data.receiptIds;
   if (data.status !== undefined) updates["status"] = data.status;

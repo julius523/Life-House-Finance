@@ -1820,6 +1820,10 @@ components:
         categoryId:
           type: integer
           nullable: true
+        categoryName:
+          type: string
+          nullable: true
+          description: Resolved category display name. Null when categoryId is null (legacy uncategorized expense).
         status:
           type: string
           enum: [draft, submitted, approved, rejected, reimbursed, needs_correction]
@@ -3552,7 +3556,16 @@ components:
           type: integer
         isActive:
           type: boolean
-      required: [name, debitAccountId]
+        defaultRule:
+          type: object
+          properties:
+            paymentMethod:
+              type: string
+              enum: [cash, check, credit_card, debit_card, bank_transfer, other]
+            creditAccountId:
+              type: integer
+          required: [paymentMethod, creditAccountId]
+      required: [name, debitAccountId, defaultRule]
 
     UpdateExpenseCategoryBody:
       type: object

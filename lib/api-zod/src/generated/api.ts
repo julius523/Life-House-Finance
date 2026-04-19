@@ -125,6 +125,12 @@ export const ListExpensesResponse = zod.object({
       programId: zod.number().optional(),
       programName: zod.string().optional(),
       categoryId: zod.number().nullish(),
+      categoryName: zod
+        .string()
+        .nullish()
+        .describe(
+          "Resolved category display name. Null when categoryId is null (legacy uncategorized expense).",
+        ),
       status: zod.enum([
         "draft",
         "submitted",
@@ -209,6 +215,12 @@ export const GetExpenseResponse = zod.object({
   programId: zod.number().optional(),
   programName: zod.string().optional(),
   categoryId: zod.number().nullish(),
+  categoryName: zod
+    .string()
+    .nullish()
+    .describe(
+      "Resolved category display name. Null when categoryId is null (legacy uncategorized expense).",
+    ),
   status: zod.enum([
     "draft",
     "submitted",
@@ -291,6 +303,12 @@ export const UpdateExpenseResponse = zod.object({
   programId: zod.number().optional(),
   programName: zod.string().optional(),
   categoryId: zod.number().nullish(),
+  categoryName: zod
+    .string()
+    .nullish()
+    .describe(
+      "Resolved category display name. Null when categoryId is null (legacy uncategorized expense).",
+    ),
   status: zod.enum([
     "draft",
     "submitted",
@@ -355,6 +373,12 @@ export const ApproveExpenseResponse = zod.object({
   programId: zod.number().optional(),
   programName: zod.string().optional(),
   categoryId: zod.number().nullish(),
+  categoryName: zod
+    .string()
+    .nullish()
+    .describe(
+      "Resolved category display name. Null when categoryId is null (legacy uncategorized expense).",
+    ),
   status: zod.enum([
     "draft",
     "submitted",
@@ -407,6 +431,12 @@ export const DismissExpenseDuplicateResponse = zod.object({
   programId: zod.number().optional(),
   programName: zod.string().optional(),
   categoryId: zod.number().nullish(),
+  categoryName: zod
+    .string()
+    .nullish()
+    .describe(
+      "Resolved category display name. Null when categoryId is null (legacy uncategorized expense).",
+    ),
   status: zod.enum([
     "draft",
     "submitted",
@@ -472,6 +502,12 @@ export const RejectExpenseResponse = zod.object({
   programId: zod.number().optional(),
   programName: zod.string().optional(),
   categoryId: zod.number().nullish(),
+  categoryName: zod
+    .string()
+    .nullish()
+    .describe(
+      "Resolved category display name. Null when categoryId is null (legacy uncategorized expense).",
+    ),
   status: zod.enum([
     "draft",
     "submitted",
@@ -1082,6 +1118,12 @@ export const ConvertTransactionToExpenseResponse = zod.object({
     programId: zod.number().optional(),
     programName: zod.string().optional(),
     categoryId: zod.number().nullish(),
+    categoryName: zod
+      .string()
+      .nullish()
+      .describe(
+        "Resolved category display name. Null when categoryId is null (legacy uncategorized expense).",
+      ),
     status: zod.enum([
       "draft",
       "submitted",
@@ -2190,6 +2232,17 @@ export const CreateExpenseCategoryBody = zod.object({
   name: zod.string(),
   debitAccountId: zod.number(),
   isActive: zod.boolean().optional(),
+  defaultRule: zod.object({
+    paymentMethod: zod.enum([
+      "cash",
+      "check",
+      "credit_card",
+      "debit_card",
+      "bank_transfer",
+      "other",
+    ]),
+    creditAccountId: zod.number(),
+  }),
 });
 
 /**

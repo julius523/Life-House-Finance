@@ -5,9 +5,11 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { CreateExpenseCategoryBodyDefaultRule } from "./createExpenseCategoryBodyDefaultRule";
 
 export interface CreateExpenseCategoryBody {
   name: string;
   debitAccountId: number;
   isActive?: boolean;
+  defaultRule: CreateExpenseCategoryBodyDefaultRule;
 }
