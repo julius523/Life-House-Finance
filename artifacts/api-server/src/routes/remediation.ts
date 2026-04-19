@@ -656,8 +656,11 @@ router.post(
       return;
     }
     const { accountId, note } = body.data;
-    const userId =
-      (req as Request & { user?: { id?: number } }).user?.id ?? null;
+    // Auth middleware populates req.authUser, NOT req.user. Reading the
+    // wrong field silently nulls the actor on the activity-log row,
+    // which is a real audit-attribution regression in this domain. Pull
+    // the id off authUser (guaranteed present behind requireAuth).
+    const userId = req.authUser?.id ?? null;
 
     // Pre-flight: account must be active + postable.
     const [coa] = await db
