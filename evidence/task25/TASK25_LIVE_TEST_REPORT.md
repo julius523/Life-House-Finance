@@ -79,3 +79,25 @@ actor + timestamp + JE id.
 - `evidence/task25/run-task25-tests.mjs` — runner
 - `evidence/task25/task25-summary.json` — machine-readable results
 - `.local/test-evidence/task25-summary.json` — same, gitignored copy
+
+## Final acceptance decision (user, 2026-04-19)
+
+**Task #25 status:** Accepted with one known deferred control gap.
+
+Task #25 is accepted for the direct-post manual journal entry slice. All
+focused acceptance tests passed and Step 8 / Step 9 regressions remained
+green. The route correctly enforces authorization, balancing, account
+validity, and period locking, and writes complete ledger / audit
+evidence (ledger row + activity_log row + evidence_snapshot, all linked
+to actor, timestamp, and JE id).
+
+**Known deferred gap:** duplicate concurrent POSTs are not idempotent
+and can create duplicate journal entries. This must be addressed before
+claiming production-ready approval workflow coverage. Owner: Task #29
+or an immediate hardening patch.
+
+**Do NOT claim implemented for Task #25:** drafts, edit draft, submit,
+approve, reject, no-self-approval workflow enforcement. Those belong to
+Task #29 and are deliberately out of scope here. No-self-approval is
+not "missing" from this slice — there is no approval surface to enforce
+it on yet.

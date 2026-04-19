@@ -1,0 +1,34 @@
+That’s a solid stop point.
+
+My read: Task #25’s shipped scope is validated. The direct-post slice appears production-sound for the boundaries it actually claims to cover.
+
+What matters most from your results:
+
+* The core posting path is real, not fake-green. You proved ledger row, activity log, evidence snapshot, actor linkage, timestamp linkage, and JE linkage.
+* The guardrails are working: balance enforcement, invalid account rejection, period lock rejection, and role-based access all behaved correctly.
+* The regression safety net held, which is the big one. Task #25 did not break Step 8 or Step 9.
+
+The two important truths you called out are exactly the right ones to call out:
+
+1. No idempotency is a real gap, not a cosmetic one.
+    Parallel duplicate posts creating duplicate JEs is unacceptable once this path gets real usage. That is the main unresolved risk in the shipped slice.
+2. No-self-approval is not missing from this slice because approval does not exist yet.
+    That is the correct framing. Don’t let anyone falsely mark that as failed for Task #25.
+
+My blunt verdict:
+
+* Task #25 = pass for shipped scope
+* Not yet pass for full manual-JE workflow
+* Main carry-forward defect = idempotency
+
+I’d record the status like this:
+
+Task #25 status: Accepted with one known deferred control gap
+Deferred gap: idempotent direct post under concurrent duplicate submission
+Owner task: Task #29 or immediate hardening patch
+Do not claim implemented: drafts, edit draft, submit, approve, reject, no-self-approval workflow enforcement
+
+Recommended decision language for the tracker:
+
+Task #25 is accepted for the direct-post manual journal entry slice. All focused acceptance tests passed and Step 8/Step 9 regressions remained green. The route correctly enforces authorization, balancing, account validity, and period locking, and writes complete ledger/audit evidence.
+Known deferred gap: duplicate concurrent POSTs are not idempotent and can create duplicate journal entries. This must be addressed before claiming production-ready approval workflow coverage.
