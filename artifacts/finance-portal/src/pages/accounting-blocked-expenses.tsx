@@ -78,7 +78,6 @@ export default function AccountingBlockedExpenses() {
   const [page, setPage] = useState(1);
   const pageSize = 25;
   const [reasonFilter, setReasonFilter] = useState<string>("all");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -88,10 +87,8 @@ export default function AccountingBlockedExpenses() {
     page: number;
     pageSize: number;
     reasonCode?: string;
-    categoryId?: number;
   } = { page, pageSize };
   if (reasonFilter !== "all") listParams.reasonCode = reasonFilter;
-  if (categoryFilter !== "all") listParams.categoryId = Number(categoryFilter);
 
   const { data, isLoading, isError, error } = useListBlockedExpenses(
     listParams,
@@ -295,13 +292,12 @@ export default function AccountingBlockedExpenses() {
             </SelectContent>
           </Select>
         </div>
-        {(reasonFilter !== "all" || categoryFilter !== "all") && (
+        {reasonFilter !== "all" && (
           <Button
             variant="ghost"
             size="sm"
             onClick={() => {
               setReasonFilter("all");
-              setCategoryFilter("all");
               setPage(1);
             }}
             data-testid="button-clear-filters"
