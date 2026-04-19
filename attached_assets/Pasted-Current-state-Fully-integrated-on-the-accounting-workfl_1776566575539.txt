@@ -1,0 +1,142 @@
+Current state
+Fully integrated on the accounting workflow side
+
+These pieces now work together:
+
+Manual JE draft workflow
+draft
+submit
+approve
+reject
+post
+Server-side controls
+no self-approval
+optimistic locking
+idempotent posting
+closed-period enforcement
+invalid account blocking
+Auditability
+full activity log chain
+approval history on posted JEs
+draft ↔ posted JE linkage
+Chart of Accounts
+real CoA
+settings
+trial balance
+ledger-based accounting reports infrastructure
+
+So the accounting subsystem itself is real and internally connected.
+
+Not yet integrated with expenses/bills
+Expenses
+
+Not integrated yet with the accounting workflow.
+
+Right now:
+
+expenses live in the operational side
+they do not automatically create JE drafts
+they do not automatically post to the ledger
+expense detail and JE detail are not yet bridged by source links
+
+That means expense reporting and accounting reporting are still partly living in separate worlds.
+
+Bills
+
+Same story, and even less mature because bills need proper A/P logic:
+
+no bill → JE draft bridge yet
+no accrual entry flow yet
+no payment-clearing flow yet
+Reporting integration status
+Fully accounting-driven
+Trial Balance: yes, ledger-driven
+Manual JE detail/history: yes, ledger-driven
+Side-by-side only
+P&L
+Balance Sheet
+
+These are intentionally in a transition state:
+
+operational mode still exists
+ledger mode also exists
+no final cutover yet
+
+So reporting is partially integrated, on purpose.
+
+Copilot integration status
+Accounting Copilot
+
+Integrated with:
+
+CoA-aware drafting
+accounting workflow rules
+manual JE constraints
+Expense/Copilot bridge
+
+Not integrated yet:
+
+copilot is not yet turning approved expenses into accounting drafts
+copilot is not yet reconciling operational expense data against posted JEs
+no automated expense-to-ledger bridge yet
+Best way to think about it
+What is true today
+
+You have a real accounting engine now.
+
+What is not true yet
+
+You do not yet have a fully connected finance operating system where:
+
+expenses
+bills
+ledger
+reports
+copilot
+
+all flow through one source of truth automatically.
+
+Gap map
+Done
+manual accounting workflow
+posting controls
+CoA
+settings
+trial balance
+approval history
+optimistic locking
+idempotency
+Half-done by design
+P&L / Balance Sheet side-by-side operational vs ledger views
+Missing
+expense → draft JE generation
+category → CoA mapping
+expense ↔ draft/JE backlinks
+blocked accounting queue for unmapped expenses
+bill → JE/AP flow
+full reporting cutover to ledger-only
+copilot reconciliation between operational data and ledger
+What’s next
+
+The next real milestone is:
+
+Expense → draft JE bridge
+
+That should include:
+
+category-to-CoA mapping
+approved expense creates draft JE
+no silent ledger posting
+traceability both directions
+blocked queue for missing mappings
+
+After that:
+
+Bills → JE/AP flow
+then report tie-out and cutover
+then deeper copilot reconciliation
+
+So the blunt answer is:
+
+The accounting side is integrated with itself. It is not yet fully integrated with expenses and the broader reporting side.
+Reporting is midway through the transition. Expenses and bills are still outside the accounting control chain.

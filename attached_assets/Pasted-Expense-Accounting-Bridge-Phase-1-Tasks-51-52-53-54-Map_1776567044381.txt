@@ -1,0 +1,580 @@
+Expense → Accounting Bridge, Phase 1
+Tasks #51, #52, #53, #54 — Mapping foundation, auto-generated draft bridge, traceability, and blocked queue
+What & Why
+
+The accounting workflow is now real: Chart of Accounts, manual JE drafts, submit/approve/reject/post, no-self-approval, optimistic locking, idempotent posting, audit history, and approval history on posted JEs all exist.
+
+But the accounting side is still not integrated with expenses.
+
+Today, expenses are operational records only. They do not deterministically map to ledger accounts, they do not generate accounting drafts, they do not surface accounting blockages, and there is no clean UI traceability from an expense to its draft or posted JE and back again.
+
+This phase creates the first real bridge from operations into accounting, without bypassing controls.
+
+The bridge must work like this:
+
+Finance defines expense categories and maps each category to the correct Chart of Accounts debit account plus payment-method-specific credit rules.
+When an expense is approved, the server attempts to generate exactly one manual journal entry draft from that expense.
+The generated draft is not auto-submitted and not auto-posted. It enters the existing draft workflow and must still be reviewed, submitted, approved, and posted through the existing accounting controls.
+If generation fails because configuration is missing or invalid, the expense is marked accounting blocked and appears in a dedicated blocked queue for finance to fix and retry.
+The system must expose two-way traceability so a reviewer can move in one click between:
+expense
+generated draft
+posted journal entry
+
+This is the keystone that makes later accounting/reporting work possible.
+
+Non-negotiable design decisions
+
+These are locked for this phase:
+
+Trigger: generate the accounting draft when the expense transitions to approved
+No silent posting: approval generates a draft only, never a posted JE
+No auto-submit: generated drafts remain in draft status until a human reviews and submits them
+Reuse the existing manual JE workflow: submit/approve/reject/post stays unchanged and must apply to generated drafts exactly as it does to hand-typed manual drafts
+Reuse the existing posting path: when an expense-generated draft is eventually posted, it must still flow through the existing hardened posting service and idempotency path
+Use a link table, not scattered foreign keys: create a shared accounting-link layer that can support expenses now and bills next
+Single-tenant only: no organization_id work in this phase
+No bill automation yet: bills are explicitly out of scope for this phase
+No report cutover yet: this phase builds the bridge, not the final report migration
+Done looks like
+Mapping foundation
+Admins can open a new expense category mapping page and manage expense categories.
+Each expense category has:
+a unique name
+an active/inactive flag
+a default debit account from the live Chart of Accounts
+one or more payment-method-specific credit rules
+at least one default credit rule
+Only active CoA accounts that allow manual posting can be selected.
+Archived, inactive, or non-manual-postable accounts are rejected server-side and filtered out of the UI.
+The mapping page includes a “Categories without complete mappings” banner/report.
+Expense form integration
+Expenses gain a nullable categoryId.
+Existing expenses are backfilled to a seeded Uncategorized category.
+New expenses require a category.
+Legacy expenses can remain uncategorized until edited, but show an explicit Uncategorized badge.
+Draft generation
+When an expense transitions to approved, the system attempts to generate exactly one manual journal entry draft.
+The generated draft:
+has status='draft'
+has sourceType='expense'
+has sourceId=<expense.id>
+has deterministic memo / entry date / lines derived from the expense
+Re-approving or retrying the same expense must not create duplicate drafts.
+If generation cannot happen, the expense is marked accountingStatus='blocked' with a stable structured reason code and no draft is created.
+Operational approval still succeeds even if accounting generation is blocked.
+Traceability
+Expense detail shows:
+accounting status
+linked draft summary
+linked posted JE summary
+block reason if blocked
+Draft detail shows the originating expense when sourced from an expense.
+Posted JE detail shows the originating expense by following the draft link.
+JE list exposes source type and supports filtering to expense-sourced entries.
+Blocked queue
+Admins/approvers can open a blocked accounting queue page and see all blocked expenses.
+The queue shows:
+expense ref
+date
+submitter
+merchant
+amount
+program
+current category
+payment method
+human-readable block reason
+Finance can:
+jump to category mapping
+retry generation for one expense
+bulk retry visible blocked expenses
+mark an expense as accounting not applicable with a required note
+Auditability
+Activity log captures:
+category create / edit / deactivate
+mapping rule create / edit / delete
+generated draft from expense
+retry generation
+mark not applicable
+Draft side and expense side both retain queryable linkage.
+No destructive cleanup that severs audit history.
+Hard acceptance gates
+
+This phase is not complete unless all of the following are true:
+
+An approved expense can generate at most one accounting draft.
+Re-approval, retries, and retry storms do not create duplicate drafts.
+Generated drafts remain in draft status and are not auto-submitted.
+Generated drafts use the existing manual JE workflow and later post through the existing hardened posting path, not a second posting implementation.
+If mapping is missing or invalid, the expense becomes accountingStatus='blocked' with a stable reason code and no draft is created.
+Expense detail, draft detail, and posted JE detail all expose the linkage cleanly.
+The blocked queue can retry successfully after mappings are fixed.
+All write actions are audit-logged with actor and entity linkage.
+Previously accepted accounting suites remain green.
+Bills are untouched except for any shared link-table design needed to avoid rework later.
+Out of scope
+Bills auto-generation / AP accrual logic
+Cash-basis on-payment trigger
+Auto-submit of generated drafts
+Auto-posting of generated drafts
+Per-vendor overrides
+Per-program overrides
+Auto-retry on mapping changes
+Report cutover to ledger-only
+Report drilldowns into source expenses
+Multi-tenant scoping
+Slack/email notifications for blocked queue growth
+Locked data model decisions
+1) Use an accounting link table
+
+Do not scatter ad hoc link fields everywhere if a shared link model avoids rework.
+
+Create a shared table for accounting-origin traceability, shaped so it can support expenses now and bills later. It should link a source entity to:
+
+manual journal entry draft
+posted journal entry
+
+Recommended shape:
+
+accounting_source_links
+id
+sourceType (expense now; room for bill later)
+sourceId
+manualJournalEntryDraftId
+journalEntryId
+timestamps
+actor fields if useful
+unique index on (sourceType, sourceId)
+
+This becomes the canonical bridge instead of inventing separate one-off patterns for expenses and then bills.
+
+2) Generated drafts are still manual drafts
+
+Generated expense drafts are not a special new workflow type. They are standard manual journal entry drafts with:
+
+sourceType='expense'
+sourceId=<expense.id>
+
+All existing workflow controls must apply unchanged.
+
+3) Idempotency model
+
+Use deterministic idempotency for generation, parallel to the existing posting idempotency model.
+
+Recommended deterministic key:
+
+expense-draft-<expenseId>
+
+DB uniqueness must enforce this at the source-link / draft generation layer so retries and parallel attempts converge safely.
+
+4) Account selection rules
+
+Any referenced CoA account must be:
+
+active
+manual-postable
+
+Server must validate this even if UI filters correctly.
+
+Implementation order
+
+Build in this order. Do not collapse this into one giant blob without respecting dependencies.
+
+Task #51 — Expense category → CoA mapping foundation
+What & Why
+
+Expenses currently have no category field and no deterministic accounting mapping. Without this, approved expenses cannot generate journal entry drafts reliably.
+
+This task creates the category/mapping foundation that the rest of the bridge depends on.
+
+Done looks like
+Admin page for expense categories exists.
+Admins can create, edit, and deactivate categories.
+Each category has:
+unique name
+active flag
+default debit account
+one or more payment-method credit rules
+at least one default credit rule
+Missing-mapping banner/report exists.
+Existing expenses are backfilled to Uncategorized.
+Expense create/edit form gains category picker.
+Steps
+Schema
+
+Add:
+
+expense_categories
+id
+name unique
+debitAccountId FK → chart_of_accounts
+isActive
+timestamps
+actor fields if your conventions already use them
+expense_category_payment_method_rules
+id
+categoryId FK → expense_categories
+paymentMethod
+creditAccountId FK → chart_of_accounts
+isDefault
+timestamps
+nullable categoryId FK on expenses
+
+Seed:
+
+Uncategorized
+
+Backfill:
+
+existing expenses → Uncategorized
+Validation rules
+debit / credit accounts must resolve to active, manual-postable CoA rows
+reject archived/inactive/non-postable accounts server-side
+require at least one default credit rule per category
+API
+
+Admin-only:
+
+GET /accounting/expense-categories
+POST /accounting/expense-categories
+PATCH /accounting/expense-categories/:id
+POST /accounting/expense-categories/:id/deactivate
+
+Payment-method rule endpoints:
+
+GET /accounting/expense-categories/:id/payment-method-rules
+POST /accounting/expense-categories/:id/payment-method-rules
+PATCH /accounting/expense-categories/:id/payment-method-rules/:ruleId
+DELETE /accounting/expense-categories/:id/payment-method-rules/:ruleId
+
+Read-only gap report:
+
+GET /accounting/expense-categories/missing-mapping
+
+All writes must be audit-logged.
+
+UI
+
+New page:
+
+/admin/expense-categories
+
+Must include:
+
+category list
+create/edit drawer or dialog
+mapping rule editor
+missing-mapping banner/report
+
+Expense form:
+
+required category picker on new expenses
+uncategorized badge for legacy items until edited
+Relevant files
+lib/db/src/schema/expenses.ts
+lib/db/src/schema/chart_of_accounts.ts
+artifacts/api-server/src/routes/expenses.ts
+artifacts/api-server/src/routes/accounting.ts
+lib/api-spec/openapi.yaml
+artifacts/finance-portal/src/pages/expense-form.tsx
+artifacts/finance-portal/src/pages/accounting-coa-list.tsx
+Task #52 — Generate accounting draft from approved expense
+What & Why
+
+Once an expense is approved, the system should create a manual JE draft so accounting controls govern every ledger hit. No silent posting.
+
+Done looks like
+Expense approval triggers draft generation attempt.
+Exactly one draft is created per expense.
+Draft has:
+status='draft'
+sourceType='expense'
+sourceId=<expense.id>
+Draft lines:
+debit = category debit account
+credit = payment-method rule credit account
+both lines carry programId
+Memo is deterministic:
+merchant + description + expense ref
+Entry date = expenseDate
+Retry/re-approval does not duplicate drafts.
+Mapping failure sets accountingStatus='blocked' and stable block reason.
+Expense approval still succeeds even if accounting generation blocks.
+Activity log written on both sides.
+Locked behavior
+Do not auto-submit
+Do not auto-post
+Do not backfill legacy approved expenses in v1
+only new approvals trigger generation
+manual retry endpoint exists for later reruns after mapping fixes
+Steps
+Draft schema additions
+
+Add to manual_journal_entry_drafts:
+
+sourceType nullable text
+sourceId nullable integer
+
+Or, if the shared link table is used as canonical, ensure the draft still exposes enough source linkage for reads, and the uniqueness guarantee lives at the link level.
+
+Add uniqueness/idempotency guarantee:
+
+one draft per expense source
+Expense accounting fields
+
+Add to expenses:
+
+accountingStatus
+pending
+draft_created
+posted
+blocked
+not_applicable
+accountingBlockReason
+accountingGeneratedAt
+
+Legacy rows default:
+
+not_applicable
+Generator service
+
+Create:
+
+expenseDraftService.ts
+generateDraftFromExpense(expenseId, actor)
+
+Responsibilities:
+
+resolve category
+resolve payment-method rule
+validate accounts
+build deterministic payload
+create draft transactionally
+create / update accounting link row
+update expense accounting fields
+write activity log
+return structured result
+
+Stable block reason codes:
+
+missing_category
+missing_mapping
+archived_account
+non_postable_account
+invalid_payment_method_rule
+other
+Approval hook
+
+At the end of expense /approve:
+
+call generator
+approval remains successful even if generator returns blocked
+response includes accounting result for UI toast/banner
+Manual retry endpoint
+
+Add:
+
+POST /expenses/:id/regenerate-accounting-draft
+
+Admin/approver only.
+
+Relevant files
+lib/db/src/schema/manual_journal_entry_drafts.ts
+lib/db/src/schema/expenses.ts
+artifacts/api-server/src/routes/accounting.ts
+artifacts/api-server/src/routes/expenses.ts
+artifacts/api-server/src/lib/postingService.ts
+artifacts/api-server/src/lib/ensureSchema.ts
+artifacts/api-server/src/lib/activityLog.ts
+Dependency
+Depends on Task #51
+Task #53 — Two-way traceability between expenses and journal entries
+What & Why
+
+Once expense-generated drafts exist, users need one-click movement between the operational record and its accounting effect.
+
+This is a read-surface task. No new workflow logic.
+
+Done looks like
+Expense detail shows an Accounting card with:
+accounting status
+linked draft summary
+linked posted JE summary
+block reason if blocked
+one-click navigation
+Draft detail shows originating expense card when sourced from expense.
+Posted JE detail shows originating expense card by following the source link.
+JE list gets a Source column:
+Manual
+Expense #N
+JE list supports ?source=expense|manual
+Steps
+Read API additions
+
+Extend:
+
+expense detail response
+draft detail response
+JE detail response
+JE list response
+
+All must expose source-link summaries without inventing a second read model.
+
+UI
+
+Update:
+
+expense detail page
+draft detail page
+JE detail page
+JE list
+OpenAPI + codegen
+
+Update spec and regenerate typed client.
+
+Relevant files
+artifacts/api-server/src/routes/expenses.ts
+artifacts/api-server/src/routes/accounting.ts
+lib/api-spec/openapi.yaml
+artifacts/finance-portal/src/pages/expense-detail.tsx
+artifacts/finance-portal/src/pages/journal-entry-draft-detail.tsx
+artifacts/finance-portal/src/pages/journal-entries-detail.tsx
+artifacts/finance-portal/src/pages/journal-entries-list.tsx
+Dependency
+Depends on Task #52
+Task #54 — Blocked accounting queue for failed expense draft generation
+What & Why
+
+If approved expenses fail accounting draft generation, finance needs a dedicated queue to fix and retry them. Otherwise the bridge fails silently.
+
+Done looks like
+New page at /accounting/blocked-expenses
+Lists every expense with accountingStatus='blocked'
+Each row shows:
+expense ref
+date
+submitter
+merchant
+amount
+program
+category
+payment method
+human-readable block reason
+Row actions:
+edit category mapping
+retry generation
+mark not applicable (with required note)
+Bulk retry exists
+Nav badge shows blocked count
+Metrics strip shows totals by reason code
+Retry and mark-not-applicable actions are audit-logged
+Steps
+List API
+
+Add:
+
+GET /accounting/blocked-expenses
+
+Must return:
+
+paginated rows
+metrics by reason code
+
+Admin/approver only.
+
+Mark not applicable
+
+Add:
+
+POST /expenses/:id/mark-accounting-not-applicable
+
+Requires note.
+Writes activity log.
+
+Bulk retry
+
+Add:
+
+POST /accounting/blocked-expenses/retry
+
+Accepts expense ids, returns per-id result.
+
+UI
+
+New page:
+
+/accounting/blocked-expenses
+
+Must include:
+
+metrics strip
+filterable table
+row action menu
+bulk retry button
+Nav badge
+
+Lightweight count endpoint or extend existing accounting summary endpoint.
+
+Relevant files
+artifacts/api-server/src/routes/expenses.ts
+artifacts/api-server/src/routes/accounting.ts
+lib/api-spec/openapi.yaml
+artifacts/finance-portal/src/components/AppNav.tsx
+artifacts/finance-portal/src/pages/expenses-list.tsx
+Dependency
+Depends on Task #52
+Cross-task test requirements
+
+Add live tests and evidence. This phase is not complete without a real regression battery.
+
+New acceptance coverage required
+Task #51
+category CRUD
+mapping-rule CRUD
+invalid CoA account rejected
+missing-mapping endpoint accurate
+backfill to Uncategorized works
+expense form requires category on new submissions
+Task #52
+approving an expense creates exactly one draft
+re-approve / retry does not duplicate
+mapping failure sets blocked status and reason
+generated draft stays in draft
+generated draft can still go through submit/approve/post using existing workflow
+activity log rows exist on both expense and draft sides
+Task #53
+expense detail shows draft / JE linkage correctly
+draft detail shows originating expense
+JE detail shows originating expense
+JE list source filter works
+Task #54
+blocked queue lists blocked expenses accurately
+retry works after fixing mapping
+bulk retry returns per-id results
+mark not applicable requires note
+nav badge count correct
+Regression suites that must remain green
+Step 8
+Step 8 edge cases
+Step 9
+Task #25
+Task 25A
+Task #29B / #37 workflow suites
+UI/accounting workflow tests already accepted
+Final sequencing
+
+Do this in order:
+
+Task #51 — category/mapping foundation
+Task #52 — generate draft from approved expense
+Task #53 — two-way traceability
+Task #54 — blocked accounting queue
+
+After these pass, then — and only then — it makes sense to move to:
+
+bill accounting bridge
+report tie-out/cutover
+deeper copilot reconciliation
+One-line implementation rule
+
+Do not invent a parallel accounting path. Approved expenses must generate controlled accounting drafts that flow through the exact same submit → approve → post control chain already accepted for manual journal entries.
