@@ -2667,6 +2667,34 @@ export const GetReconciliationReportResponse = zod.object({
     .describe(
       "Per-journal-entry integrity tie-out section. Walks every posted\/reversed JE in the reconciliation window and surfaces localized corruption that aggregate checks would miss.\n",
     ),
+  independentNetIncomeCheck: zod
+    .object({
+      checkCode: zod.enum(["net_income_matches_equity_movement"]),
+      status: zod.enum(["pass", "fail", "warning"]),
+      shortMessage: zod.string(),
+      pnlNetIncomeCents: zod.number(),
+      equityMovementNetIncomeCents: zod.number(),
+      deltaCents: zod.number(),
+      includedEquityAccounts: zod.array(
+        zod.object({
+          id: zod.number(),
+          code: zod.string(),
+          name: zod.string(),
+        }),
+      ),
+      excludedEquityAccounts: zod.array(
+        zod.object({
+          id: zod.number(),
+          code: zod.string(),
+          name: zod.string(),
+          exclusionReason: zod.string(),
+        }),
+      ),
+      limitationNote: zod.string().nullable(),
+    })
+    .describe(
+      "Structurally-independent cross-check between P&L net income (computed directly from revenue\/expense lines) and equity-account movement (computed directly from equity-account lines), without going through the shared computeLedgerSummary helper. Returns warning when the current chart of accounts cannot support a true independent derivation (e.g. no Retained Earnings \/ period-close mechanism).\n",
+    ),
 });
 
 /**

@@ -146,6 +146,10 @@ function ReconciliationCard({
               perEntry={data.perEntry}
               fmtDelta={fmtDelta}
             />
+            <IndependentNetIncomeSection
+              check={data.independentNetIncomeCheck}
+              fmtDelta={fmtDelta}
+            />
           </>
         )}
       </CardContent>
@@ -279,6 +283,208 @@ function PerEntryIntegritySection({
             </button>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Independent net-income / equity-movement validation subsection of the
+ * Reconciliation card. Surfaces a structurally-independent cross-check
+ * between P&L net income and equity-account movement. Returns warning when
+ * the chart of accounts cannot support a true independent derivation
+ * (e.g. no Retained Earnings / period-close mechanism). Defensive: renders
+ * nothing if the API response somehow lacks the field.
+ */
+function IndependentNetIncomeSection({
+  check,
+  fmtDelta,
+}: {
+  check:
+    | {
+        checkCode: string;
+        status: "pass" | "fail" | "warning";
+        shortMessage: string;
+        pnlNetIncomeCents: number;
+        equityMovementNetIncomeCents: number;
+        deltaCents: number;
+        includedEquityAccounts: Array<{ id: number; code: string; name: string }>;
+        excludedEquityAccounts: Array<{
+          id: number;
+          code: string;
+          name: string;
+          exclusionReason: string;
+        }>;
+        limitationNote: string | null;
+      }
+    | undefined;
+  fmtDelta: (cents: number) => string;
+}) {
+  const [showAccounts, setShowAccounts] = useState(false);
+  if (!check) return null;
+  const badgeCls =
+    check.status === "pass"
+      ? "bg-emerald-100 text-emerald-800"
+      : check.status === "fail"
+      ? "bg-red-100 text-red-800"
+      : "bg-amber-100 text-amber-800";
+  const badgeLabel =
+    check.status === "pass"
+      ? "Pass"
+      : check.status === "fail"
+      ? "Fail"
+      : "Warning";
+  return (
+    <div
+      data-testid="reconciliation-independent-ni"
+      className="mt-6 border-t border-border/60 pt-4"
+    >
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold">
+            Independent net-income check
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            P&amp;L net income computed directly from revenue/expense lines,
+            cross-checked against equity-account movement — without going
+            through the shared ledger-summary helper.
+          </p>
+        </div>
+        <span
+          data-testid="reconciliation-independent-ni-status"
+          className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${badgeCls}`}
+        >
+          {badgeLabel}
+        </span>
+      </div>
+      <div className="mb-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+        <div className="rounded-md border border-border/60 px-3 py-2">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">
+            P&amp;L net income
+          </div>
+          <div
+            data-testid="reconciliation-independent-ni-pnl"
+            className="font-mono text-base"
+          >
+            {fmtDelta(check.pnlNetIncomeCents)}
+          </div>
+        </div>
+        <div className="rounded-md border border-border/60 px-3 py-2">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">
+            Equity movement
+          </div>
+          <div
+            data-testid="reconciliation-independent-ni-equity"
+            className="font-mono text-base"
+          >
+            {fmtDelta(check.equityMovementNetIncomeCents)}
+          </div>
+        </div>
+        <div
+          className={`rounded-md border px-3 py-2 ${
+            check.status === "fail"
+              ? "border-red-300 bg-red-50"
+              : "border-border/60"
+          }`}
+        >
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">
+            Delta
+          </div>
+          <div
+            data-testid="reconciliation-independent-ni-delta"
+            className={`font-mono text-base ${
+              check.deltaCents !== 0 && check.status === "fail"
+                ? "text-red-700"
+                : ""
+            }`}
+          >
+            {fmtDelta(check.deltaCents)}
+          </div>
+        </div>
+      </div>
+      <div
+        className={`rounded-md border px-3 py-2 text-sm ${
+          check.status === "pass"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : check.status === "fail"
+            ? "border-red-200 bg-red-50 text-red-800"
+            : "border-amber-200 bg-amber-50 text-amber-800"
+        }`}
+      >
+        <div className="font-medium">{check.shortMessage}</div>
+        {check.limitationNote && (
+          <p
+            data-testid="reconciliation-independent-ni-limitation"
+            className="mt-1 text-xs leading-relaxed"
+          >
+            <span className="font-semibold">Limitation:</span>{" "}
+            {check.limitationNote}
+          </p>
+        )}
+      </div>
+      {(check.includedEquityAccounts.length > 0 ||
+        check.excludedEquityAccounts.length > 0) && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setShowAccounts((v) => !v)}
+            className="text-xs font-medium text-blue-700 underline-offset-2 hover:underline"
+            data-testid="reconciliation-independent-ni-accounts-toggle"
+            aria-expanded={showAccounts}
+          >
+            {showAccounts ? "Hide" : "Show"} equity accounts (
+            {check.includedEquityAccounts.length} included
+            {check.excludedEquityAccounts.length > 0
+              ? `, ${check.excludedEquityAccounts.length} excluded`
+              : ""}
+            )
+          </button>
+          {showAccounts && (
+            <div className="mt-2 space-y-3 text-xs">
+              {check.includedEquityAccounts.length > 0 && (
+                <div>
+                  <div className="mb-1 font-semibold text-muted-foreground">
+                    Included
+                  </div>
+                  <ul className="space-y-1">
+                    {check.includedEquityAccounts.map((a) => (
+                      <li
+                        key={`inc-${a.id}`}
+                        className="flex gap-2 font-mono"
+                        data-testid={`reconciliation-independent-ni-included-${a.id}`}
+                      >
+                        <span className="text-muted-foreground">{a.code}</span>
+                        <span>{a.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {check.excludedEquityAccounts.length > 0 && (
+                <div>
+                  <div className="mb-1 font-semibold text-muted-foreground">
+                    Excluded
+                  </div>
+                  <ul className="space-y-1">
+                    {check.excludedEquityAccounts.map((a) => (
+                      <li
+                        key={`exc-${a.id}`}
+                        className="flex gap-2 font-mono"
+                        data-testid={`reconciliation-independent-ni-excluded-${a.id}`}
+                      >
+                        <span className="text-muted-foreground">{a.code}</span>
+                        <span>{a.name}</span>
+                        <span className="text-muted-foreground">
+                          — {a.exclusionReason}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

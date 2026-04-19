@@ -1331,6 +1331,51 @@ export interface ReconciliationPerEntrySummary {
   failingEntries: ReconciliationPerEntryFailure[];
 }
 
+export type ReconciliationIndependentNetIncomeCheckCheckCode =
+  (typeof ReconciliationIndependentNetIncomeCheckCheckCode)[keyof typeof ReconciliationIndependentNetIncomeCheckCheckCode];
+
+export const ReconciliationIndependentNetIncomeCheckCheckCode = {
+  net_income_matches_equity_movement: "net_income_matches_equity_movement",
+} as const;
+
+export type ReconciliationIndependentNetIncomeCheckStatus =
+  (typeof ReconciliationIndependentNetIncomeCheckStatus)[keyof typeof ReconciliationIndependentNetIncomeCheckStatus];
+
+export const ReconciliationIndependentNetIncomeCheckStatus = {
+  pass: "pass",
+  fail: "fail",
+  warning: "warning",
+} as const;
+
+export interface ReconciliationIncludedEquityAccount {
+  id: number;
+  code: string;
+  name: string;
+}
+
+export interface ReconciliationExcludedEquityAccount {
+  id: number;
+  code: string;
+  name: string;
+  exclusionReason: string;
+}
+
+/**
+ * Structurally-independent cross-check between P&L net income (computed directly from revenue/expense lines) and equity-account movement (computed directly from equity-account lines), without going through the shared computeLedgerSummary helper. Returns warning when the current chart of accounts cannot support a true independent derivation (e.g. no Retained Earnings / period-close mechanism).
+
+ */
+export interface ReconciliationIndependentNetIncomeCheck {
+  checkCode: ReconciliationIndependentNetIncomeCheckCheckCode;
+  status: ReconciliationIndependentNetIncomeCheckStatus;
+  shortMessage: string;
+  pnlNetIncomeCents: number;
+  equityMovementNetIncomeCents: number;
+  deltaCents: number;
+  includedEquityAccounts: ReconciliationIncludedEquityAccount[];
+  excludedEquityAccounts: ReconciliationExcludedEquityAccount[];
+  limitationNote: string | null;
+}
+
 export interface ReconciliationReport {
   generatedAt: string;
   fromDate: string | null;
@@ -1340,6 +1385,7 @@ export interface ReconciliationReport {
   warningCount: number;
   checks: ReconciliationCheck[];
   perEntry: ReconciliationPerEntrySummary;
+  independentNetIncomeCheck: ReconciliationIndependentNetIncomeCheck;
 }
 
 export interface AccountingDashboardOpenPeriod {

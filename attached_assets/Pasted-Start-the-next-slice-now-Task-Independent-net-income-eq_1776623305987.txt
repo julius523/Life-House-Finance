@@ -1,0 +1,157 @@
+Start the next slice now.
+
+Task: Independent net-income / equity-movement validation
+
+Why this next:
+- The reconciliation engine already proves most same-source ledger math.
+- The next real confidence upgrade is an independent cross-check that does not merely restate the same formulas.
+- This specifically hardens the weakest area the prior review called out: proving current-period net income through balance-sheet movement, not just through the P&L aggregation path.
+
+Scope
+This slice has 4 parts:
+1. Add an independent net-income / equity-movement reconciliation check to the backend.
+2. Surface that check clearly in the Reports reconciliation card.
+3. Make the check explainable when it fails.
+4. Keep the implementation strictly read-only and ledger-source only.
+
+Do not broaden into copilot logic.
+Do not add write flows.
+Do not start unmapped-lines remediation in this slice.
+Do not weaken or replace the existing reconciliation checks.
+
+Business rule to implement
+For a selected ledger reporting window:
+- Current-period net income from the P&L path should equal the period movement in equity after removing non-P&L equity activity.
+- The goal is an actually independent check, not a tautology built from the same already-summed totals.
+
+Required validation model
+Compute two values independently:
+
+A. P&L-derived net income
+- Revenue minus expense for the selected date range.
+- Use the same posted/reversed status semantics and entry_date filters already used by ledger reporting.
+
+B. Equity-movement-derived net income
+- Measure the movement in equity across the selected period using journal-entry lines.
+- Exclude direct equity activity that should not count as operating net income.
+- At minimum exclude owner contributions, distributions, opening balance / migration equity, and any other explicitly non-income equity movements if they can be identified from account classification or seeded system accounts.
+- If your current Chart of Accounts model supports account types/subtypes, use those classifications rather than memo heuristics.
+- If exclusions are not perfectly inferable from current schema, implement the strongest deterministic version the current data model supports and clearly encode its limitations in the response.
+
+Important:
+- This check must be meaningfully independent.
+- Do not ship a fake proof where both sides are derived from the same already-aggregated helper.
+- If a perfect independent derivation is impossible with the current schema, return a warning state rather than pretending it passed.
+
+Acceptance criteria
+
+A. Backend reconciliation endpoint is extended
+Extend GET /reports/reconciliation to add a new machine-readable check for independent net-income validation.
+
+Required new check code:
+- net_income_matches_equity_movement
+
+Return shape requirements:
+- Keep the existing response compatible.
+- Add a dedicated structured payload for this check with enough detail to explain the result.
+- Include at minimum:
+  - status: pass | fail | warning
+  - checkCode
+  - shortMessage
+  - pnlNetIncomeCents
+  - equityMovementNetIncomeCents
+  - deltaCents
+  - includedEquityAccounts[] with id, code, name where practical
+  - excludedEquityAccounts[] with id, code, name, exclusionReason where practical
+  - limitationNote when status=warning or when exclusions are only partially deterministic
+
+Behavior rules:
+- pass when delta is exactly zero cents
+- fail when both sides are computable and delta != 0
+- warning when the current data model does not allow a trustworthy independent derivation
+- never silently downgrade a fail into a warning just because the numbers are ugly
+
+B. Use a truly independent derivation path
+Implementation expectations:
+- Reuse low-level ledger line query primitives if helpful.
+- Do not reuse the already-computed “currentPeriodNetIncome” summary field as the second side of the comparison.
+- The equity-movement side must come from account activity / line-level movement, not from the same summary object being checked against itself.
+- If needed, compute:
+  - opening equity position before fromDate
+  - closing equity position through toDate
+  - period movement
+  - then remove explicitly excluded direct-to-equity activity
+- Prefer deterministic account-based exclusions over memo-based guesses.
+
+C. Reports UI
+In the Reconciliation card on /reports:
+- Show the new check alongside the other checks.
+- On expand or details view, show:
+  - P&L net income
+  - equity-movement-derived net income
+  - delta
+  - whether the result is pass/fail/warning
+  - a short human explanation
+- If warning, show the limitation clearly instead of vague language.
+- Keep this ledger-mode only.
+- No white-screening if the backend omits optional detail fields.
+
+D. Explainability
+If the check fails or warns, the response/UI must make it obvious why:
+- direct equity postings excluded
+- missing classification support
+- ambiguous equity accounts
+- other deterministic reason
+Do not force finance users to reverse-engineer the failure from raw numbers alone.
+
+Out of scope
+- Remapping or editing Chart of Accounts classifications
+- Admin workflow to mark equity accounts as “operational” vs “non-operational” unless absolutely required for correctness
+- Copilot suggestions
+- Automated fixing
+- Changes to posting flows
+- Historical backfill cleanup
+- Report exports for this specific detail unless trivial
+
+Implementation notes
+Backend:
+- Extend the existing reconciliation module/route, not a parallel endpoint.
+- Keep admin/approver auth exactly as today.
+- Follow the same date/status semantics as TB/P&L/BS/account-activity.
+- If there are seeded/system equity accounts that represent opening balance or migration offsets, explicitly exclude them by deterministic rule and name that rule in code/comments.
+- If current schema cannot distinguish owner contributions/distributions cleanly, return warning with the exact limitation rather than inventing certainty.
+
+Frontend:
+- Continue using typed hooks only.
+- Keep the reconciliation card readable.
+- No giant wall of JSON.
+- A concise explanation block is better than a giant table here.
+
+Testing / validation
+1. Happy path
+- Use a dataset where the check can compute cleanly.
+- Verify the endpoint returns the new check and the UI renders it.
+
+2. Failure path
+- Create or simulate a controlled dataset where P&L net income and equity movement diverge.
+- Verify status=fail and deltaCents reflects the mismatch.
+
+3. Warning path
+- Create or identify a scenario where the current schema cannot make a trustworthy independent derivation.
+- Verify status=warning with limitationNote populated.
+
+4. Regression
+- Existing reconciliation checks still render and behave unchanged.
+- Reports page still handles bad/partial/inverted dates without crashing.
+- Per-entry integrity subsection still works.
+
+Deliverable format
+When you report back, give:
+1. What changed
+2. Exact files touched
+3. The derivation method used for the equity-movement side
+4. Acceptance results for pass/fail/warning paths
+5. Any truly new deferred follow-ups
+
+Revision rule
+If you need to revise the plan, give the full revised prompt in one place, not fragments.

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ReconciliationCheck } from "./reconciliationCheck";
+import type { ReconciliationIndependentNetIncomeCheck } from "./reconciliationIndependentNetIncomeCheck";
 import type { ReconciliationPerEntrySummary } from "./reconciliationPerEntrySummary";
 
 export interface ReconciliationReport {
@@ -17,4 +18,5 @@ export interface ReconciliationReport {
   warningCount: number;
   checks: ReconciliationCheck[];
   perEntry: ReconciliationPerEntrySummary;
+  independentNetIncomeCheck: ReconciliationIndependentNetIncomeCheck;
 }

@@ -5578,6 +5578,8 @@ components:
             $ref: "#/components/schemas/ReconciliationCheck"
         perEntry:
           $ref: "#/components/schemas/ReconciliationPerEntrySummary"
+        independentNetIncomeCheck:
+          $ref: "#/components/schemas/ReconciliationIndependentNetIncomeCheck"
       required:
         [
           generatedAt,
@@ -5588,6 +5590,72 @@ components:
           warningCount,
           checks,
           perEntry,
+          independentNetIncomeCheck,
+        ]
+
+    ReconciliationIncludedEquityAccount:
+      type: object
+      properties:
+        id: { type: integer }
+        code: { type: string }
+        name: { type: string }
+      required: [id, code, name]
+
+    ReconciliationExcludedEquityAccount:
+      type: object
+      properties:
+        id: { type: integer }
+        code: { type: string }
+        name: { type: string }
+        exclusionReason: { type: string }
+      required: [id, code, name, exclusionReason]
+
+    ReconciliationIndependentNetIncomeCheck:
+      type: object
+      description: >
+        Structurally-independent cross-check between P&L net income (computed
+        directly from revenue/expense lines) and equity-account movement
+        (computed directly from equity-account lines), without going through
+        the shared computeLedgerSummary helper. Returns warning when the
+        current chart of accounts cannot support a true independent
+        derivation (e.g. no Retained Earnings / period-close mechanism).
+      properties:
+        checkCode:
+          type: string
+          enum: [net_income_matches_equity_movement]
+        status:
+          type: string
+          enum: [pass, fail, warning]
+        shortMessage:
+          type: string
+        pnlNetIncomeCents:
+          type: integer
+        equityMovementNetIncomeCents:
+          type: integer
+        deltaCents:
+          type: integer
+        includedEquityAccounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReconciliationIncludedEquityAccount"
+        excludedEquityAccounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReconciliationExcludedEquityAccount"
+        limitationNote:
+          type: string
+          nullable: true
+      required:
+        [
+          checkCode,
+          status,
+          shortMessage,
+          pnlNetIncomeCents,
+          equityMovementNetIncomeCents,
+          deltaCents,
+          includedEquityAccounts,
+          excludedEquityAccounts,
+          limitationNote,
         ]
 
     ReconciliationPerEntryFailure:

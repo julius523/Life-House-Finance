@@ -1374,6 +1374,205 @@ router.get("/reports/reconciliation", async (req, res): Promise<void> => {
   const failingEntryCount = new Set(failingEntries.map((f) => f.journalEntryId)).size;
   const perEntryOk = failingEntries.length === 0;
 
+  // -------------------------------------------------------------------------
+  // Independent net-income / equity-movement validation (Task #66 follow-on).
+  //
+  // Side A — pnlNetIncomeCents — is computed by direct SQL aggregation over
+  //   revenue + expense lines in [fromDate, toDate]. It deliberately does NOT
+  //   reuse `ls.totalIncome - ls.totalExpenses` from `computeLedgerSummary`,
+  //   because that would make the comparison a tautology of the same helper.
+  //
+  // Side B — equityMovementNetIncomeCents — is computed as the change in raw
+  //   equity-account balances from "as-of fromDate-1" to "as-of toDate" using
+  //   line-level aggregation on type='equity' accounts. In a chart of
+  //   accounts that supports period-close (a Retained Earnings / Accumulated
+  //   Earnings account that absorbs P&L each close), this movement equals
+  //   the net income for the window — so any divergence indicates either a
+  //   misclassified posting (P&L line landed on equity, or vice versa) or an
+  //   unbalanced entry that escaped the per-entry checks.
+  //
+  // This codebase ships a nonprofit chart with only "Net Assets" equity
+  // accounts (no Retained Earnings, no closing JEs). In that mode the check
+  // returns `status='warning'` with a `limitationNote` rather than pretending
+  // to pass, per the Task #66 brief: "If a perfect independent derivation is
+  // impossible with the current schema, return a warning state rather than
+  // pretending it passed." Once a Retained Earnings account is added to the
+  // chart of accounts, the same code path automatically upgrades to a real
+  // pass/fail check with no further code changes.
+  // -------------------------------------------------------------------------
+
+  // Side A: independent P&L net income from raw revenue/expense lines.
+  const pnlConds = [sql`${journalEntriesTable.status} in ('posted', 'reversed')`];
+  if (fromDate) pnlConds.push(gte(journalEntriesTable.entryDate, fromDate));
+  if (toDate) pnlConds.push(lte(journalEntriesTable.entryDate, toDate));
+  const pnlRows = await db
+    .select({
+      type: chartOfAccountsTable.type,
+      debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+    })
+    .from(journalEntryLinesTable)
+    .innerJoin(
+      journalEntriesTable,
+      eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+    )
+    .innerJoin(
+      chartOfAccountsTable,
+      eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
+    )
+    .where(
+      and(
+        ...pnlConds,
+        sql`${chartOfAccountsTable.type} in ('revenue', 'expense', 'contra_revenue')`,
+      ),
+    )
+    .groupBy(chartOfAccountsTable.type);
+  let pnlNetIncomeCents = 0;
+  for (const row of pnlRows) {
+    const d = Number(row.debits);
+    const c = Number(row.credits);
+    if (row.type === "revenue") pnlNetIncomeCents += c - d;
+    else if (row.type === "contra_revenue") pnlNetIncomeCents -= c - d;
+    else if (row.type === "expense") pnlNetIncomeCents -= d - c;
+  }
+
+  // Side B: equity-movement net income from raw equity-account lines.
+  // closing balance @ toDate (or all-time if toDate is unset)
+  const equityClosingConds = [
+    sql`${journalEntriesTable.status} in ('posted', 'reversed')`,
+    sql`${chartOfAccountsTable.type} = 'equity'`,
+  ];
+  if (toDate) equityClosingConds.push(lte(journalEntriesTable.entryDate, toDate));
+  const equityClosingRows = await db
+    .select({
+      debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+    })
+    .from(journalEntryLinesTable)
+    .innerJoin(
+      journalEntriesTable,
+      eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+    )
+    .innerJoin(
+      chartOfAccountsTable,
+      eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
+    )
+    .where(and(...equityClosingConds));
+  const closingRawEquity =
+    Number(equityClosingRows[0]?.credits ?? 0) -
+    Number(equityClosingRows[0]?.debits ?? 0);
+
+  // opening balance immediately before fromDate (0 if fromDate is unset, since
+  // there is no "before" the start of all time).
+  let openingRawEquity = 0;
+  if (fromDate) {
+    const equityOpeningRows = await db
+      .select({
+        debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+        credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      })
+      .from(journalEntryLinesTable)
+      .innerJoin(
+        journalEntriesTable,
+        eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+      )
+      .innerJoin(
+        chartOfAccountsTable,
+        eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
+      )
+      .where(
+        and(
+          sql`${journalEntriesTable.status} in ('posted', 'reversed')`,
+          sql`${chartOfAccountsTable.type} = 'equity'`,
+          sql`${journalEntriesTable.entryDate} < ${fromDate}`,
+        ),
+      );
+    openingRawEquity =
+      Number(equityOpeningRows[0]?.credits ?? 0) -
+      Number(equityOpeningRows[0]?.debits ?? 0);
+  }
+  const equityMovementNetIncomeCents = closingRawEquity - openingRawEquity;
+
+  // Detect whether this CoA supports a true independent derivation.
+  // Heuristic is deterministic — purely on type/subtype/name patterns, no
+  // memo guessing. If any of these accounts exist, period-close postings
+  // can land there and the equity-movement comparison becomes meaningful.
+  const equityAccountRows = await db
+    .select({
+      id: chartOfAccountsTable.id,
+      code: chartOfAccountsTable.code,
+      name: chartOfAccountsTable.name,
+      subtype: chartOfAccountsTable.subtype,
+    })
+    .from(chartOfAccountsTable)
+    .where(eq(chartOfAccountsTable.type, "equity"))
+    .orderBy(asc(chartOfAccountsTable.code));
+
+  const isRetainedEarnings = (a: { code: string; name: string; subtype: string | null }) =>
+    a.subtype === "retained_earnings" ||
+    /retained earnings/i.test(a.name) ||
+    /accumulated earnings/i.test(a.name) ||
+    /current period earnings/i.test(a.name);
+
+  const includedEquityAccounts = equityAccountRows.map((a) => ({
+    id: a.id,
+    code: a.code,
+    name: a.name,
+  }));
+  // No deterministic schema-based way (yet) to flag any equity account as
+  // "non-operational" (e.g. owner contributions / distributions). The brief
+  // explicitly says: prefer schema-based exclusions over memo heuristics, so
+  // we list none. Once such a marker exists in the schema this list fills in.
+  const excludedEquityAccounts: Array<{
+    id: number;
+    code: string;
+    name: string;
+    exclusionReason: string;
+  }> = [];
+
+  const hasRetainedEarnings = equityAccountRows.some(isRetainedEarnings);
+
+  const independentDelta =
+    pnlNetIncomeCents - equityMovementNetIncomeCents;
+
+  type IndependentNiStatus = "pass" | "fail" | "warning";
+  let independentStatus: IndependentNiStatus;
+  let independentShortMessage: string;
+  let independentLimitationNote: string | null = null;
+  if (!hasRetainedEarnings) {
+    independentStatus = "warning";
+    independentShortMessage =
+      "Independent check is structurally limited in this chart of accounts.";
+    independentLimitationNote =
+      "This chart of accounts has no Retained Earnings (or equivalent) account, " +
+      "and the codebase does not perform period-close postings that roll P&L " +
+      "into equity. As a result, equity-account movement reflects only direct " +
+      "Net Assets activity (contributions, reclassifications) rather than " +
+      "accumulated net income, so it is not directly comparable to P&L net " +
+      "income. To enable a true pass/fail check, add a Retained Earnings " +
+      "account (subtype 'retained_earnings' or a name matching " +
+      "/retained earnings|accumulated earnings|current period earnings/i).";
+  } else if (independentDelta === 0) {
+    independentStatus = "pass";
+    independentShortMessage =
+      "P&L net income equals equity movement (independent derivation).";
+  } else {
+    independentStatus = "fail";
+    independentShortMessage = `P&L net income differs from equity movement by ${(independentDelta / 100).toFixed(2)}.`;
+  }
+
+  const independentNetIncomeCheck = {
+    checkCode: "net_income_matches_equity_movement" as const,
+    status: independentStatus,
+    shortMessage: independentShortMessage,
+    pnlNetIncomeCents,
+    equityMovementNetIncomeCents,
+    deltaCents: independentDelta,
+    includedEquityAccounts,
+    excludedEquityAccounts,
+    limitationNote: independentLimitationNote,
+  };
+
   // Promote the per-entry pass/fail into the aggregate `checks` list so the
   // overall `allOk` flag and the existing UI status badge stay accurate
   // without needing to know about the per-entry section specifically.
@@ -1383,6 +1582,21 @@ router.get("/reports/reconciliation", async (req, res): Promise<void> => {
     0,
     perEntryOk ? 0 : failingEntries.length,
   );
+
+  // Promote the independent NI cross-check into the aggregate `checks` list
+  // so `allOk` / errorCount / warningCount stay honest. Use severity=warning
+  // when the chart of accounts can't structurally support a true derivation
+  // (no Retained Earnings); error when it can but the numbers disagree.
+  checks.push({
+    id: "net_income_matches_equity_movement",
+    label:
+      "Independent net income matches equity movement (P&L vs equity-account close − open)",
+    expectedCents: pnlNetIncomeCents,
+    actualCents: equityMovementNetIncomeCents,
+    diffCents: independentDelta,
+    ok: independentStatus === "pass",
+    severity: independentStatus === "fail" ? "error" : "warning",
+  });
 
   const allOk = checks.every((c) => c.ok);
   const errorCount = checks.filter((c) => !c.ok && c.severity === "error").length;
@@ -1401,6 +1615,7 @@ router.get("/reports/reconciliation", async (req, res): Promise<void> => {
       failingEntryCount,
       failingEntries,
     },
+    independentNetIncomeCheck,
   });
 });
 
