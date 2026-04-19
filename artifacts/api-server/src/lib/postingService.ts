@@ -616,6 +616,20 @@ export type ManualJournalEntryInput = {
   entryDate: string;
   memo: string;
   lines: unknown;
+  /**
+   * Task 25A — required for the HTTP route. Service-level callers (tests,
+   * future internal flows) may pass null to opt out of idempotency, but
+   * the route layer enforces presence. When set, two requests with the
+   * same key MUST resolve to the same JE (replay) or 409 (conflict).
+   */
+  idempotencyKey?: string | null;
+  /**
+   * Task 25A — caller-computed stable fingerprint of the logical payload
+   * (date + memo + normalized sorted lines). Used to detect "same key,
+   * different payload" conflicts on replay. The route computes this so
+   * the service does not have to know the wire format.
+   */
+  fingerprint?: string | null;
 };
 
 export type PostManualJournalEntryResult =
@@ -623,6 +637,11 @@ export type PostManualJournalEntryResult =
       kind: "ok";
       journalEntry: JournalEntryRow;
       lines: JournalEntryLineRow[];
+      /**
+       * Task 25A — true when this call resolved to a previously-posted JE
+       * via the idempotency key (no new row, no new activity_log row).
+       */
+      idempotent: boolean;
     }
   | { kind: "forbidden"; reason: string }
   | { kind: "invalid_payload"; reason: string }
@@ -640,6 +659,15 @@ export type PostManualJournalEntryResult =
       kind: "period_locked";
       entryDate: string;
       periodLabel: string | null;
+    }
+  | {
+      /**
+       * Task 25A — same idempotency key was previously used for a
+       * meaningfully different payload. The route maps this to 409.
+       */
+      kind: "idempotency_conflict";
+      idempotencyKey: string;
+      existingJournalEntryId: number;
     };
 
 export async function postManualJournalEntry(
@@ -663,7 +691,29 @@ export async function postManualJournalEntry(
     return { kind: "invalid_payload", reason: "Memo is required." };
   }
 
-  return db.transaction(async (tx) => {
+  const idempotencyKey =
+    typeof input.idempotencyKey === "string" && input.idempotencyKey.length > 0
+      ? input.idempotencyKey
+      : null;
+  const fingerprint =
+    typeof input.fingerprint === "string" && input.fingerprint.length > 0
+      ? input.fingerprint
+      : null;
+
+  // Task 25A — fast-path replay check. If a JE with this idempotency key
+  // already exists, decide replay-vs-conflict here without doing any work.
+  // The DB-level partial unique index is the authoritative race guard
+  // (see the catch block below) — this pre-check just avoids the wasted
+  // transaction in the common, sequential retry case.
+  if (idempotencyKey) {
+    const existing = await loadJournalEntryByIdempotencyKey(idempotencyKey);
+    if (existing) {
+      return resolveIdempotencyMatch(existing, fingerprint, idempotencyKey);
+    }
+  }
+
+  try {
+    return await db.transaction(async (tx) => {
     const sanitized = await sanitizeLines(tx, input.lines);
     if (!sanitized.ok) {
       if ("kind" in sanitized && sanitized.kind === "invalid_account") {
@@ -735,6 +785,14 @@ export async function postManualJournalEntry(
           memo: ln.memo,
         })),
       },
+      // Task 25A — freeze the idempotency key + fingerprint inside the
+      // evidence snapshot so an auditor can prove what payload the key
+      // was first bound to. The same fingerprint is recomputed by the
+      // route on every request and compared against this value to detect
+      // "same key, different payload" replay conflicts.
+      idempotency: idempotencyKey
+        ? { key: idempotencyKey, fingerprint }
+        : null,
       snapshot_taken_at: new Date().toISOString(),
     };
 
@@ -753,6 +811,7 @@ export async function postManualJournalEntry(
         assistantMessageId: null,
         approverUserId: actor.id,
         evidenceSnapshot,
+        idempotencyKey,
       })
       .returning();
 
@@ -785,8 +844,73 @@ export async function postManualJournalEntry(
       kind: "ok" as const,
       journalEntry: je!,
       lines: lineRows,
+      idempotent: false,
     };
-  });
+    });
+  } catch (err) {
+    // Task 25A — race-safe idempotency. If two parallel requests with the
+    // same key reach the INSERT at the same time, exactly one wins and
+    // the other gets a unique-violation on `journal_entries_idempotency_key_uniq`.
+    // We catch ONLY that specific code, then re-resolve through the same
+    // replay/conflict path the fast-path uses.
+    if (idempotencyKey && isUniqueViolationOn(err, "journal_entries_idempotency_key_uniq")) {
+      const existing = await loadJournalEntryByIdempotencyKey(idempotencyKey);
+      if (existing) {
+        return resolveIdempotencyMatch(existing, fingerprint, idempotencyKey);
+      }
+    }
+    throw err;
+  }
+}
+
+// Task 25A helpers --------------------------------------------------------
+async function loadJournalEntryByIdempotencyKey(
+  key: string,
+): Promise<{ je: JournalEntryRow; lines: JournalEntryLineRow[] } | null> {
+  const [je] = await db
+    .select()
+    .from(journalEntriesTable)
+    .where(eq(journalEntriesTable.idempotencyKey, key));
+  if (!je) return null;
+  const lines = await db
+    .select()
+    .from(journalEntryLinesTable)
+    .where(eq(journalEntryLinesTable.journalEntryId, je.id));
+  return { je, lines };
+}
+
+function resolveIdempotencyMatch(
+  existing: { je: JournalEntryRow; lines: JournalEntryLineRow[] },
+  newFingerprint: string | null,
+  idempotencyKey: string,
+): PostManualJournalEntryResult {
+  const storedFingerprint =
+    (existing.je.evidenceSnapshot as { idempotency?: { fingerprint?: string | null } } | null)
+      ?.idempotency?.fingerprint ?? null;
+  // If the route did not supply a fingerprint (service-direct caller), be
+  // strict and treat the replay as a match. The route always supplies one.
+  if (newFingerprint != null && storedFingerprint != null && storedFingerprint !== newFingerprint) {
+    return {
+      kind: "idempotency_conflict" as const,
+      idempotencyKey,
+      existingJournalEntryId: existing.je.id,
+    };
+  }
+  return {
+    kind: "ok" as const,
+    journalEntry: existing.je,
+    lines: existing.lines,
+    idempotent: true,
+  };
+}
+
+function isUniqueViolationOn(err: unknown, indexName: string): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as { code?: string; constraint?: string; message?: string };
+  if (e.code !== "23505") return false;
+  if (e.constraint === indexName) return true;
+  // Some pg drivers don't surface `constraint`; fall back to message match.
+  return typeof e.message === "string" && e.message.includes(indexName);
 }
 
 // ---------------------------------------------------------------------------

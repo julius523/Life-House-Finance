@@ -1,0 +1,114 @@
+{
+  "results": [
+    {
+      "id": "25A-1",
+      "desc": "Missing Idempotency-Key header → 400 IDEMPOTENCY_KEY_REQUIRED",
+      "pass": true,
+      "evidence": {
+        "status": 400,
+        "code": "IDEMPOTENCY_KEY_REQUIRED"
+      }
+    },
+    {
+      "id": "25A-2",
+      "desc": "Non-UUID Idempotency-Key → 400 IDEMPOTENCY_KEY_INVALID",
+      "pass": true,
+      "evidence": {
+        "status": 400,
+        "code": "IDEMPOTENCY_KEY_INVALID"
+      }
+    },
+    {
+      "id": "25A-3",
+      "desc": "Same key + same payload → second request 200 idempotent, same JE id, no duplicate",
+      "pass": true,
+      "evidence": {
+        "first": {
+          "status": 201,
+          "idempotent": false,
+          "jeId": 32
+        },
+        "replay": {
+          "status": 200,
+          "idempotent": true,
+          "jeId": 32
+        }
+      }
+    },
+    {
+      "id": "25A-3-no-dup",
+      "desc": "Replay must NOT create a second JE row for the same memo",
+      "pass": true,
+      "evidence": {
+        "matchCount": 1,
+        "memo": "T25A-3 same-key replay a04a9730-af45-4346-86fa-f386c0815035"
+      }
+    },
+    {
+      "id": "25A-4",
+      "desc": "Same key + different payload → 409 IDEMPOTENCY_CONFLICT and no second JE created",
+      "pass": true,
+      "evidence": {
+        "first": {
+          "status": 201,
+          "jeId": 33
+        },
+        "conflict": {
+          "status": 409,
+          "code": "IDEMPOTENCY_CONFLICT",
+          "existingJeId": 33
+        }
+      }
+    },
+    {
+      "id": "25A-4-no-leak",
+      "desc": "Conflicted second payload must NOT create a JE",
+      "pass": true,
+      "evidence": {
+        "foundForBMemo": 0
+      }
+    },
+    {
+      "id": "25A-5",
+      "desc": "8 parallel identical requests with same key → exactly one JE, all responses converge on same id",
+      "pass": true,
+      "evidence": {
+        "parallel": 8,
+        "created201": 1,
+        "replay200": 7,
+        "distinctJeIds": 1,
+        "jeRowsForMemo": 1,
+        "statusBreakdown": [
+          201,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200
+        ]
+      }
+    },
+    {
+      "id": "25A-6",
+      "desc": "Sanity: same payload, DIFFERENT keys → two distinct JEs (idempotency is keyed on the header, not on payload alone)",
+      "pass": true,
+      "evidence": {
+        "idA": 35,
+        "idB": 36
+      }
+    },
+    {
+      "id": "25A-7",
+      "desc": "evidence_snapshot.idempotency.{key,fingerprint} present and key matches the original request",
+      "pass": true,
+      "evidence": {
+        "storedKey": "a04a9730-af45-4346-86fa-f386c0815035",
+        "fingerprintLen": 64
+      }
+    }
+  ],
+  "passes": 9,
+  "total": 9
+}

@@ -113,6 +113,17 @@ export const journalEntriesTable = pgTable(
     }),
     reversalReason: text("reversal_reason"),
 
+    /**
+     * Task 25A — caller-supplied idempotency key for the manual-post path.
+     * Required by `POST /accounting/journal-entries`; null for reversals
+     * and for legacy/agent-action posts (those have their own idempotency
+     * via `agent_action_id`). The DB-level partial unique index below
+     * makes "one JE per (idempotency_key)" race-safe — a parallel duplicate
+     * insert raises a unique-violation, which the service catches and
+     * resolves by returning the existing JE (replay) or 409 (conflict).
+     */
+    idempotencyKey: text("idempotency_key"),
+
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [
@@ -121,6 +132,10 @@ export const journalEntriesTable = pgTable(
     uniqueIndex("journal_entries_agent_action_uniq")
       .on(table.agentActionId)
       .where(sqlNotNull(table.agentActionId)),
+    // Task 25A — at most one posted JE per caller-supplied idempotency key.
+    uniqueIndex("journal_entries_idempotency_key_uniq")
+      .on(table.idempotencyKey)
+      .where(sqlNotNull(table.idempotencyKey)),
     index("journal_entries_status_idx").on(table.status, table.postedAt),
     index("journal_entries_entry_date_idx").on(table.entryDate),
     index("journal_entries_thread_idx").on(table.threadId),

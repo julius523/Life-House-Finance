@@ -1,73 +1,27 @@
-# Life House Reentry Finance Portal
+# Life House Reentry — Finance Portal
 
-## Overview
+Nonprofit bookkeeping monorepo (pnpm workspace).
 
-A full-stack nonprofit finance management portal for Life House Reentry. Built with React + Vite (frontend) and Express + PostgreSQL (backend) in a pnpm monorepo.
+## Artifacts
+- `artifacts/finance-portal` — React/Vite UI
+- `artifacts/api-server` — Express + Drizzle/Postgres
+- `artifacts/mockup-sandbox` — component preview server
 
-## Features
+## Recent shipped work
+- **Step 8** — controlled GL posting (admin/approver only, period-locked, idempotent on `agent_action_id`, reversal-only correction)
+- **Step 9** — Chart of Accounts + accounting settings + trial balance (9-value account_type enum + `defaultNormalBalanceFor()`; admin-only settings)
+- **Task #25** — manual JE direct-post route (`POST /accounting/journal-entries`) + `/accounting/journal-entries/new` page
+- **Task #26** — Balance-Sheet breakdown
+- **Task #27** — typed React Query hooks generated from OpenAPI for new accounting endpoints
+- **Task #28** — `/accounting/journal-entries` review list + detail page (filters: status, source, date; pagination)
+- **Task 25A** — manual-post idempotency hardening: required `Idempotency-Key` UUID header, sha256 fingerprint of normalized payload, partial unique index `journal_entries_idempotency_key_uniq`, 200 on replay / 409 on conflict, race-safe via DB unique violation catch
 
-- **Dashboard**: Financial overview, spending by program charts, recent activity feed, pending approvals summary
-- **Expense Claims**: Submit, review, approve/reject staff expense reimbursements with receipt tracking
-- **Vendor Bills**: Manage vendor invoices, approval workflow, payment tracking
-- **Receipt Library**: Document management with searchable archive and missing receipt report
-- **Bank Transactions**: Import and reconcile bank statement data, match to expenses/bills
-- **Programs & Grants**: Track spending against budgets for programs, grants, funds, sites, and departments
-- **Vendor Directory**: Manage vendor relationships and track total spend
-- **Approval Queue**: Centralized view of all pending approvals sorted by urgency
-- **Month-End Close**: Checklist-driven month-end close process with progress tracking
-- **Chart of Accounts (Step 9)**: Full GAAP CoA at `/accounting/coa` with system-locked seeded defaults plus admin-managed custom rows, archived/active filtering, and posting validation. Singleton **Accounting Settings** at `/accounting/settings` (cash/accrual method, separation-of-duties, period-close gating, default Cash/AR/AP/Clearing/Rounding accounts, receipt threshold).
-- **Trial Balance + Ledger Reports (Step 9)**: `GET /api/reports/trial-balance` returns posted JE balances per CoA row with balanced-totals indicator; Reports page exposes a Trial Balance card with CSV export and a side-by-side **Operational vs General Ledger** source toggle on the P&L / Balance Sheet (`/api/reports/financial-summary?source=ledger|operational`). Dashboard shows an "Accounting status" card.
-- **Notifications**: In-app bell + transactional email (SendGrid) when bills/expenses are sent back for correction. Sends a branded HTML email with a deep link to the item; failures are logged but never break the API call. Configure via `SENDGRID_API_KEY` (secret), `NOTIFICATION_FROM_EMAIL` (must be a SendGrid-verified sender), and optional `NOTIFICATION_FROM_NAME` (defaults to "Life House Finance Portal"). If credentials are missing, emails fall back to log-only. The notifications table now records per-row delivery state (`email_status`: sent / failed / not_attempted, `email_error`, `email_attempts`, `email_last_attempt_at`) and the admin page (`/admin`) shows an "Email delivery" panel with status filters and a per-row "Resend" button that retries via the same helper.
+## In flight / deferred
+- **Task #29** — draft → submit → approve → reject manual JE workflow (no-self-approval, full lifecycle UI)
+- **Task #32** — typed account picker + CoA detail page on the generated client
+- **Task #33** — CSV export of journal entries list
+- **Task #34** — show "posted by" on the JE review page
 
-  Note: The user prefers configuring SendGrid directly via secrets rather than the Replit SendGrid/Resend integration connectors.
-
-## Branding
-
-- **Font**: Montserrat (all weights 400-700)
-- **Primary Green**: #24b556
-- **Primary Blue**: #4175f4
-- **Accent Purple**: #9649e2
-- **Deep Blue**: #1800ad (sidebar background)
-
-## Stack
-
-- **Monorepo tool**: pnpm workspaces
-- **Node.js version**: 24
-- **Package manager**: pnpm
-- **Frontend**: React + Vite, TailwindCSS, shadcn/ui, Recharts, Wouter routing
-- **Backend**: Express 5, TypeScript
-- **Database**: PostgreSQL + Drizzle ORM
-- **Validation**: Zod (zod/v4), drizzle-zod
-- **API codegen**: Orval (from OpenAPI spec)
-- **Build**: esbuild (CJS bundle)
-
-## Key Artifacts
-
-- `artifacts/finance-portal` — React + Vite frontend, served at `/`
-- `artifacts/api-server` — Express API server, served at `/api`
-
-## Key Commands
-
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run dev` — run API server locally
-
-## Database Schema
-
-Tables:
-- `vendors` — vendor directory
-- `programs` — programs, grants, funds, sites, departments
-- `expenses` — expense claims/reimbursements
-- `bills` — vendor bills/payables
-- `receipts` — document library
-- `transactions` — bank transactions
-- `month_end_checklists` — month-end close checklists (with JSONB items)
-- `activity_log` — audit trail of financial activity
-
-## Users / Roles
-
-Initial admin users: Kai Washington (primary), Julius Martinez, Brittney Davis
-
-See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+## Test evidence
+- `evidence/step8/`, `evidence/step9/`, `evidence/task25/`, `evidence/task25a/`
+- Runners under `.local/test-evidence/run-*.mjs`

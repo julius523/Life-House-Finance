@@ -1,0 +1,100 @@
+Start **Task 25A — Manual Journal Entry Idempotency Hardening** immediately.
+
+Do not wait for Task #29.
+
+This is a small, surgical hardening patch for `POST /accounting/journal-entries`.
+
+## Goal
+
+Prevent duplicate journal entries from retries, double-clicks, network replays, or parallel identical requests.
+
+## Required implementation
+
+### 1) Database
+
+Add:
+
+* `journal_entries.idempotency_key text nullable`
+
+Add a unique index:
+
+* unique on `idempotency_key`
+* only when `idempotency_key is not null`
+
+### 2) API contract
+
+Require header on `POST /accounting/journal-entries`:
+
+* `Idempotency-Key: <uuid>`
+
+Rules:
+
+* same key + same logical payload => return the same JE, never create a duplicate
+* same key + different payload => reject with 409 conflict
+* missing key => reject cleanly unless there is a very strong backwards-compatibility reason already in production, in which case document the temporary exception explicitly
+
+### 3) Request fingerprint
+
+Store or derive a stable request fingerprint for comparison.
+It must be based on the logical JE payload, not raw JSON ordering.
+
+Fingerprint should include at minimum:
+
+* date
+* memo/description
+* posting period
+* normalized lines:
+
+  * account
+  * debit
+  * credit
+  * line memo if relevant
+
+### 4) Insert behavior
+
+Use database-backed idempotency, not in-memory logic.
+
+Expected flow:
+
+* first request inserts JE with idempotency key
+* retry with same key and same fingerprint returns the existing JE
+* retry with same key but different fingerprint returns 409 conflict
+* parallel requests with same key must result in exactly one JE
+
+### 5) Response behavior
+
+The first successful request and safe retry should return functionally equivalent success responses tied to the same JE id.
+
+No duplicate JEs. Ever.
+
+### 6) Audit/logging
+
+Log enough data to investigate retries/conflicts:
+
+* idempotency key
+* actor
+* resulting JE id
+* whether request was new / replay / conflict
+
+## Acceptance tests
+
+Minimum required:
+
+1. same key + same payload => one JE only, same JE returned
+2. same key + different payload => 409 conflict
+3. parallel identical requests with same key => one JE only
+4. Step 8 / Step 9 / Task 25 regressions still green
+
+## Constraints
+
+* keep patch isolated
+* do not broaden into Task #29
+* do not refactor unrelated posting logic
+* do not weaken existing validation or period-lock behavior
+
+When done, give me:
+
+* concise implementation summary
+* exact response behavior for replay vs conflict
+* live test results
+* updated evidence report

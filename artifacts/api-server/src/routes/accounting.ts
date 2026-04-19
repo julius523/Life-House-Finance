@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import OpenAI from "openai";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
@@ -1801,6 +1802,52 @@ const ManualJournalEntryBody = z.object({
     .max(100),
 });
 
+// Task 25A — accept v1/v3/v4/v5 UUIDs (canonical 8-4-4-4-12 hex). We do not
+// accept arbitrary strings as keys: a UUID format keeps clients honest and
+// makes accidental collisions across users effectively impossible.
+const IDEMPOTENCY_KEY_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Task 25A — stable logical-payload fingerprint. Two requests have the same
+// fingerprint iff they post the same JE: same date, same memo (trimmed),
+// same lines (sorted by type+account+amount+program+fund+memo so JSON key
+// order or array order cannot change the hash). Account is normalized to
+// the account_code, since that's the field the posting service resolves.
+function computeManualJeFingerprint(payload: {
+  entryDate: string;
+  memo: string;
+  lines: Array<{
+    type: "debit" | "credit";
+    amount: number;
+    account_code: string;
+    program?: string | null;
+    fund?: string | null;
+    memo?: string | null;
+  }>;
+}): string {
+  const normalized = {
+    entry_date: payload.entryDate,
+    memo: payload.memo.trim(),
+    lines: payload.lines
+      .map((ln) => ({
+        type: ln.type,
+        // Normalize amount to fixed-precision cents-as-string so 100 and
+        // 100.00 hash identically.
+        amount_cents: Math.round(Number(ln.amount) * 100).toString(),
+        account_code: ln.account_code.trim(),
+        program: ln.program ?? null,
+        fund: ln.fund ?? null,
+        memo: ln.memo ?? null,
+      }))
+      .sort((a, b) => {
+        const ka = `${a.type}|${a.account_code}|${a.amount_cents}|${a.program ?? ""}|${a.fund ?? ""}|${a.memo ?? ""}`;
+        const kb = `${b.type}|${b.account_code}|${b.amount_cents}|${b.program ?? ""}|${b.fund ?? ""}|${b.memo ?? ""}`;
+        return ka < kb ? -1 : ka > kb ? 1 : 0;
+      }),
+  };
+  return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+}
+
 router.post(
   "/accounting/journal-entries",
   async (req, res): Promise<void> => {
@@ -1809,6 +1856,28 @@ router.post(
       res.status(403).json({ error: "Admins or approvers only" });
       return;
     }
+    // Task 25A — Idempotency-Key is REQUIRED on this endpoint. We do not
+    // grandfather any caller: this route was only just shipped (Task #25)
+    // and has no in-the-wild integrations to break.
+    const rawKey = req.header("Idempotency-Key") ?? req.header("idempotency-key");
+    if (typeof rawKey !== "string" || rawKey.length === 0) {
+      res.status(400).json({
+        error:
+          "Missing required header 'Idempotency-Key'. Send a UUID (e.g. crypto.randomUUID()) so duplicate retries are safe.",
+        code: "IDEMPOTENCY_KEY_REQUIRED",
+      });
+      return;
+    }
+    if (!IDEMPOTENCY_KEY_RE.test(rawKey)) {
+      res.status(400).json({
+        error:
+          "Header 'Idempotency-Key' must be a UUID (8-4-4-4-12 hex, dash-separated).",
+        code: "IDEMPOTENCY_KEY_INVALID",
+      });
+      return;
+    }
+    const idempotencyKey = rawKey.toLowerCase();
+
     const parsed = ManualJournalEntryBody.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({
@@ -1817,21 +1886,48 @@ router.post(
       });
       return;
     }
+    const fingerprint = computeManualJeFingerprint({
+      entryDate: parsed.data.entryDate,
+      memo: parsed.data.memo,
+      lines: parsed.data.lines.map((ln) => ({
+        type: ln.type,
+        amount: ln.amount,
+        account_code: ln.account_code,
+        program: ln.program ?? null,
+        fund: ln.fund ?? null,
+        memo: ln.memo ?? null,
+      })),
+    });
     const result = await postManualJournalEntry(
       {
         entryDate: parsed.data.entryDate,
         memo: parsed.data.memo,
         lines: parsed.data.lines,
+        idempotencyKey,
+        fingerprint,
       },
       toPostingActor(req),
     );
     switch (result.kind) {
       case "ok":
-        res.status(201).json({
+        // Task 25A — 201 on first post, 200 on idempotent replay. Same
+        // body shape both ways so clients can't tell the difference at
+        // the JE-id level (which is the whole point).
+        res.status(result.idempotent ? 200 : 201).json({
           journalEntry: serializeJournalEntry(
             result.journalEntry,
             result.lines,
           ),
+          idempotent: result.idempotent,
+        });
+        return;
+      case "idempotency_conflict":
+        res.status(409).json({
+          error:
+            "Idempotency-Key was previously used with a different payload. Generate a new key for a different journal entry.",
+          code: "IDEMPOTENCY_CONFLICT",
+          idempotencyKey: result.idempotencyKey,
+          existingJournalEntryId: result.existingJournalEntryId,
         });
         return;
       case "forbidden":
