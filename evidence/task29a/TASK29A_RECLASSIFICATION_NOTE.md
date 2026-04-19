@@ -1,3 +1,22 @@
+# Task #29A — Manual JE draft persistence (reclassified from rejected Task #29)
+
+**Date:** 2026-04-19
+**Decision (user):** Reject the merged work as Task #29. Reclassify it as
+**Task #29A — Manual JE draft persistence**. Open
+**Task #29B — Manual JE approval workflow** as the real follow-up.
+
+The merged code is **kept** because:
+- It is useful in its own right (accountants can save and resume work).
+- It did not regress any previously accepted accounting behavior
+  (49 / 49 prior regression cases still pass).
+
+It must **not** be represented as the controlled draft → submit →
+approve → reject → post workflow. That work is Task #29B.
+
+---
+
+## Original verdict report (reasoning behind the rejection)
+
 # Task #29 — Verification verdict against frozen acceptance criteria
 
 **Date:** 2026-04-19

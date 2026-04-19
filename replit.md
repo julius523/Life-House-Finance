@@ -17,7 +17,8 @@ Nonprofit bookkeeping monorepo (pnpm workspace).
 - **Task 25A** — manual-post idempotency hardening: required `Idempotency-Key` UUID header, sha256 fingerprint of normalized payload, partial unique index `journal_entries_idempotency_key_uniq`, 200 on replay / 409 on conflict, race-safe via DB unique violation catch
 
 ## In flight / deferred
-- **Task #29** — draft → submit → approve → reject manual JE workflow (no-self-approval, full lifecycle UI)
+- **Task #29A** — Manual JE draft persistence (save/resume work-in-progress). Reclassified from rejected Task #29 (which was supposed to be the full approval workflow but only delivered persistence). Useful in its own right; ledger surface untouched. See `evidence/task29a/`.
+- **Task #29B (PENDING)** — the actual Manual JE approval workflow (draft → submit → approve → reject → post). Frozen acceptance criteria at `evidence/task29b/TASK29B_ACCEPTANCE_CRITERIA.md`. Must build on top of the existing 29A drafts table (extend with status + approval columns); must reuse the Task 25A idempotent posting service; must add `journal_entries.manual_draft_id` linkage; must enforce server-side no-self-approval honoring `accounting_settings.separationOfDuties`.
 - **Task #32** — typed account picker + CoA detail page on the generated client
 - **Task #33** — CSV export of journal entries list
 - **Task #34** — show "posted by" on the JE review page
