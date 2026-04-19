@@ -1,0 +1,293 @@
+#60 - Fix Reports page crash and stabilize reporting surfaces
+
+What & Why
+
+The reporting area is partially converted and currently unstable. There is at least one known Reports-page crash, and that makes the next reporting tasks harder to trust even when the underlying ledger data is correct. Before adding more drilldowns and exports, the reporting shell needs to load consistently and fail safely.
+
+This task is the stabilization pass. It is not about changing accounting logic. It is about making the existing reporting UI and read APIs reliable enough that finance can actually use them without hitting runtime crashes or broken states.
+
+Done looks like
+
+The Reports page loads without crashing for supported users.
+
+If one report dataset fails to load, the page does not white-screen. The affected panel shows an inline error state while the rest of the page remains usable.
+
+Empty-state, loading-state, and permission-state handling are explicit and user-friendly.
+
+All current report cards, selectors, and route transitions on the Reports page render safely when:
+
+there is no data
+there are draft-only accounting periods
+filters produce zero rows
+one of the downstream report endpoints returns a 4xx or 5xx
+optional fields are null or missing
+
+Any client-side assumptions that currently rely on closed enums or always-present objects are hardened.
+
+The typed client and page state align with the current OpenAPI contract so runtime crashes caused by stale or mismatched response shapes are removed.
+
+Out of scope
+adding new report drilldowns
+CSV export
+changing accounting calculations
+adding new report types
+redesigning the Reports page
+Hard constraints
+Do not change ledger math in this task unless the crash is directly caused by an invalid reporting query and the fix is strictly defensive.
+Do not hide broken data silently. Show a clear inline error state.
+Do not weaken accounting controls just to make the page render.
+Steps
+1) Reproduce and isolate the crash
+
+Identify the exact page, route, query, and response shape that causes the current Reports-page failure.
+
+Document whether the crash is caused by:
+
+null handling
+bad type narrowing
+stale codegen types
+unexpected enum values
+unsafe assumptions in chart/table rendering
+missing permission guards
+query failure propagation
+2) Harden the read path
+
+Update the reporting page and any supporting components so they tolerate:
+
+null arrays
+empty arrays
+missing optional objects
+unexpected-but-valid free-form strings from the API
+partial query failure
+
+Make sure route-level and panel-level error boundaries are appropriate.
+
+3) Align API contract and typed client
+
+If the crash is caused by an API contract mismatch, update openapi.yaml, regenerate the typed client, and adjust the reporting page to the actual contract.
+
+Do not leave “works in runtime but types lie” gaps behind.
+
+4) Verify report shell behavior
+
+Confirm the Reports page behaves correctly for:
+
+admin
+approver
+users without access
+
+If permission is denied, show a stable access state instead of crashing or hanging.
+
+Validation / acceptance gate
+
+Do not mark complete unless all of the following are true:
+
+Reports page loads successfully in the normal happy path
+known crash path is eliminated
+zero-data and partial-failure states render safely
+permission-denied state renders safely
+no new accounting math behavior was introduced unintentionally
+Relevant files
+artifacts/finance-portal/src/pages/reports*.tsx
+artifacts/finance-portal/src/components/*report*
+artifacts/api-server/src/routes/accounting.ts
+lib/api-spec/openapi.yaml
+Dependencies
+none beyond the currently merged accounting bridge work
+Revision instructions
+
+If revised, revise the entire task description, not isolated bullets.
+
+Keep these locked decisions intact:
+
+this is a stabilization task, not a ledger-math rewrite
+failures must surface as inline error states, not silent fallbacks
+typed client and OpenAPI must match actual runtime behavior
+
+#61 - Profit & Loss drilldown from report rows to underlying journal entries
+
+What & Why
+
+The Balance Sheet drilldown is already in. The next reporting gap is the Profit & Loss side. Finance needs to click a P&L row and see the journal-entry detail behind that number, using the ledger as the source of truth.
+
+This task adds row-level drilldown for the Profit & Loss report so a reviewer can move from summary totals into the underlying posted journal entries that produced them.
+
+Done looks like
+
+When a user clicks a P&L row, they can see the underlying posted journal entries contributing to that line for the selected date range and filters.
+
+The drilldown is filtered correctly by:
+
+selected report period
+selected account or account group
+posted-only ledger rows
+any existing program/dimension filters already supported by the report
+
+The drilldown view shows enough context to audit the number:
+
+entry number
+entry date
+memo
+debit / credit effect relevant to the line
+source label where available
+one-click navigation to JE detail
+
+Totals shown in the drilldown reconcile to the clicked P&L row.
+
+Out of scope
+exporting the drilldown to CSV
+drilldown to source expenses or bills from report rows
+changing P&L calculation methodology
+adding new report dimensions not already supported
+Hard constraints
+The drilldown must read from posted journal entries only.
+Draft JEs must not affect P&L drilldown totals.
+The drilldown must reconcile to the displayed report row for the same filter set.
+Do not invent a second reporting aggregation path. Reuse the same source-of-truth logic as the P&L report.
+Steps
+1) Add or extend read API
+
+Expose a read endpoint for P&L row drilldown that accepts the same relevant filters as the parent report plus the clicked row context.
+
+The endpoint should return:
+
+row identity
+applied filters
+list of contributing journal entries or lines
+reconciled total for the drilldown set
+2) Add UI interaction
+
+On the P&L report page, make clickable rows visually obvious and open a drilldown panel, drawer, or detail page.
+
+The UI should preserve the current report context so the user can move back without losing the selected period and filters.
+
+3) Reconciliation check
+
+Ensure the amount shown in the drilldown matches the clicked row amount exactly for the same filters.
+
+If there is a mismatch, show an explicit error state rather than a misleading partial view.
+
+Validation / acceptance gate
+
+Do not mark complete unless all of the following are proven:
+
+clicking a P&L row opens a stable drilldown
+drilldown rows are posted-only
+drilldown total equals clicked row total
+JE detail links work
+existing Balance Sheet drilldown behavior remains intact
+Relevant files
+artifacts/api-server/src/routes/accounting.ts
+artifacts/finance-portal/src/pages/reports*.tsx
+artifacts/finance-portal/src/components/*report*
+lib/api-spec/openapi.yaml
+Dependencies
+Reports page stabilization (#60) should land first if the page is still unstable
+Revision instructions
+
+If revised, revise the entire task description.
+
+Keep these locked decisions intact:
+
+posted journal entries only
+no second aggregation path
+drilldown must reconcile exactly to the clicked P&L row
+
+#62 - CSV export for reporting and drilldown tables
+
+What & Why
+
+Finance needs exportable evidence, not just on-screen numbers. Once the report shell is stable and drilldowns exist, the next practical step is CSV export so users can hand off, archive, and reconcile reporting data outside the app.
+
+This task adds CSV export for supported report tables and drilldown tables, using the same filter context the user is currently viewing.
+
+Done looks like
+
+Users can export CSV from supported reporting views without changing the numbers or scope.
+
+Exported CSV reflects the exact current filter context, including:
+
+date range
+report type
+selected row context where applicable
+source filter or dimension filters already applied
+
+Supported exports for this task:
+
+main report table(s) already visible on the Reports page
+Balance Sheet drilldown table
+Profit & Loss drilldown table once #61 lands
+
+CSV column headers are stable, readable, and audit-friendly.
+
+Downloaded data matches the visible dataset and ordering semantics closely enough that users can reconcile the export to the screen.
+
+Out of scope
+Excel/XLSX export
+PDF export
+scheduled report delivery
+custom column selection
+source-expense or source-bill exports beyond the report/drilldown tables themselves
+Hard constraints
+CSV export must use the same query/filter context as the visible table.
+Do not implement a separate export-only data pipeline that can drift from the screen.
+Export must not include draft-only accounting rows unless the screen explicitly includes them.
+Headers should be stable and human-readable.
+Steps
+1) Decide export shape per table
+
+For each supported table, define the exact export columns.
+
+At minimum:
+
+report tables should include the row label and displayed amount columns
+drilldown tables should include entry number, date, memo, source, and relevant amount columns
+2) Add export endpoint or client-side export path
+
+Choose the simplest path that preserves parity with the visible dataset:
+
+server-side export if the dataset needs authoritative query logic or large result handling
+client-side export only if it is guaranteed to reflect the already-fetched visible rows without drift
+
+For larger or filter-rich drilldowns, prefer server-side export.
+
+3) Add UI export controls
+
+Add clear export actions in the report and drilldown surfaces.
+
+Buttons should be disabled or hidden when there is no data to export.
+
+4) Verify parity
+
+Confirm exported CSV rows and totals match the on-screen table for the same filters.
+
+Validation / acceptance gate
+
+Do not mark complete unless all of the following are proven:
+
+CSV exports download successfully
+exported data matches the visible filter context
+headers are stable and readable
+zero-row exports are handled cleanly
+export does not introduce a second divergent reporting pipeline
+Relevant files
+artifacts/api-server/src/routes/accounting.ts
+artifacts/finance-portal/src/pages/reports*.tsx
+artifacts/finance-portal/src/components/*report*
+lib/api-spec/openapi.yaml
+Dependencies
+#60 for report shell stability
+#61 before P&L drilldown export is considered complete
+Revision instructions
+
+If revised, revise the entire task description.
+
+Keep these locked decisions intact:
+
+export must reflect the exact visible filter context
+no separate divergent export pipeline
+CSV only for this task, not XLSX/PDF
+Recommended order
+#60 — stabilize the Reports page
+#61 — add P&L drilldown
+#62 — add CSV export once the visible tables are stable
