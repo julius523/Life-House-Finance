@@ -17,8 +17,10 @@ import {
   usersTable,
   journalEntriesTable,
   journalEntryLinesTable,
+  manualJournalEntryDraftsTable,
   accountingPeriodsTable,
   chartOfAccountsTable,
+  type ManualJournalEntryDraftRow,
   type CopilotMessageRow,
   type CopilotThreadRow,
   type CopilotToolCallRow,
@@ -2065,6 +2067,266 @@ router.get(
       .where(eq(journalEntryLinesTable.journalEntryId, je.id))
       .orderBy(asc(journalEntryLinesTable.lineNo));
     res.json({ journalEntry: serializeJournalEntry(je, lines) });
+  },
+);
+
+// --- Manual journal entry drafts ------------------------------------------
+// Drafts let accountants save work-in-progress JE editor state and resume
+// later. They never touch the ledger. Visibility is the user who created
+// the draft, plus admin/approver reviewers.
+
+const MAX_DRAFT_PAYLOAD_BYTES = 64 * 1024;
+
+const DraftLineSchema = z.object({
+  uid: z.number().optional(),
+  type: z.enum(["debit", "credit"]),
+  accountCode: z.string().max(60).default(""),
+  amount: z.string().max(40).default(""),
+  program: z.string().max(120).default(""),
+  fund: z.string().max(120).default(""),
+  memo: z.string().max(500).default(""),
+});
+
+const DraftPayloadSchema = z.object({
+  entryDate: z.string().max(40).default(""),
+  memo: z.string().max(2000).default(""),
+  lines: z.array(DraftLineSchema).min(1).max(100),
+});
+
+const SaveDraftBody = z.object({
+  payload: DraftPayloadSchema,
+});
+
+function canAccessDraft(
+  draft: ManualJournalEntryDraftRow,
+  user: { id: number; role: string },
+): boolean {
+  if (draft.createdByUserId === user.id) return true;
+  return user.role === "admin" || user.role === "approver";
+}
+
+function serializeDraft(d: ManualJournalEntryDraftRow) {
+  return {
+    id: d.id,
+    createdByUserId: d.createdByUserId,
+    entryDate: d.entryDate,
+    memo: d.memo,
+    payload: d.payload,
+    createdAt: d.createdAt,
+    updatedAt: d.updatedAt,
+  };
+}
+
+function summarizeDraftHeader(payload: z.infer<typeof DraftPayloadSchema>): {
+  entryDate: string | null;
+  memo: string | null;
+} {
+  const entryDate = payload.entryDate.trim();
+  const memo = payload.memo.trim();
+  return {
+    entryDate: /^\d{4}-\d{2}-\d{2}$/.test(entryDate) ? entryDate : null,
+    memo: memo.length > 0 ? memo.slice(0, 2000) : null,
+  };
+}
+
+router.get(
+  "/accounting/journal-entry-drafts",
+  async (req, res): Promise<void> => {
+    const user = req.authUser!;
+    const role = user.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    // Reviewers (admin/approver) can choose to see all drafts or just
+    // their own. Defaults to their own to keep the list focused.
+    const scope =
+      typeof req.query["scope"] === "string"
+        ? (req.query["scope"] as string)
+        : "mine";
+    const conds = [];
+    if (scope !== "all") {
+      conds.push(eq(manualJournalEntryDraftsTable.createdByUserId, user.id));
+    }
+    const rows = await db
+      .select({
+        draft: manualJournalEntryDraftsTable,
+        createdByEmail: usersTable.email,
+        createdByFirstName: usersTable.firstName,
+        createdByLastName: usersTable.lastName,
+      })
+      .from(manualJournalEntryDraftsTable)
+      .leftJoin(
+        usersTable,
+        eq(usersTable.id, manualJournalEntryDraftsTable.createdByUserId),
+      )
+      .where(conds.length ? and(...conds) : undefined)
+      .orderBy(desc(manualJournalEntryDraftsTable.updatedAt))
+      .limit(200);
+    res.json({
+      drafts: rows.map((r) => ({
+        ...serializeDraft(r.draft),
+        createdBy: {
+          id: r.draft.createdByUserId,
+          email: r.createdByEmail,
+          firstName: r.createdByFirstName,
+          lastName: r.createdByLastName,
+        },
+      })),
+    });
+  },
+);
+
+router.post(
+  "/accounting/journal-entry-drafts",
+  async (req, res): Promise<void> => {
+    const user = req.authUser!;
+    if (user.role !== "admin" && user.role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const parsed = SaveDraftBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: parsed.error.issues[0]?.message ?? "Invalid body",
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    const payload = parsed.data.payload;
+    if (JSON.stringify(payload).length > MAX_DRAFT_PAYLOAD_BYTES) {
+      res
+        .status(413)
+        .json({ error: "Draft payload too large", code: "PAYLOAD_TOO_LARGE" });
+      return;
+    }
+    const summary = summarizeDraftHeader(payload);
+    const [row] = await db
+      .insert(manualJournalEntryDraftsTable)
+      .values({
+        createdByUserId: user.id,
+        entryDate: summary.entryDate,
+        memo: summary.memo,
+        payload,
+      })
+      .returning();
+    res.status(201).json({ draft: serializeDraft(row!) });
+  },
+);
+
+router.get(
+  "/accounting/journal-entry-drafts/:id",
+  async (req, res): Promise<void> => {
+    const user = req.authUser!;
+    if (user.role !== "admin" && user.role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [draft] = await db
+      .select()
+      .from(manualJournalEntryDraftsTable)
+      .where(eq(manualJournalEntryDraftsTable.id, id));
+    if (!draft) {
+      res.status(404).json({ error: "Draft not found" });
+      return;
+    }
+    if (!canAccessDraft(draft, user)) {
+      res.status(403).json({ error: "Draft is owned by another user" });
+      return;
+    }
+    res.json({ draft: serializeDraft(draft) });
+  },
+);
+
+router.patch(
+  "/accounting/journal-entry-drafts/:id",
+  async (req, res): Promise<void> => {
+    const user = req.authUser!;
+    if (user.role !== "admin" && user.role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const parsed = SaveDraftBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: parsed.error.issues[0]?.message ?? "Invalid body",
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    const payload = parsed.data.payload;
+    if (JSON.stringify(payload).length > MAX_DRAFT_PAYLOAD_BYTES) {
+      res
+        .status(413)
+        .json({ error: "Draft payload too large", code: "PAYLOAD_TOO_LARGE" });
+      return;
+    }
+    const [existing] = await db
+      .select()
+      .from(manualJournalEntryDraftsTable)
+      .where(eq(manualJournalEntryDraftsTable.id, id));
+    if (!existing) {
+      res.status(404).json({ error: "Draft not found" });
+      return;
+    }
+    if (!canAccessDraft(existing, user)) {
+      res.status(403).json({ error: "Draft is owned by another user" });
+      return;
+    }
+    const summary = summarizeDraftHeader(payload);
+    const [updated] = await db
+      .update(manualJournalEntryDraftsTable)
+      .set({
+        payload,
+        entryDate: summary.entryDate,
+        memo: summary.memo,
+        updatedAt: new Date(),
+      })
+      .where(eq(manualJournalEntryDraftsTable.id, id))
+      .returning();
+    res.json({ draft: serializeDraft(updated!) });
+  },
+);
+
+router.delete(
+  "/accounting/journal-entry-drafts/:id",
+  async (req, res): Promise<void> => {
+    const user = req.authUser!;
+    if (user.role !== "admin" && user.role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [existing] = await db
+      .select()
+      .from(manualJournalEntryDraftsTable)
+      .where(eq(manualJournalEntryDraftsTable.id, id));
+    if (!existing) {
+      res.status(404).json({ error: "Draft not found" });
+      return;
+    }
+    if (!canAccessDraft(existing, user)) {
+      res.status(403).json({ error: "Draft is owned by another user" });
+      return;
+    }
+    await db
+      .delete(manualJournalEntryDraftsTable)
+      .where(eq(manualJournalEntryDraftsTable.id, id));
+    res.status(204).end();
   },
 );
 

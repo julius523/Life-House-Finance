@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, Link } from "wouter";
+import { useLocation, Link, useSearch } from "wouter";
 import {
   Card,
   CardContent,
@@ -30,7 +30,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { apiJson } from "@/lib/api";
-import { ArrowLeft, BookOpen, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Plus, Save, Trash2 } from "lucide-react";
 
 type Account = {
   id: number;
@@ -77,11 +77,51 @@ function parseAmountToCents(input: string): number | null {
   return Math.round(num * 100);
 }
 
+type DraftPayload = {
+  entryDate: string;
+  memo: string;
+  lines: Array<Omit<LineDraft, "uid"> & { uid?: number }>;
+};
+
+type DraftRecord = {
+  id: number;
+  createdByUserId: number;
+  entryDate: string | null;
+  memo: string | null;
+  payload: DraftPayload;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function rehydrateLine(
+  line: DraftPayload["lines"][number],
+  fallbackType: "debit" | "credit",
+): LineDraft {
+  return {
+    uid: typeof line.uid === "number" ? line.uid : Math.random(),
+    type: line.type === "credit" ? "credit" : line.type === "debit" ? "debit" : fallbackType,
+    accountCode: line.accountCode ?? "",
+    amount: line.amount ?? "",
+    program: line.program ?? "",
+    fund: line.fund ?? "",
+    memo: line.memo ?? "",
+  };
+}
+
 export default function JournalEntriesNewPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+  const search = useSearch();
   const canPost = user?.role === "admin" || user?.role === "approver";
+
+  const draftIdParam = useMemo(() => {
+    const params = new URLSearchParams(search);
+    const raw = params.get("draft");
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  }, [search]);
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(true);
@@ -94,6 +134,12 @@ export default function JournalEntriesNewPage() {
     makeBlankLine("credit"),
   ]);
   const [submitting, setSubmitting] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [discardingDraft, setDiscardingDraft] = useState(false);
+  const [draftId, setDraftId] = useState<number | null>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftLoadError, setDraftLoadError] = useState<string | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (!canPost) return;
@@ -118,6 +164,56 @@ export default function JournalEntriesNewPage() {
       cancelled = true;
     };
   }, [canPost]);
+
+  // Load existing draft if ?draft=ID is in the URL.
+  useEffect(() => {
+    if (!canPost) return;
+    if (draftIdParam === null) {
+      setDraftId(null);
+      setDraftLoadError(null);
+      return;
+    }
+    let cancelled = false;
+    setDraftLoading(true);
+    setDraftLoadError(null);
+    apiJson<{ draft: DraftRecord }>(
+      `/accounting/journal-entry-drafts/${draftIdParam}`,
+    )
+      .then(({ draft }) => {
+        if (cancelled) return;
+        setDraftId(draft.id);
+        setLastSavedAt(draft.updatedAt);
+        const p = draft.payload ?? { entryDate: "", memo: "", lines: [] };
+        // Restore exactly what was saved — including blank values — so
+        // a paused, partially-filled entry reopens identically.
+        setEntryDate(p.entryDate ?? "");
+        setMemo(p.memo ?? "");
+        const restored = (p.lines ?? []).map((ln, i) =>
+          rehydrateLine(ln, i === 0 ? "debit" : "credit"),
+        );
+        if (restored.length >= 2) {
+          setLines(restored);
+        } else if (restored.length === 1) {
+          setLines([restored[0]!, makeBlankLine("credit")]);
+        }
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        // Drop any stale in-memory draft id so a subsequent "Save draft"
+        // doesn't try to PATCH an inaccessible/missing draft row.
+        setDraftId(null);
+        setLastSavedAt(null);
+        setDraftLoadError(
+          e instanceof Error ? e.message : "Failed to load draft.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setDraftLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [draftIdParam, canPost]);
 
   const postableAccounts = useMemo(
     () => accounts.filter((a) => a.isActive && a.allowManualPosting),
@@ -200,6 +296,86 @@ export default function JournalEntriesNewPage() {
     return null;
   };
 
+  const buildDraftPayload = (): DraftPayload => ({
+    entryDate,
+    memo,
+    lines: lines.map((l) => ({
+      type: l.type,
+      accountCode: l.accountCode,
+      amount: l.amount,
+      program: l.program,
+      fund: l.fund,
+      memo: l.memo,
+    })),
+  });
+
+  const saveDraft = async () => {
+    setSavingDraft(true);
+    try {
+      const payload = buildDraftPayload();
+      if (draftId !== null) {
+        const data = await apiJson<{ draft: DraftRecord }>(
+          `/accounting/journal-entry-drafts/${draftId}`,
+          { method: "PATCH", body: { payload } },
+        );
+        setLastSavedAt(data.draft.updatedAt);
+        toast({
+          title: "Draft saved",
+          description: "Your changes are stored.",
+        });
+      } else {
+        const data = await apiJson<{ draft: DraftRecord }>(
+          "/accounting/journal-entry-drafts",
+          { method: "POST", body: { payload } },
+        );
+        setDraftId(data.draft.id);
+        setLastSavedAt(data.draft.updatedAt);
+        // Reflect the draft id in the URL so a refresh resumes correctly.
+        setLocation(`/accounting/journal-entries/new?draft=${data.draft.id}`, {
+          replace: true,
+        });
+        toast({
+          title: "Draft saved",
+          description: "You can come back to it later from the entries list.",
+        });
+      }
+    } catch (e) {
+      toast({
+        title: "Could not save draft",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const discardDraft = async () => {
+    if (draftId === null) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("Discard this draft? This cannot be undone.")
+    ) {
+      return;
+    }
+    setDiscardingDraft(true);
+    try {
+      await apiJson<null>(`/accounting/journal-entry-drafts/${draftId}`, {
+        method: "DELETE",
+      });
+      toast({ title: "Draft discarded" });
+      setLocation("/accounting/journal-entries");
+    } catch (e) {
+      toast({
+        title: "Could not discard draft",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setDiscardingDraft(false);
+    }
+  };
+
   const submit = async () => {
     const err = validateBeforeSubmit();
     if (err) {
@@ -226,6 +402,18 @@ export default function JournalEntriesNewPage() {
         method: "POST",
         body: payload,
       });
+      // Clean up the draft (if any) now that the entry is posted.
+      if (draftId !== null) {
+        try {
+          await apiJson<null>(
+            `/accounting/journal-entry-drafts/${draftId}`,
+            { method: "DELETE" },
+          );
+        } catch {
+          // Non-fatal: the post succeeded; a stale draft can be removed
+          // from the drafts list.
+        }
+      }
       toast({
         title: `Posted ${data.journalEntry.entryNo}`,
         description: "Entry is now in the ledger and Trial Balance.",
@@ -259,12 +447,21 @@ export default function JournalEntriesNewPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <BookOpen className="h-7 w-7 text-primary" />
-            New journal entry
+            {draftId !== null ? "Resume journal entry draft" : "New journal entry"}
           </h1>
           <p className="text-muted-foreground mt-1">
             Record an adjusting, accrual, depreciation, or reclass entry by
-            hand. Posts immediately into the ledger.
+            hand. Save a draft to come back to later, or post it straight to
+            the ledger.
           </p>
+          {lastSavedAt && (
+            <p className="text-xs text-muted-foreground mt-1" data-testid="text-draft-status">
+              Draft saved {new Date(lastSavedAt).toLocaleString()}
+            </p>
+          )}
+          {draftLoadError && (
+            <p className="text-xs text-destructive mt-1">{draftLoadError}</p>
+          )}
         </div>
         <Button variant="ghost" asChild>
           <Link href="/accounting">
@@ -501,13 +698,38 @@ export default function JournalEntriesNewPage() {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button variant="ghost" asChild>
-              <Link href="/accounting">Cancel</Link>
+              <Link href="/accounting/journal-entries">Cancel</Link>
+            </Button>
+            {draftId !== null && (
+              <Button
+                variant="outline"
+                onClick={discardDraft}
+                disabled={discardingDraft || savingDraft || submitting}
+                data-testid="button-discard-draft"
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                {discardingDraft ? "Discarding…" : "Discard draft"}
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              onClick={saveDraft}
+              disabled={savingDraft || submitting || draftLoading}
+              data-testid="button-save-draft"
+            >
+              <Save className="h-4 w-4 mr-1" />
+              {savingDraft
+                ? "Saving…"
+                : draftId !== null
+                  ? "Update draft"
+                  : "Save draft"}
             </Button>
             <Button
               onClick={submit}
-              disabled={submitting || !balanced || accountsLoading}
+              disabled={submitting || !balanced || accountsLoading || savingDraft}
+              data-testid="button-post-entry"
             >
               {submitting ? "Posting…" : "Post entry"}
             </Button>

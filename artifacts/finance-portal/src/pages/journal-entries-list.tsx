@@ -32,7 +32,16 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { apiJson } from "@/lib/api";
 import { format } from "date-fns";
-import { ArrowLeft, BookOpen, Filter, Plus, Sparkles, User } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  FileEdit,
+  Filter,
+  Plus,
+  Sparkles,
+  Trash2,
+  User,
+} from "lucide-react";
 
 type JournalEntry = {
   id: number;
@@ -49,6 +58,22 @@ type JournalEntry = {
 
 type StatusFilter = "all" | "posted" | "reversed";
 type SourceFilter = "all" | "manual" | "copilot";
+type DraftScope = "mine" | "all";
+
+type DraftSummary = {
+  id: number;
+  createdByUserId: number;
+  entryDate: string | null;
+  memo: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: {
+    id: number;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+  };
+};
 
 const PAGE_SIZE = 50;
 
@@ -86,6 +111,54 @@ export default function JournalEntriesListPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [drafts, setDrafts] = useState<DraftSummary[]>([]);
+  const [draftsLoading, setDraftsLoading] = useState(true);
+  const [draftScope, setDraftScope] = useState<DraftScope>("mine");
+  const [draftRefreshKey, setDraftRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (!canView) return;
+    let cancelled = false;
+    setDraftsLoading(true);
+    apiJson<{ drafts: DraftSummary[] }>(
+      `/accounting/journal-entry-drafts?scope=${draftScope}`,
+    )
+      .then((data) => {
+        if (!cancelled) setDrafts(data.drafts);
+      })
+      .catch(() => {
+        if (!cancelled) setDrafts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setDraftsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canView, draftScope, draftRefreshKey]);
+
+  const discardDraft = async (id: number) => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("Discard this draft? This cannot be undone.")
+    ) {
+      return;
+    }
+    try {
+      await apiJson<null>(`/accounting/journal-entry-drafts/${id}`, {
+        method: "DELETE",
+      });
+      toast({ title: "Draft discarded" });
+      setDraftRefreshKey((k) => k + 1);
+    } catch (e) {
+      toast({
+        title: "Could not discard draft",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
 
   // Reset to first page when filters change.
   useEffect(() => {
@@ -254,6 +327,119 @@ export default function JournalEntriesListPage() {
               Clear
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <FileEdit className="h-4 w-4 text-muted-foreground" />
+              Drafts
+            </CardTitle>
+            <CardDescription>
+              Saved work-in-progress entries that have not been posted yet.
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Select
+              value={draftScope}
+              onValueChange={(v) => setDraftScope(v as DraftScope)}
+            >
+              <SelectTrigger className="w-[160px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="mine">My drafts</SelectItem>
+                <SelectItem value="all">All drafts</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {draftsLoading ? (
+            <div className="p-4 space-y-2">
+              {[1, 2].map((i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : drafts.length === 0 ? (
+            <div className="px-4 py-6 text-sm text-muted-foreground">
+              {draftScope === "mine"
+                ? "You don't have any saved drafts."
+                : "No saved drafts."}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[120px]">Entry date</TableHead>
+                    <TableHead>Memo</TableHead>
+                    <TableHead className="w-[180px]">Saved by</TableHead>
+                    <TableHead className="w-[160px]">Last updated</TableHead>
+                    <TableHead className="w-[180px] text-right" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {drafts.map((d) => {
+                    const ownerName =
+                      [d.createdBy.firstName, d.createdBy.lastName]
+                        .filter(Boolean)
+                        .join(" ") ||
+                      d.createdBy.email ||
+                      `User #${d.createdBy.id}`;
+                    return (
+                      <TableRow
+                        key={d.id}
+                        data-testid={`row-draft-${d.id}`}
+                      >
+                        <TableCell>
+                          {d.entryDate
+                            ? format(parseDateOnly(d.entryDate), "MMM d, yyyy")
+                            : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="max-w-[420px]">
+                          <div className="truncate" title={d.memo ?? ""}>
+                            {d.memo ?? <span className="text-muted-foreground">(no memo yet)</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm">{ownerName}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {format(new Date(d.updatedAt), "MMM d, p")}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              asChild
+                              size="sm"
+                              variant="outline"
+                              data-testid={`button-resume-draft-${d.id}`}
+                            >
+                              <Link
+                                href={`/accounting/journal-entries/new?draft=${d.id}`}
+                              >
+                                Resume
+                              </Link>
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => discardDraft(d.id)}
+                              data-testid={`button-discard-draft-${d.id}`}
+                              title="Discard draft"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 

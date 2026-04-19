@@ -24,3 +24,4 @@ export * from "./accounting_periods";
 export * from "./chart_of_accounts";
 export * from "./accounting_settings";
 export * from "./journal_entries";
+export * from "./manual_journal_entry_drafts";
