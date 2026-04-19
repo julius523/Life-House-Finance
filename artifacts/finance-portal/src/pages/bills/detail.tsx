@@ -19,6 +19,8 @@ import {
   getListTransactionsQueryKey,
   type RejectBillBody,
   RejectBillBodyAction,
+  RegenerateBillAccountingDraftBodyEventType,
+  MarkBillAccountingNotApplicableBodyEventType,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -317,7 +319,9 @@ export default function BillDetail() {
     try {
       await regenerateBillDraftMut.mutateAsync({
         id,
-        data: { eventType },
+        data: {
+          eventType: RegenerateBillAccountingDraftBodyEventType[eventType],
+        },
       });
       toast({ title: "Accounting draft regenerated" });
       refresh();
@@ -356,7 +360,10 @@ export default function BillDetail() {
     try {
       await markBillNotApplicableMut.mutateAsync({
         id,
-        data: { eventType, note: trimmed },
+        data: {
+          eventType: MarkBillAccountingNotApplicableBodyEventType[eventType],
+          note: trimmed,
+        },
       });
       toast({ title: "Marked as not applicable" });
       refresh();

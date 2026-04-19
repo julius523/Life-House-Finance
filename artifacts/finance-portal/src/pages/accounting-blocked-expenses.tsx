@@ -15,6 +15,8 @@ import {
   getGetBlockedBillsCountQueryKey,
   type BlockedExpenseRow,
   type BlockedBillRow,
+  RegenerateBillAccountingDraftBodyEventType,
+  MarkBillAccountingNotApplicableBodyEventType,
 } from "@workspace/api-client-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useQueryClient } from "@tanstack/react-query";
@@ -719,7 +721,10 @@ function BlockedBillsTab() {
     try {
       await regenerateBillDraftMut.mutateAsync({
         id: r.billId,
-        data: { eventType: r.eventType },
+        data: {
+          eventType:
+            RegenerateBillAccountingDraftBodyEventType[r.eventType],
+        },
       });
       toast({
         title: "Draft generated",
@@ -763,7 +768,11 @@ function BlockedBillsTab() {
     try {
       await markBillNotApplicableMut.mutateAsync({
         id: r.billId,
-        data: { eventType: r.eventType, note: trimmed },
+        data: {
+          eventType:
+            MarkBillAccountingNotApplicableBodyEventType[r.eventType],
+          note: trimmed,
+        },
       });
       toast({ title: "Marked not applicable" });
     } catch (err) {
