@@ -553,6 +553,8 @@ export const ApproveExpenseResponse = zod
               "archived_account",
               "non_postable_account",
               "invalid_payment_method_rule",
+              "missing_ap_account",
+              "missing_cash_account",
               "other",
             ])
             .optional(),
@@ -560,7 +562,7 @@ export const ApproveExpenseResponse = zod
         })
         .optional()
         .describe(
-          "Task #52 — outcome of an attempt to bridge an expense (or future\nbill) into a manual journal entry draft. `ok=true` means a draft\nis now linked; `created` distinguishes a brand new draft from\nre-returning an existing one (idempotent retry). `ok=false`\ncarries a stable machine-readable `reason` code.\n",
+          "Task #52 \/ #63 — outcome of an attempt to bridge a source document\n(expense or bill) into a manual journal entry draft. `ok=true` means\na draft is now linked; `created` distinguishes a brand new draft from\nre-returning an existing one (idempotent retry). `ok=false`\ncarries a stable machine-readable `reason` code.\n",
         ),
     }),
   );
@@ -584,13 +586,15 @@ export const RegenerateAccountingDraftForExpenseResponse = zod
         "archived_account",
         "non_postable_account",
         "invalid_payment_method_rule",
+        "missing_ap_account",
+        "missing_cash_account",
         "other",
       ])
       .optional(),
     message: zod.string().optional(),
   })
   .describe(
-    "Task #52 — outcome of an attempt to bridge an expense (or future\nbill) into a manual journal entry draft. `ok=true` means a draft\nis now linked; `created` distinguishes a brand new draft from\nre-returning an existing one (idempotent retry). `ok=false`\ncarries a stable machine-readable `reason` code.\n",
+    "Task #52 \/ #63 — outcome of an attempt to bridge a source document\n(expense or bill) into a manual journal entry draft. `ok=true` means\na draft is now linked; `created` distinguishes a brand new draft from\nre-returning an existing one (idempotent retry). `ok=false`\ncarries a stable machine-readable `reason` code.\n",
   );
 
 /**
@@ -910,6 +914,8 @@ export const ListBillsResponseItem = zod.object({
   description: zod.string().optional(),
   programId: zod.number().optional(),
   programName: zod.string().optional(),
+  categoryId: zod.number().nullish().describe("Task"),
+  categoryName: zod.string().nullish(),
   status: zod.enum([
     "draft",
     "submitted",
@@ -925,6 +931,18 @@ export const ListBillsResponseItem = zod.object({
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
   submittedByEmail: zod.string().optional(),
+  accountingStatus: zod
+    .enum(["pending", "draft_created", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingBlockReason: zod.string().nullish(),
+  accountingGeneratedAt: zod.coerce.date().nullish(),
+  accountingPaymentStatus: zod
+    .enum(["pending", "draft_created", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingPaymentBlockReason: zod.string().nullish(),
+  accountingPaymentGeneratedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
 export const ListBillsResponse = zod.array(ListBillsResponseItem);
@@ -940,6 +958,7 @@ export const CreateBillBody = zod.object({
   amount: zod.number(),
   description: zod.string().optional(),
   programId: zod.number().optional(),
+  categoryId: zod.number().nullish().describe("Task"),
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
 });
@@ -962,6 +981,8 @@ export const GetBillResponse = zod.object({
   description: zod.string().optional(),
   programId: zod.number().optional(),
   programName: zod.string().optional(),
+  categoryId: zod.number().nullish().describe("Task"),
+  categoryName: zod.string().nullish(),
   status: zod.enum([
     "draft",
     "submitted",
@@ -977,6 +998,18 @@ export const GetBillResponse = zod.object({
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
   submittedByEmail: zod.string().optional(),
+  accountingStatus: zod
+    .enum(["pending", "draft_created", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingBlockReason: zod.string().nullish(),
+  accountingGeneratedAt: zod.coerce.date().nullish(),
+  accountingPaymentStatus: zod
+    .enum(["pending", "draft_created", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingPaymentBlockReason: zod.string().nullish(),
+  accountingPaymentGeneratedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -995,6 +1028,7 @@ export const UpdateBillBody = zod.object({
   amount: zod.number(),
   description: zod.string().optional(),
   programId: zod.number().optional(),
+  categoryId: zod.number().nullish().describe("Task"),
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
 });
@@ -1010,6 +1044,8 @@ export const UpdateBillResponse = zod.object({
   description: zod.string().optional(),
   programId: zod.number().optional(),
   programName: zod.string().optional(),
+  categoryId: zod.number().nullish().describe("Task"),
+  categoryName: zod.string().nullish(),
   status: zod.enum([
     "draft",
     "submitted",
@@ -1025,6 +1061,18 @@ export const UpdateBillResponse = zod.object({
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
   submittedByEmail: zod.string().optional(),
+  accountingStatus: zod
+    .enum(["pending", "draft_created", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingBlockReason: zod.string().nullish(),
+  accountingGeneratedAt: zod.coerce.date().nullish(),
+  accountingPaymentStatus: zod
+    .enum(["pending", "draft_created", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingPaymentBlockReason: zod.string().nullish(),
+  accountingPaymentGeneratedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -1053,6 +1101,8 @@ export const RejectBillResponse = zod.object({
   description: zod.string().optional(),
   programId: zod.number().optional(),
   programName: zod.string().optional(),
+  categoryId: zod.number().nullish().describe("Task"),
+  categoryName: zod.string().nullish(),
   status: zod.enum([
     "draft",
     "submitted",
@@ -1068,6 +1118,18 @@ export const RejectBillResponse = zod.object({
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
   submittedByEmail: zod.string().optional(),
+  accountingStatus: zod
+    .enum(["pending", "draft_created", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingBlockReason: zod.string().nullish(),
+  accountingGeneratedAt: zod.coerce.date().nullish(),
+  accountingPaymentStatus: zod
+    .enum(["pending", "draft_created", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingPaymentBlockReason: zod.string().nullish(),
+  accountingPaymentGeneratedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -1089,6 +1151,8 @@ export const ResubmitBillResponse = zod.object({
   description: zod.string().optional(),
   programId: zod.number().optional(),
   programName: zod.string().optional(),
+  categoryId: zod.number().nullish().describe("Task"),
+  categoryName: zod.string().nullish(),
   status: zod.enum([
     "draft",
     "submitted",
@@ -1104,6 +1168,18 @@ export const ResubmitBillResponse = zod.object({
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
   submittedByEmail: zod.string().optional(),
+  accountingStatus: zod
+    .enum(["pending", "draft_created", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingBlockReason: zod.string().nullish(),
+  accountingGeneratedAt: zod.coerce.date().nullish(),
+  accountingPaymentStatus: zod
+    .enum(["pending", "draft_created", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingPaymentBlockReason: zod.string().nullish(),
+  accountingPaymentGeneratedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -1119,7 +1195,130 @@ export const ApproveBillBody = zod.object({
   notes: zod.string().optional(),
 });
 
-export const ApproveBillResponse = zod.object({
+export const ApproveBillResponse = zod
+  .object({
+    id: zod.number(),
+    vendorId: zod.number(),
+    vendorName: zod.string(),
+    invoiceNumber: zod.string().optional(),
+    invoiceDate: zod.coerce.date().optional(),
+    dueDate: zod.coerce.date(),
+    amount: zod.number(),
+    description: zod.string().optional(),
+    programId: zod.number().optional(),
+    programName: zod.string().optional(),
+    categoryId: zod.number().nullish().describe("Task"),
+    categoryName: zod.string().nullish(),
+    status: zod.enum([
+      "draft",
+      "submitted",
+      "approved",
+      "paid",
+      "overdue",
+      "rejected",
+      "needs_correction",
+    ]),
+    approvedBy: zod.string().optional(),
+    rejectionReason: zod.string().optional(),
+    paidDate: zod.coerce.date().optional(),
+    receiptIds: zod.array(zod.number()).optional(),
+    submittedBy: zod.string().optional(),
+    submittedByEmail: zod.string().optional(),
+    accountingStatus: zod
+      .enum(["pending", "draft_created", "blocked", "not_applicable"])
+      .optional()
+      .describe("Task"),
+    accountingBlockReason: zod.string().nullish(),
+    accountingGeneratedAt: zod.coerce.date().nullish(),
+    accountingPaymentStatus: zod
+      .enum(["pending", "draft_created", "blocked", "not_applicable"])
+      .optional()
+      .describe("Task"),
+    accountingPaymentBlockReason: zod.string().nullish(),
+    accountingPaymentGeneratedAt: zod.coerce.date().nullish(),
+    createdAt: zod.coerce.date(),
+  })
+  .and(
+    zod.object({
+      accounting: zod
+        .object({
+          ok: zod.boolean(),
+          created: zod.boolean().optional(),
+          manualJournalEntryDraftId: zod.number().optional(),
+          reason: zod
+            .enum([
+              "missing_category",
+              "missing_mapping",
+              "archived_account",
+              "non_postable_account",
+              "invalid_payment_method_rule",
+              "missing_ap_account",
+              "missing_cash_account",
+              "other",
+            ])
+            .optional(),
+          message: zod.string().optional(),
+        })
+        .optional()
+        .describe(
+          "Task #52 \/ #63 — outcome of an attempt to bridge a source document\n(expense or bill) into a manual journal entry draft. `ok=true` means\na draft is now linked; `created` distinguishes a brand new draft from\nre-returning an existing one (idempotent retry). `ok=false`\ncarries a stable machine-readable `reason` code.\n",
+        ),
+    }),
+  );
+
+/**
+ * @summary Task
+ */
+export const RegenerateBillAccountingDraftParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const RegenerateBillAccountingDraftBody = zod.object({
+  eventType: zod.enum(["accrual", "payment"]),
+});
+
+export const RegenerateBillAccountingDraftResponse = zod
+  .object({
+    ok: zod.boolean(),
+    created: zod.boolean().optional(),
+    manualJournalEntryDraftId: zod.number().optional(),
+    reason: zod
+      .enum([
+        "missing_category",
+        "missing_mapping",
+        "archived_account",
+        "non_postable_account",
+        "invalid_payment_method_rule",
+        "missing_ap_account",
+        "missing_cash_account",
+        "other",
+      ])
+      .optional(),
+    message: zod.string().optional(),
+  })
+  .describe(
+    "Task #52 \/ #63 — outcome of an attempt to bridge a source document\n(expense or bill) into a manual journal entry draft. `ok=true` means\na draft is now linked; `created` distinguishes a brand new draft from\nre-returning an existing one (idempotent retry). `ok=false`\ncarries a stable machine-readable `reason` code.\n",
+  );
+
+/**
+ * @summary Task
+ */
+export const MarkBillAccountingNotApplicableParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const markBillAccountingNotApplicableBodyNoteMin = 3;
+export const markBillAccountingNotApplicableBodyNoteMax = 500;
+
+export const MarkBillAccountingNotApplicableBody = zod.object({
+  eventType: zod.enum(["accrual", "payment"]),
+  note: zod
+    .string()
+    .min(markBillAccountingNotApplicableBodyNoteMin)
+    .max(markBillAccountingNotApplicableBodyNoteMax),
+});
+
+export const MarkBillAccountingNotApplicableResponse = zod.object({
   id: zod.number(),
   vendorId: zod.number(),
   vendorName: zod.string(),
@@ -1130,6 +1329,8 @@ export const ApproveBillResponse = zod.object({
   description: zod.string().optional(),
   programId: zod.number().optional(),
   programName: zod.string().optional(),
+  categoryId: zod.number().nullish().describe("Task"),
+  categoryName: zod.string().nullish(),
   status: zod.enum([
     "draft",
     "submitted",
@@ -1145,7 +1346,118 @@ export const ApproveBillResponse = zod.object({
   receiptIds: zod.array(zod.number()).optional(),
   submittedBy: zod.string().optional(),
   submittedByEmail: zod.string().optional(),
+  accountingStatus: zod
+    .enum(["pending", "draft_created", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingBlockReason: zod.string().nullish(),
+  accountingGeneratedAt: zod.coerce.date().nullish(),
+  accountingPaymentStatus: zod
+    .enum(["pending", "draft_created", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingPaymentBlockReason: zod.string().nullish(),
+  accountingPaymentGeneratedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Task
+ */
+export const listBlockedBillsQueryPageDefault = 1;
+export const listBlockedBillsQueryPageSizeDefault = 25;
+
+export const ListBlockedBillsQueryParams = zod.object({
+  page: zod.coerce.number().default(listBlockedBillsQueryPageDefault),
+  pageSize: zod.coerce.number().default(listBlockedBillsQueryPageSizeDefault),
+  eventType: zod
+    .enum(["accrual", "payment"])
+    .optional()
+    .describe("Filter to one leg ('accrual' or 'payment'). Omit for both."),
+  reasonCode: zod.coerce.string().optional(),
+});
+
+export const ListBlockedBillsResponse = zod.object({
+  items: zod.array(
+    zod
+      .object({
+        billId: zod.number(),
+        eventType: zod.enum(["accrual", "payment"]),
+        invoiceDate: zod.coerce.date().nullish(),
+        dueDate: zod.coerce.date(),
+        amount: zod.number(),
+        vendorId: zod.number(),
+        vendorName: zod.string(),
+        programId: zod.number().nullish(),
+        programName: zod.string().nullish(),
+        categoryId: zod.number().nullish(),
+        categoryName: zod.string().nullish(),
+        accountingBlockReason: zod.string().nullish(),
+        accountingGeneratedAt: zod.coerce.date().nullish(),
+      })
+      .describe("Task"),
+  ),
+  total: zod.number(),
+  page: zod.number(),
+  pageSize: zod.number(),
+  metrics: zod
+    .record(zod.string(), zod.number())
+    .describe("Counts keyed by accountingBlockReason. Missing keys mean zero."),
+});
+
+/**
+ * @summary Lightweight count of blocked bill legs (used for nav badge)
+ */
+export const GetBlockedBillsCountResponse = zod.object({
+  total: zod.number(),
+});
+
+/**
+ * @summary Bulk re-run accrual/payment draft generation for the given blocked bill legs
+ */
+export const retryBlockedBillsBodyItemsMax = 200;
+
+export const RetryBlockedBillsBody = zod.object({
+  items: zod
+    .array(
+      zod.object({
+        billId: zod.number(),
+        eventType: zod.enum(["accrual", "payment"]),
+      }),
+    )
+    .min(1)
+    .max(retryBlockedBillsBodyItemsMax),
+});
+
+export const RetryBlockedBillsResponse = zod.object({
+  results: zod.array(
+    zod.object({
+      billId: zod.number(),
+      eventType: zod.string(),
+      result: zod
+        .object({
+          ok: zod.boolean(),
+          created: zod.boolean().optional(),
+          manualJournalEntryDraftId: zod.number().optional(),
+          reason: zod
+            .enum([
+              "missing_category",
+              "missing_mapping",
+              "archived_account",
+              "non_postable_account",
+              "invalid_payment_method_rule",
+              "missing_ap_account",
+              "missing_cash_account",
+              "other",
+            ])
+            .optional(),
+          message: zod.string().optional(),
+        })
+        .describe(
+          "Task #52 \/ #63 — outcome of an attempt to bridge a source document\n(expense or bill) into a manual journal entry draft. `ok=true` means\na draft is now linked; `created` distinguishes a brand new draft from\nre-returning an existing one (idempotent retry). `ok=false`\ncarries a stable machine-readable `reason` code.\n",
+        ),
+    }),
+  ),
 });
 
 /**
@@ -1477,6 +1789,8 @@ export const ConvertTransactionToBillResponse = zod.object({
     description: zod.string().optional(),
     programId: zod.number().optional(),
     programName: zod.string().optional(),
+    categoryId: zod.number().nullish().describe("Task"),
+    categoryName: zod.string().nullish(),
     status: zod.enum([
       "draft",
       "submitted",
@@ -1492,6 +1806,18 @@ export const ConvertTransactionToBillResponse = zod.object({
     receiptIds: zod.array(zod.number()).optional(),
     submittedBy: zod.string().optional(),
     submittedByEmail: zod.string().optional(),
+    accountingStatus: zod
+      .enum(["pending", "draft_created", "blocked", "not_applicable"])
+      .optional()
+      .describe("Task"),
+    accountingBlockReason: zod.string().nullish(),
+    accountingGeneratedAt: zod.coerce.date().nullish(),
+    accountingPaymentStatus: zod
+      .enum(["pending", "draft_created", "blocked", "not_applicable"])
+      .optional()
+      .describe("Task"),
+    accountingPaymentBlockReason: zod.string().nullish(),
+    accountingPaymentGeneratedAt: zod.coerce.date().nullish(),
     createdAt: zod.coerce.date(),
   }),
   transaction: zod.object({
@@ -2965,13 +3291,15 @@ export const RetryBlockedExpensesResponse = zod.object({
               "archived_account",
               "non_postable_account",
               "invalid_payment_method_rule",
+              "missing_ap_account",
+              "missing_cash_account",
               "other",
             ])
             .optional(),
           message: zod.string().optional(),
         })
         .describe(
-          "Task #52 — outcome of an attempt to bridge an expense (or future\nbill) into a manual journal entry draft. `ok=true` means a draft\nis now linked; `created` distinguishes a brand new draft from\nre-returning an existing one (idempotent retry). `ok=false`\ncarries a stable machine-readable `reason` code.\n",
+          "Task #52 \/ #63 — outcome of an attempt to bridge a source document\n(expense or bill) into a manual journal entry draft. `ok=true` means\na draft is now linked; `created` distinguishes a brand new draft from\nre-returning an existing one (idempotent retry). `ok=false`\ncarries a stable machine-readable `reason` code.\n",
         ),
     }),
   ),

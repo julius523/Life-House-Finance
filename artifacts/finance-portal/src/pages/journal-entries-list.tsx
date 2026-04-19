@@ -67,10 +67,18 @@ type JournalEntry = {
   approver: EntryActor | null;
   // Task #53 — backend-derived source. Resolution order on the
   // server: copilot first, then expense, then manual.
-  source?: "manual" | "copilot" | "expense";
+  source?: "manual" | "copilot" | "expense" | "bill";
   // Task #53 — when source === 'expense', the originating expense
   // summary is included so the list cell can render "Expense #N".
   originatingExpense?: { id: number; merchant: string } | null;
+  // Task #63 — when source === 'bill', the originating bill summary is
+  // included so the list cell can render "Bill #N (Accrual)" /
+  // "Bill #N (Payment)".
+  originatingBill?: {
+    id: number;
+    eventType: "accrual" | "payment";
+    vendorName: string;
+  } | null;
 };
 
 function actorName(a: EntryActor | null): string {
@@ -80,7 +88,7 @@ function actorName(a: EntryActor | null): string {
 }
 
 type StatusFilter = "all" | "posted" | "reversed";
-type SourceFilter = "all" | "manual" | "copilot" | "expense";
+type SourceFilter = "all" | "manual" | "copilot" | "expense" | "bill";
 type DraftScope = "mine" | "all";
 type DraftStatus =
   | "draft"
@@ -428,6 +436,7 @@ export default function JournalEntriesListPage() {
                 <SelectItem value="manual">Manual</SelectItem>
                 <SelectItem value="copilot">Copilot</SelectItem>
                 <SelectItem value="expense">Expense</SelectItem>
+                <SelectItem value="bill">Bill</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -718,6 +727,29 @@ export default function JournalEntriesListPage() {
                             ) : (
                               <Badge variant="secondary" className="gap-1">
                                 Expense
+                              </Badge>
+                            )
+                          ) : src === "bill" ? (
+                            e.originatingBill ? (
+                              <Link
+                                href={`/bills/${e.originatingBill.id}`}
+                                onClick={(ev) => ev.stopPropagation()}
+                                data-testid={`link-source-bill-${e.id}`}
+                              >
+                                <Badge
+                                  variant="secondary"
+                                  className="gap-1 hover:underline"
+                                >
+                                  Bill #{e.originatingBill.id} (
+                                  {e.originatingBill.eventType === "accrual"
+                                    ? "Accrual"
+                                    : "Payment"}
+                                  )
+                                </Badge>
+                              </Link>
+                            ) : (
+                              <Badge variant="secondary" className="gap-1">
+                                Bill
                               </Badge>
                             )
                           ) : (

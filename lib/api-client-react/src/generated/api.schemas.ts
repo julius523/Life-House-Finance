@@ -134,13 +134,15 @@ export const AccountingDraftResultReason = {
   archived_account: "archived_account",
   non_postable_account: "non_postable_account",
   invalid_payment_method_rule: "invalid_payment_method_rule",
+  missing_ap_account: "missing_ap_account",
+  missing_cash_account: "missing_cash_account",
   other: "other",
 } as const;
 
 /**
- * Task #52 — outcome of an attempt to bridge an expense (or future
-bill) into a manual journal entry draft. `ok=true` means a draft
-is now linked; `created` distinguishes a brand new draft from
+ * Task #52 / #63 — outcome of an attempt to bridge a source document
+(expense or bill) into a manual journal entry draft. `ok=true` means
+a draft is now linked; `created` distinguishes a brand new draft from
 re-returning an existing one (idempotent retry). `ok=false`
 carries a stable machine-readable `reason` code.
 
@@ -151,6 +153,47 @@ export interface AccountingDraftResult {
   manualJournalEntryDraftId?: number;
   reason?: AccountingDraftResultReason;
   message?: string;
+}
+
+export type BlockedBillRowEventType =
+  (typeof BlockedBillRowEventType)[keyof typeof BlockedBillRowEventType];
+
+export const BlockedBillRowEventType = {
+  accrual: "accrual",
+  payment: "payment",
+} as const;
+
+/**
+ * Task
+ */
+export interface BlockedBillRow {
+  billId: number;
+  eventType: BlockedBillRowEventType;
+  invoiceDate?: string | null;
+  dueDate: string;
+  amount: number;
+  vendorId: number;
+  vendorName: string;
+  programId?: number | null;
+  programName?: string | null;
+  categoryId?: number | null;
+  categoryName?: string | null;
+  accountingBlockReason?: string | null;
+  accountingGeneratedAt?: string | null;
+}
+
+/**
+ * Counts keyed by accountingBlockReason. Missing keys mean zero.
+ */
+export type BlockedBillsListResponseMetrics = { [key: string]: number };
+
+export interface BlockedBillsListResponse {
+  items: BlockedBillRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Counts keyed by accountingBlockReason. Missing keys mean zero. */
+  metrics: BlockedBillsListResponseMetrics;
 }
 
 export type ExpensePaymentMethod =
@@ -411,6 +454,32 @@ export const BillStatus = {
   needs_correction: "needs_correction",
 } as const;
 
+/**
+ * Task
+ */
+export type BillAccountingStatus =
+  (typeof BillAccountingStatus)[keyof typeof BillAccountingStatus];
+
+export const BillAccountingStatus = {
+  pending: "pending",
+  draft_created: "draft_created",
+  blocked: "blocked",
+  not_applicable: "not_applicable",
+} as const;
+
+/**
+ * Task
+ */
+export type BillAccountingPaymentStatus =
+  (typeof BillAccountingPaymentStatus)[keyof typeof BillAccountingPaymentStatus];
+
+export const BillAccountingPaymentStatus = {
+  pending: "pending",
+  draft_created: "draft_created",
+  blocked: "blocked",
+  not_applicable: "not_applicable",
+} as const;
+
 export interface Bill {
   id: number;
   vendorId: number;
@@ -422,6 +491,9 @@ export interface Bill {
   description?: string;
   programId?: number;
   programName?: string;
+  /** Task */
+  categoryId?: number | null;
+  categoryName?: string | null;
   status: BillStatus;
   approvedBy?: string;
   rejectionReason?: string;
@@ -429,6 +501,14 @@ export interface Bill {
   receiptIds?: number[];
   submittedBy?: string;
   submittedByEmail?: string;
+  /** Task */
+  accountingStatus?: BillAccountingStatus;
+  accountingBlockReason?: string | null;
+  accountingGeneratedAt?: string | null;
+  /** Task */
+  accountingPaymentStatus?: BillAccountingPaymentStatus;
+  accountingPaymentBlockReason?: string | null;
+  accountingPaymentGeneratedAt?: string | null;
   createdAt: string;
 }
 
@@ -440,6 +520,8 @@ export interface CreateBillBody {
   amount: number;
   description?: string;
   programId?: number;
+  /** Task */
+  categoryId?: number | null;
   receiptIds?: number[];
   submittedBy?: string;
 }
@@ -1408,6 +1490,92 @@ export const RejectBillBodyAction = {
 export type RejectBillBody = {
   reason: string;
   action?: RejectBillBodyAction;
+};
+
+export type ApproveBill200 = Bill & {
+  accounting?: AccountingDraftResult;
+};
+
+export type RegenerateBillAccountingDraftBodyEventType =
+  (typeof RegenerateBillAccountingDraftBodyEventType)[keyof typeof RegenerateBillAccountingDraftBodyEventType];
+
+export const RegenerateBillAccountingDraftBodyEventType = {
+  accrual: "accrual",
+  payment: "payment",
+} as const;
+
+export type RegenerateBillAccountingDraftBody = {
+  eventType: RegenerateBillAccountingDraftBodyEventType;
+};
+
+export type MarkBillAccountingNotApplicableBodyEventType =
+  (typeof MarkBillAccountingNotApplicableBodyEventType)[keyof typeof MarkBillAccountingNotApplicableBodyEventType];
+
+export const MarkBillAccountingNotApplicableBodyEventType = {
+  accrual: "accrual",
+  payment: "payment",
+} as const;
+
+export type MarkBillAccountingNotApplicableBody = {
+  eventType: MarkBillAccountingNotApplicableBodyEventType;
+  /**
+   * @minLength 3
+   * @maxLength 500
+   */
+  note: string;
+};
+
+export type ListBlockedBillsParams = {
+  page?: number;
+  pageSize?: number;
+  /**
+   * Filter to one leg ('accrual' or 'payment'). Omit for both.
+   */
+  eventType?: ListBlockedBillsEventType;
+  reasonCode?: string;
+};
+
+export type ListBlockedBillsEventType =
+  (typeof ListBlockedBillsEventType)[keyof typeof ListBlockedBillsEventType];
+
+export const ListBlockedBillsEventType = {
+  accrual: "accrual",
+  payment: "payment",
+} as const;
+
+export type GetBlockedBillsCount200 = {
+  total: number;
+};
+
+export type RetryBlockedBillsBodyItemsItemEventType =
+  (typeof RetryBlockedBillsBodyItemsItemEventType)[keyof typeof RetryBlockedBillsBodyItemsItemEventType];
+
+export const RetryBlockedBillsBodyItemsItemEventType = {
+  accrual: "accrual",
+  payment: "payment",
+} as const;
+
+export type RetryBlockedBillsBodyItemsItem = {
+  billId: number;
+  eventType: RetryBlockedBillsBodyItemsItemEventType;
+};
+
+export type RetryBlockedBillsBody = {
+  /**
+   * @minItems 1
+   * @maxItems 200
+   */
+  items: RetryBlockedBillsBodyItemsItem[];
+};
+
+export type RetryBlockedBills200ResultsItem = {
+  billId: number;
+  eventType: string;
+  result: AccountingDraftResult;
+};
+
+export type RetryBlockedBills200 = {
+  results: RetryBlockedBills200ResultsItem[];
 };
 
 export type ListReceiptsParams = {

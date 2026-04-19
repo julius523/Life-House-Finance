@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { generatePaymentDraftFromBill } from "../lib/billDraftService";
 import { db } from "@workspace/db";
 import {
   transactionsTable,
@@ -442,6 +443,19 @@ router.post("/transactions/:id/convert-to-bill", async (req, res): Promise<void>
     referenceType: "bill",
   });
 
+  // Task #63 — convert-to-bill creates an already-paid bill, so fire the
+  // payment-leg generator. (No accrual leg fires because the bill never
+  // went through approval; finance can manually generate one if needed.)
+  if (req.authUser) {
+    const display =
+      `${req.authUser.firstName} ${req.authUser.lastName}`.trim() ||
+      req.authUser.email;
+    await generatePaymentDraftFromBill(bill.id, {
+      id: req.authUser.id,
+      display,
+    });
+  }
+
   res.json({
     bill: {
       id: bill.id,
@@ -545,6 +559,18 @@ router.post("/transactions/:id/link-bill", async (req, res): Promise<void> => {
     .set({ matchedBillId: bill.id, status: "matched" })
     .where(eq(transactionsTable.id, id))
     .returning();
+  // Task #63 — when a bank transaction is linked to an approved bill, that
+  // is the moment the bill is paid. Flip status->paid so the payment-leg
+  // generator can run (and so reports treat the bill as expensed).
+  let billForBridge = bill;
+  if (bill.status === "approved" || bill.status === "submitted" || bill.status === "overdue") {
+    const [refreshed] = await db
+      .update(billsTable)
+      .set({ status: "paid", paidDate: tx.transactionDate })
+      .where(eq(billsTable.id, bill.id))
+      .returning();
+    if (refreshed) billForBridge = refreshed;
+  }
   await db.insert(activityLogTable).values({
     type: "transaction_imported",
     description: `Transaction #${tx.id} linked to bill #${bill.id}`,
@@ -555,6 +581,15 @@ router.post("/transactions/:id/link-bill", async (req, res): Promise<void> => {
     referenceId: tx.id,
     referenceType: "transaction",
   });
+  if (billForBridge.status === "paid" && req.authUser) {
+    const display =
+      `${req.authUser.firstName} ${req.authUser.lastName}`.trim() ||
+      req.authUser.email;
+    await generatePaymentDraftFromBill(billForBridge.id, {
+      id: req.authUser.id,
+      display,
+    });
+  }
   res.json(await formatTransaction(updated!));
 });
 

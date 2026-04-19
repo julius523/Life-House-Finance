@@ -96,6 +96,23 @@ type DraftRecord = {
     } | null;
     approvedAt: string | null;
   } | null;
+  // Task #63 — populated when this draft was auto-generated from a bill
+  // (either accrual or payment leg).
+  originatingBill?: {
+    id: number;
+    eventType: "accrual" | "payment";
+    vendorId: number;
+    vendorName: string;
+    amount: number;
+    invoiceDate: string | null;
+    dueDate: string;
+    status: string;
+    programId: number | null;
+    programName: string | null;
+    categoryId: number | null;
+    categoryName: string | null;
+    approvedAt: string | null;
+  } | null;
 };
 
 type UserSummary = {
@@ -581,6 +598,105 @@ export default function JournalEntryDraftDetailPage() {
                 <div className="font-medium">
                   {format(
                     new Date(draft.originatingExpense.approvedAt),
+                    "MMM d, yyyy",
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/*
+        Task #63 — Originating bill card. Renders for either accrual or
+        payment legs; the leg badge tells reviewers which posting this
+        draft will produce when posted.
+      */}
+      {draft.originatingBill && (
+        <Card data-testid="card-originating-bill">
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base">Originating bill</CardTitle>
+              <Badge
+                variant="outline"
+                className="capitalize"
+                data-testid="badge-bill-event-type"
+              >
+                {draft.originatingBill.eventType}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Bill
+              </div>
+              <Link
+                href={`/bills/${draft.originatingBill.id}`}
+                className="font-medium text-primary hover:underline"
+                data-testid="link-originating-bill"
+              >
+                #{draft.originatingBill.id}
+              </Link>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Vendor
+              </div>
+              <div className="font-medium">
+                {draft.originatingBill.vendorName || "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                {draft.originatingBill.invoiceDate ? "Invoice date" : "Due date"}
+              </div>
+              <div className="font-medium">
+                {format(
+                  parseDateOnly(
+                    draft.originatingBill.invoiceDate ??
+                      draft.originatingBill.dueDate,
+                  ),
+                  "MMM d, yyyy",
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Amount
+              </div>
+              <div className="font-medium font-mono">
+                ${draft.originatingBill.amount.toFixed(2)}
+              </div>
+            </div>
+            {draft.originatingBill.categoryName && (
+              <div>
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Category
+                </div>
+                <div className="font-medium">
+                  {draft.originatingBill.categoryName}
+                </div>
+              </div>
+            )}
+            {draft.originatingBill.programName && (
+              <div>
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Program
+                </div>
+                <div className="font-medium">
+                  {draft.originatingBill.programName}
+                </div>
+              </div>
+            )}
+            {draft.originatingBill.approvedAt && (
+              <div>
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Approved
+                </div>
+                <div className="font-medium">
+                  {format(
+                    new Date(draft.originatingBill.approvedAt),
                     "MMM d, yyyy",
                   )}
                 </div>

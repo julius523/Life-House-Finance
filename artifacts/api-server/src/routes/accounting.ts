@@ -26,6 +26,8 @@ import {
   expensesTable,
   accountingSourceLinksTable,
   programsTable,
+  billsTable,
+  vendorsTable,
   type ManualJournalEntryDraftRow,
   type CopilotMessageRow,
   type CopilotThreadRow,
@@ -35,6 +37,10 @@ import {
 } from "@workspace/db";
 import { requireAuth } from "../lib/auth";
 import { generateDraftFromExpense } from "../lib/expenseDraftService";
+import {
+  generateAccrualDraftFromBill,
+  generatePaymentDraftFromBill,
+} from "../lib/billDraftService";
 import {
   postApprovedJournalEntry,
   postManualJournalEntry,
@@ -1689,6 +1695,7 @@ function serializeJournalEntry(
   lines?: Array<typeof journalEntryLinesTable.$inferSelect>,
   users?: Map<number, typeof usersTable.$inferSelect>,
   originatingExpense?: OriginatingExpenseSummary | null,
+  originatingBill?: OriginatingBillSummary | null,
 ) {
   return {
     id: je.id,
@@ -1712,11 +1719,16 @@ function serializeJournalEntry(
     reversalReason: je.reversalReason,
     manualDraftId: je.manualDraftId,
     createdAt: je.createdAt,
-    // Task #53 — derived from accounting_source_links + agent_action_id so
-    // the UI can render a Source badge ('expense' | 'manual' | 'copilot')
-    // without recomputing the rule client-side.
-    source: deriveJournalEntrySource(je, originatingExpense ?? null),
+    // Task #53/#63 — derived from accounting_source_links + agent_action_id
+    // so the UI can render a Source badge without recomputing client-side.
+    source: deriveJournalEntrySource(
+      je,
+      originatingExpense ?? null,
+      originatingBill ?? null,
+    ),
     originatingExpense: originatingExpense ?? null,
+    // Task #63 — bill-sourced entries set this; otherwise null.
+    originatingBill: originatingBill ?? null,
     ...(lines ? { lines } : {}),
   };
 }
@@ -1724,9 +1736,11 @@ function serializeJournalEntry(
 function deriveJournalEntrySource(
   je: typeof journalEntriesTable.$inferSelect,
   originatingExpense: OriginatingExpenseSummary | null,
-): "manual" | "copilot" | "expense" {
+  originatingBill: OriginatingBillSummary | null = null,
+): "manual" | "copilot" | "expense" | "bill" {
   if (je.agentActionId !== null) return "copilot";
   if (originatingExpense) return "expense";
+  if (originatingBill) return "bill";
   return "manual";
 }
 
@@ -1910,6 +1924,216 @@ async function loadOriginatingExpensesForJournalEntries(
     }
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Task #63 — originating bill plumbing (parallel to expense plumbing above).
+// A bill can produce two source-link rows (eventType='accrual' and
+// 'payment'); both can resolve to the same draft/JE pair or to different
+// pairs. The summary returned to the client is therefore keyed per-row and
+// carries `eventType` so the UI can render "Accrual" / "Payment" badges.
+// ---------------------------------------------------------------------------
+
+type OriginatingBillSummary = {
+  id: number;
+  eventType: "accrual" | "payment";
+  vendorId: number;
+  vendorName: string;
+  amount: number;
+  invoiceDate: string | null;
+  dueDate: string;
+  status: string;
+  programId: number | null;
+  programName: string | null;
+  categoryId: number | null;
+  categoryName: string | null;
+  approvedAt: string | null;
+};
+
+async function loadOriginatingBills(opts: {
+  journalEntryIds?: number[];
+  manualDraftIds?: number[];
+}): Promise<{
+  byJournalEntryId: Map<number, OriginatingBillSummary>;
+  byManualDraftId: Map<number, OriginatingBillSummary>;
+}> {
+  const jeIds = (opts.journalEntryIds ?? []).filter((n) => Number.isInteger(n));
+  const draftIds = (opts.manualDraftIds ?? []).filter((n) =>
+    Number.isInteger(n),
+  );
+  const byJournalEntryId = new Map<number, OriginatingBillSummary>();
+  const byManualDraftId = new Map<number, OriginatingBillSummary>();
+  if (jeIds.length === 0 && draftIds.length === 0) {
+    return { byJournalEntryId, byManualDraftId };
+  }
+  const conds = [eq(accountingSourceLinksTable.sourceType, "bill")];
+  const orParts = [];
+  if (jeIds.length > 0) {
+    orParts.push(inArray(accountingSourceLinksTable.journalEntryId, jeIds));
+  }
+  if (draftIds.length > 0) {
+    orParts.push(
+      inArray(accountingSourceLinksTable.manualJournalEntryDraftId, draftIds),
+    );
+  }
+  conds.push(
+    orParts.length === 1
+      ? orParts[0]!
+      : sql`(${orParts[0]} OR ${orParts[1]})`,
+  );
+  const rows = await db
+    .select({
+      sourceId: accountingSourceLinksTable.sourceId,
+      eventType: accountingSourceLinksTable.eventType,
+      journalEntryId: accountingSourceLinksTable.journalEntryId,
+      manualJournalEntryDraftId:
+        accountingSourceLinksTable.manualJournalEntryDraftId,
+      billId: billsTable.id,
+      vendorId: billsTable.vendorId,
+      amount: billsTable.amount,
+      invoiceDate: billsTable.invoiceDate,
+      dueDate: billsTable.dueDate,
+      billStatus: billsTable.status,
+      programId: billsTable.programId,
+      categoryId: billsTable.categoryId,
+    })
+    .from(accountingSourceLinksTable)
+    .innerJoin(
+      billsTable,
+      eq(billsTable.id, accountingSourceLinksTable.sourceId),
+    )
+    .where(and(...conds));
+
+  const billIds = Array.from(new Set(rows.map((r) => r.billId)));
+  const vendorIds = Array.from(new Set(rows.map((r) => r.vendorId)));
+  const programIds = Array.from(
+    new Set(rows.map((r) => r.programId).filter((v): v is number => v !== null)),
+  );
+  const categoryIds = Array.from(
+    new Set(rows.map((r) => r.categoryId).filter((v): v is number => v !== null)),
+  );
+  const vendorNameById = new Map<number, string>();
+  if (vendorIds.length > 0) {
+    const vrows = await db
+      .select({ id: vendorsTable.id, name: vendorsTable.name })
+      .from(vendorsTable)
+      .where(inArray(vendorsTable.id, vendorIds));
+    for (const v of vrows) vendorNameById.set(v.id, v.name);
+  }
+  const programNameById = new Map<number, string>();
+  if (programIds.length > 0) {
+    const prows = await db
+      .select({ id: programsTable.id, name: programsTable.name })
+      .from(programsTable)
+      .where(inArray(programsTable.id, programIds));
+    for (const p of prows) programNameById.set(p.id, p.name);
+  }
+  const categoryNameById = new Map<number, string>();
+  if (categoryIds.length > 0) {
+    const crows = await db
+      .select({ id: expenseCategoriesTable.id, name: expenseCategoriesTable.name })
+      .from(expenseCategoriesTable)
+      .where(inArray(expenseCategoriesTable.id, categoryIds));
+    for (const c of crows) categoryNameById.set(c.id, c.name);
+  }
+  const approvedAtByBillId = new Map<number, Date>();
+  if (billIds.length > 0) {
+    const approvals = await db
+      .select({
+        referenceId: activityLogTable.referenceId,
+        createdAt: activityLogTable.createdAt,
+      })
+      .from(activityLogTable)
+      .where(
+        and(
+          eq(activityLogTable.type, "bill_approved"),
+          eq(activityLogTable.referenceType, "bill"),
+          inArray(activityLogTable.referenceId, billIds),
+        ),
+      )
+      .orderBy(desc(activityLogTable.createdAt));
+    for (const a of approvals) {
+      if (a.referenceId === null || a.referenceId === undefined) continue;
+      if (!approvedAtByBillId.has(a.referenceId)) {
+        approvedAtByBillId.set(a.referenceId, a.createdAt);
+      }
+    }
+  }
+
+  for (const r of rows) {
+    if (r.eventType !== "accrual" && r.eventType !== "payment") continue;
+    const summary: OriginatingBillSummary = {
+      id: r.billId,
+      eventType: r.eventType as "accrual" | "payment",
+      vendorId: r.vendorId,
+      vendorName: vendorNameById.get(r.vendorId) ?? "",
+      amount: parseFloat(r.amount),
+      invoiceDate: r.invoiceDate ?? null,
+      dueDate: r.dueDate,
+      status: r.billStatus,
+      programId: r.programId ?? null,
+      programName:
+        r.programId !== null
+          ? (programNameById.get(r.programId) ?? null)
+          : null,
+      categoryId: r.categoryId ?? null,
+      categoryName:
+        r.categoryId !== null
+          ? (categoryNameById.get(r.categoryId) ?? null)
+          : null,
+      approvedAt:
+        approvedAtByBillId.get(r.billId)?.toISOString() ?? null,
+    };
+    if (r.journalEntryId !== null) {
+      byJournalEntryId.set(r.journalEntryId, summary);
+    }
+    if (r.manualJournalEntryDraftId !== null) {
+      byManualDraftId.set(r.manualJournalEntryDraftId, summary);
+    }
+  }
+  return { byJournalEntryId, byManualDraftId };
+}
+
+async function loadOriginatingBillsForJournalEntries(
+  jes: Array<{ id: number; manualDraftId: number | null }>,
+): Promise<Map<number, OriginatingBillSummary>> {
+  if (jes.length === 0) return new Map();
+  const direct = await loadOriginatingBills({
+    journalEntryIds: jes.map((j) => j.id),
+  });
+  const result = new Map<number, OriginatingBillSummary>(
+    direct.byJournalEntryId,
+  );
+  const draftIdsToResolve: number[] = [];
+  const draftIdToJeId = new Map<number, number>();
+  for (const j of jes) {
+    if (result.has(j.id)) continue;
+    if (j.manualDraftId !== null && j.manualDraftId !== undefined) {
+      draftIdsToResolve.push(j.manualDraftId);
+      draftIdToJeId.set(j.manualDraftId, j.id);
+    }
+  }
+  if (draftIdsToResolve.length > 0) {
+    const viaDraft = await loadOriginatingBills({
+      manualDraftIds: draftIdsToResolve,
+    });
+    for (const [draftId, summary] of viaDraft.byManualDraftId.entries()) {
+      const jeId = draftIdToJeId.get(draftId);
+      if (jeId !== undefined && !result.has(jeId)) {
+        result.set(jeId, summary);
+      }
+    }
+  }
+  return result;
+}
+
+async function originatingBillForDraft(
+  draftId: number,
+): Promise<OriginatingBillSummary | null> {
+  const { byManualDraftId } = await loadOriginatingBills({
+    manualDraftIds: [draftId],
+  });
+  return byManualDraftId.get(draftId) ?? null;
 }
 
 router.post(
@@ -2345,9 +2569,19 @@ router.get(
     const byJournalEntryId = await loadOriginatingExpensesForJournalEntries(
       rows.map((r) => ({ id: r.id, manualDraftId: r.manualDraftId })),
     );
+    // Task #63 — parallel resolution for bill-sourced entries.
+    const billsByJeId = await loadOriginatingBillsForJournalEntries(
+      rows.map((r) => ({ id: r.id, manualDraftId: r.manualDraftId })),
+    );
     res.json({
       entries: rows.map((r) =>
-        serializeJournalEntry(r, undefined, users, byJournalEntryId.get(r.id) ?? null),
+        serializeJournalEntry(
+          r,
+          undefined,
+          users,
+          byJournalEntryId.get(r.id) ?? null,
+          billsByJeId.get(r.id) ?? null,
+        ),
       ),
       total: totalRow[0]?.count ?? 0,
       limit,
@@ -2624,12 +2858,16 @@ router.get(
     const byJournalEntryId = await loadOriginatingExpensesForJournalEntries(
       [{ id: je.id, manualDraftId: je.manualDraftId }],
     );
+    const billsByJeId = await loadOriginatingBillsForJournalEntries(
+      [{ id: je.id, manualDraftId: je.manualDraftId }],
+    );
     res.json({
       journalEntry: serializeJournalEntry(
         je,
         lines,
         users,
         byJournalEntryId.get(je.id) ?? null,
+        billsByJeId.get(je.id) ?? null,
       ),
     });
   },
@@ -2753,6 +2991,7 @@ function canAccessDraft(
 function serializeDraft(
   d: ManualJournalEntryDraftRow,
   originatingExpense?: OriginatingExpenseSummary | null,
+  originatingBill?: OriginatingBillSummary | null,
 ) {
   return {
     id: d.id,
@@ -2778,6 +3017,8 @@ function serializeDraft(
     // so the draft detail page can show "From expense #N" without a second
     // round-trip. Null for hand-rolled drafts.
     originatingExpense: originatingExpense ?? null,
+    // Task #63 — same treatment for bill-sourced drafts.
+    originatingBill: originatingBill ?? null,
   };
 }
 
@@ -2793,6 +3034,21 @@ async function originatingExpenseForDraft(
     manualDraftIds: [draftId],
   });
   return byManualDraftId.get(draftId) ?? null;
+}
+
+// Task #63 — fetch BOTH the expense and bill summaries for a draft in
+// parallel so the draft detail endpoints don't pay two round-trips.
+async function draftSourceContext(
+  draftId: number,
+): Promise<{
+  expense: OriginatingExpenseSummary | null;
+  bill: OriginatingBillSummary | null;
+}> {
+  const [expense, bill] = await Promise.all([
+    originatingExpenseForDraft(draftId),
+    originatingBillForDraft(draftId),
+  ]);
+  return { expense, bill };
 }
 
 /**
@@ -3068,7 +3324,7 @@ router.get(
       res.status(403).json({ error: "Draft is owned by another user" });
       return;
     }
-    res.json({ draft: serializeDraft(draft, await originatingExpenseForDraft(draft.id)) });
+    { const __ctx = await draftSourceContext(draft.id); res.json({ draft: serializeDraft(draft, __ctx.expense, __ctx.bill) }); }
   },
 );
 
@@ -3155,7 +3411,7 @@ router.patch(
       user,
       `${actorLabel(user)} edited manual JE draft #${updated!.id}`,
     );
-    res.json({ draft: serializeDraft(updated!, await originatingExpenseForDraft(updated!.id)) });
+    { const __ctx = await draftSourceContext(updated!.id); res.json({ draft: serializeDraft(updated!, __ctx.expense, __ctx.bill) }); }
   },
 );
 
@@ -3414,7 +3670,7 @@ router.post(
       user,
       `${actorLabel(user)} submitted manual JE draft #${updated!.id} for approval`,
     );
-    res.json({ draft: serializeDraft(updated!, await originatingExpenseForDraft(updated!.id)) });
+    { const __ctx = await draftSourceContext(updated!.id); res.json({ draft: serializeDraft(updated!, __ctx.expense, __ctx.bill) }); }
   },
 );
 
@@ -3497,7 +3753,7 @@ router.post(
       user,
       `${actorLabel(user)} approved manual JE draft #${updated!.id}`,
     );
-    res.json({ draft: serializeDraft(updated!, await originatingExpenseForDraft(updated!.id)) });
+    { const __ctx = await draftSourceContext(updated!.id); res.json({ draft: serializeDraft(updated!, __ctx.expense, __ctx.bill) }); }
   },
 );
 
@@ -3581,7 +3837,7 @@ router.post(
       // free-text description.
       { reason: parsed.data.reason },
     );
-    res.json({ draft: serializeDraft(updated!, await originatingExpenseForDraft(updated!.id)) });
+    { const __ctx = await draftSourceContext(updated!.id); res.json({ draft: serializeDraft(updated!, __ctx.expense, __ctx.bill) }); }
   },
 );
 
@@ -5348,6 +5604,296 @@ router.post(
       } else {
         results.push({
           expenseId,
+          result: { ok: false, reason: r.reason, message: r.message },
+        });
+      }
+    }
+    res.json({ results });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Task #63 — Blocked bill bridge queue. Mirrors blocked-expenses but spans
+// two lifecycle legs ('accrual' and 'payment'). One bill can appear twice
+// (once per blocked leg).
+// ---------------------------------------------------------------------------
+
+type BillEventType = "accrual" | "payment";
+
+router.get(
+  "/accounting/blocked-bills",
+  async (req, res): Promise<void> => {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const pageRaw = Number(req.query["page"]);
+    const page = Number.isInteger(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+    const sizeRaw = Number(req.query["pageSize"]);
+    const pageSize =
+      Number.isInteger(sizeRaw) && sizeRaw > 0 && sizeRaw <= 100 ? sizeRaw : 25;
+
+    const eventTypeRaw = req.query["eventType"];
+    const eventType: BillEventType | null =
+      eventTypeRaw === "accrual" || eventTypeRaw === "payment"
+        ? eventTypeRaw
+        : null;
+    const reasonCode =
+      typeof req.query["reasonCode"] === "string" &&
+      (req.query["reasonCode"] as string).length > 0
+        ? (req.query["reasonCode"] as string)
+        : null;
+
+    const accrualBlocked = eq(billsTable.accountingStatus, "blocked");
+    const paymentBlocked = eq(billsTable.accountingPaymentStatus, "blocked");
+
+    // Pull both legs as separate query sets, then merge in JS. This keeps
+    // SQL simple and lets us paginate over the unioned virtual list.
+    const accrualConds = [accrualBlocked];
+    const paymentConds = [paymentBlocked];
+    if (reasonCode) {
+      accrualConds.push(eq(billsTable.accountingBlockReason, reasonCode));
+      paymentConds.push(
+        eq(billsTable.accountingPaymentBlockReason, reasonCode),
+      );
+    }
+
+    const accrualRows =
+      eventType === "payment"
+        ? []
+        : await db
+            .select()
+            .from(billsTable)
+            .where(and(...accrualConds))
+            .orderBy(desc(billsTable.accountingGeneratedAt));
+    const paymentRows =
+      eventType === "accrual"
+        ? []
+        : await db
+            .select()
+            .from(billsTable)
+            .where(and(...paymentConds))
+            .orderBy(desc(billsTable.accountingPaymentGeneratedAt));
+
+    type Row = (typeof billsTable.$inferSelect) & {
+      _eventType: BillEventType;
+    };
+    const merged: Row[] = [
+      ...accrualRows.map((r) => ({ ...r, _eventType: "accrual" as const })),
+      ...paymentRows.map((r) => ({ ...r, _eventType: "payment" as const })),
+    ];
+    merged.sort((a, b) => {
+      const ta =
+        a._eventType === "accrual"
+          ? a.accountingGeneratedAt?.getTime() ?? 0
+          : a.accountingPaymentGeneratedAt?.getTime() ?? 0;
+      const tb =
+        b._eventType === "accrual"
+          ? b.accountingGeneratedAt?.getTime() ?? 0
+          : b.accountingPaymentGeneratedAt?.getTime() ?? 0;
+      return tb - ta;
+    });
+
+    const total = merged.length;
+    const slice = merged.slice((page - 1) * pageSize, page * pageSize);
+
+    const vendorIds = Array.from(new Set(slice.map((r) => r.vendorId)));
+    const programIds = Array.from(
+      new Set(slice.map((r) => r.programId).filter((v): v is number => v !== null)),
+    );
+    const categoryIds = Array.from(
+      new Set(slice.map((r) => r.categoryId).filter((v): v is number => v !== null)),
+    );
+    const vendorRows =
+      vendorIds.length > 0
+        ? await db
+            .select({ id: vendorsTable.id, name: vendorsTable.name })
+            .from(vendorsTable)
+            .where(inArray(vendorsTable.id, vendorIds))
+        : [];
+    const programRows =
+      programIds.length > 0
+        ? await db
+            .select({ id: programsTable.id, name: programsTable.name })
+            .from(programsTable)
+            .where(inArray(programsTable.id, programIds))
+        : [];
+    const categoryRows =
+      categoryIds.length > 0
+        ? await db
+            .select({
+              id: expenseCategoriesTable.id,
+              name: expenseCategoriesTable.name,
+            })
+            .from(expenseCategoriesTable)
+            .where(inArray(expenseCategoriesTable.id, categoryIds))
+        : [];
+    const vendorById = new Map(vendorRows.map((r) => [r.id, r.name]));
+    const programById = new Map(programRows.map((r) => [r.id, r.name]));
+    const categoryById = new Map(categoryRows.map((r) => [r.id, r.name]));
+
+    const items = slice.map((r) => ({
+      billId: r.id,
+      eventType: r._eventType,
+      invoiceDate: r.invoiceDate ?? null,
+      dueDate: r.dueDate,
+      amount: parseFloat(r.amount),
+      vendorId: r.vendorId,
+      vendorName: vendorById.get(r.vendorId) ?? "Unknown Vendor",
+      programId: r.programId ?? null,
+      programName:
+        r.programId !== null ? (programById.get(r.programId) ?? null) : null,
+      categoryId: r.categoryId ?? null,
+      categoryName:
+        r.categoryId !== null
+          ? (categoryById.get(r.categoryId) ?? null)
+          : null,
+      accountingBlockReason:
+        r._eventType === "accrual"
+          ? r.accountingBlockReason ?? null
+          : r.accountingPaymentBlockReason ?? null,
+      accountingGeneratedAt:
+        r._eventType === "accrual"
+          ? r.accountingGeneratedAt?.toISOString() ?? null
+          : r.accountingPaymentGeneratedAt?.toISOString() ?? null,
+    }));
+
+    const metrics: Record<string, number> = {};
+    for (const r of merged) {
+      const reason =
+        r._eventType === "accrual"
+          ? r.accountingBlockReason
+          : r.accountingPaymentBlockReason;
+      const key = reason ?? "other";
+      metrics[key] = (metrics[key] ?? 0) + 1;
+    }
+
+    res.json({ items, total, page, pageSize, metrics });
+  },
+);
+
+router.get(
+  "/accounting/blocked-bills/count",
+  async (req, res): Promise<void> => {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const [accrualRow] = await db
+      .select({ cnt: sql<number>`count(*)::int` })
+      .from(billsTable)
+      .where(eq(billsTable.accountingStatus, "blocked"));
+    const [paymentRow] = await db
+      .select({ cnt: sql<number>`count(*)::int` })
+      .from(billsTable)
+      .where(eq(billsTable.accountingPaymentStatus, "blocked"));
+    res.json({
+      total:
+        Number(accrualRow?.cnt ?? 0) + Number(paymentRow?.cnt ?? 0),
+    });
+  },
+);
+
+router.post(
+  "/accounting/blocked-bills/retry",
+  async (req, res): Promise<void> => {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const itemsRaw = req.body?.items;
+    if (
+      !Array.isArray(itemsRaw) ||
+      itemsRaw.length === 0 ||
+      itemsRaw.length > 200
+    ) {
+      res
+        .status(400)
+        .json({ error: "items must be a 1–200 element array of {billId,eventType}" });
+      return;
+    }
+    const items: Array<{ billId: number; eventType: BillEventType }> = [];
+    for (const v of itemsRaw) {
+      const billId = Number(v?.billId);
+      const eventType = v?.eventType;
+      if (
+        !Number.isInteger(billId) ||
+        billId <= 0 ||
+        (eventType !== "accrual" && eventType !== "payment")
+      ) {
+        res.status(400).json({ error: "Invalid items entry" });
+        return;
+      }
+      items.push({ billId, eventType });
+    }
+    const u = req.authUser!;
+    const display = `${u.firstName} ${u.lastName}`.trim() || u.email;
+
+    // Pre-filter: only retry rows that are actually still blocked on the
+    // requested leg (analogous to blocked-expenses retry).
+    const billIds = Array.from(new Set(items.map((i) => i.billId)));
+    const billRows = await db
+      .select({
+        id: billsTable.id,
+        accountingStatus: billsTable.accountingStatus,
+        accountingPaymentStatus: billsTable.accountingPaymentStatus,
+      })
+      .from(billsTable)
+      .where(inArray(billsTable.id, billIds));
+    const statusById = new Map(
+      billRows.map((r) => [
+        r.id,
+        {
+          accrual: r.accountingStatus,
+          payment: r.accountingPaymentStatus,
+        },
+      ]),
+    );
+
+    const results: Array<{
+      billId: number;
+      eventType: BillEventType;
+      result:
+        | { ok: true; created: boolean; manualJournalEntryDraftId: number }
+        | { ok: false; reason: string; message?: string };
+    }> = [];
+    for (const { billId, eventType } of items) {
+      const status = statusById.get(billId);
+      const legStatus =
+        eventType === "accrual" ? status?.accrual : status?.payment;
+      if (legStatus !== "blocked") {
+        results.push({
+          billId,
+          eventType,
+          result: {
+            ok: false,
+            reason: "not_blocked",
+            message: "Bill leg is not in the blocked queue",
+          },
+        });
+        continue;
+      }
+      const r =
+        eventType === "accrual"
+          ? await generateAccrualDraftFromBill(billId, { id: u.id, display })
+          : await generatePaymentDraftFromBill(billId, { id: u.id, display });
+      if (r.ok) {
+        results.push({
+          billId,
+          eventType,
+          result: {
+            ok: true,
+            created: r.created,
+            manualJournalEntryDraftId: r.draftId,
+          },
+        });
+      } else {
+        results.push({
+          billId,
+          eventType,
           result: { ok: false, reason: r.reason, message: r.message },
         });
       }

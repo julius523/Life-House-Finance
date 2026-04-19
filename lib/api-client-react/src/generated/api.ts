@@ -24,8 +24,10 @@ import type {
   ActivityItem,
   ApprovalActionBody,
   ApprovalQueueItem,
+  ApproveBill200,
   ApproveExpense200,
   Bill,
+  BlockedBillsListResponse,
   BlockedExpensesListResponse,
   ChartOfAccountActivityResponse,
   ChartOfAccountDetailResponse,
@@ -56,6 +58,7 @@ import type {
   ExpenseListResponse,
   FinancialSummaryReport,
   GetAccountActivityReportParams,
+  GetBlockedBillsCount200,
   GetBlockedExpensesCount200,
   GetChartOfAccountActivityParams,
   GetFinancialSummaryReportParams,
@@ -69,6 +72,7 @@ import type {
   LinkTransactionToProgramBody,
   ListApprovalsParams,
   ListBillsParams,
+  ListBlockedBillsParams,
   ListBlockedExpensesParams,
   ListChartOfAccountsParams,
   ListExpenseCategoriesParams,
@@ -79,6 +83,7 @@ import type {
   ListTransactionsParams,
   ListVendorsParams,
   MarkAllNotificationsRead200,
+  MarkBillAccountingNotApplicableBody,
   MarkExpenseAccountingNotApplicableBody,
   MissingReceiptItem,
   MonthEndChecklist,
@@ -92,10 +97,13 @@ import type {
   Receipt,
   ReceiptListResponse,
   ReconciliationSummary,
+  RegenerateBillAccountingDraftBody,
   RejectBillBody,
   RejectionBody,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
+  RetryBlockedBills200,
+  RetryBlockedBillsBody,
   RetryBlockedExpenses200,
   RetryBlockedExpensesBody,
   SpendingByDimension,
@@ -2186,8 +2194,8 @@ export const approveBill = async (
   id: number,
   approvalActionBody: ApprovalActionBody,
   options?: RequestInit,
-): Promise<Bill> => {
-  return customFetch<Bill>(getApproveBillUrl(id), {
+): Promise<ApproveBill200> => {
+  return customFetch<ApproveBill200>(getApproveBillUrl(id), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
@@ -2260,6 +2268,448 @@ export const useApproveBill = <
   TContext
 > => {
   return useMutation(getApproveBillMutationOptions(options));
+};
+
+/**
+ * @summary Task
+ */
+export const getRegenerateBillAccountingDraftUrl = (id: number) => {
+  return `/api/bills/${id}/regenerate-accounting-draft`;
+};
+
+export const regenerateBillAccountingDraft = async (
+  id: number,
+  regenerateBillAccountingDraftBody: RegenerateBillAccountingDraftBody,
+  options?: RequestInit,
+): Promise<AccountingDraftResult> => {
+  return customFetch<AccountingDraftResult>(
+    getRegenerateBillAccountingDraftUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(regenerateBillAccountingDraftBody),
+    },
+  );
+};
+
+export const getRegenerateBillAccountingDraftMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof regenerateBillAccountingDraft>>,
+    TError,
+    { id: number; data: BodyType<RegenerateBillAccountingDraftBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof regenerateBillAccountingDraft>>,
+  TError,
+  { id: number; data: BodyType<RegenerateBillAccountingDraftBody> },
+  TContext
+> => {
+  const mutationKey = ["regenerateBillAccountingDraft"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof regenerateBillAccountingDraft>>,
+    { id: number; data: BodyType<RegenerateBillAccountingDraftBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return regenerateBillAccountingDraft(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RegenerateBillAccountingDraftMutationResult = NonNullable<
+  Awaited<ReturnType<typeof regenerateBillAccountingDraft>>
+>;
+export type RegenerateBillAccountingDraftMutationBody =
+  BodyType<RegenerateBillAccountingDraftBody>;
+export type RegenerateBillAccountingDraftMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Task
+ */
+export const useRegenerateBillAccountingDraft = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof regenerateBillAccountingDraft>>,
+    TError,
+    { id: number; data: BodyType<RegenerateBillAccountingDraftBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof regenerateBillAccountingDraft>>,
+  TError,
+  { id: number; data: BodyType<RegenerateBillAccountingDraftBody> },
+  TContext
+> => {
+  return useMutation(getRegenerateBillAccountingDraftMutationOptions(options));
+};
+
+/**
+ * @summary Task
+ */
+export const getMarkBillAccountingNotApplicableUrl = (id: number) => {
+  return `/api/bills/${id}/mark-accounting-not-applicable`;
+};
+
+export const markBillAccountingNotApplicable = async (
+  id: number,
+  markBillAccountingNotApplicableBody: MarkBillAccountingNotApplicableBody,
+  options?: RequestInit,
+): Promise<Bill> => {
+  return customFetch<Bill>(getMarkBillAccountingNotApplicableUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(markBillAccountingNotApplicableBody),
+  });
+};
+
+export const getMarkBillAccountingNotApplicableMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markBillAccountingNotApplicable>>,
+    TError,
+    { id: number; data: BodyType<MarkBillAccountingNotApplicableBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof markBillAccountingNotApplicable>>,
+  TError,
+  { id: number; data: BodyType<MarkBillAccountingNotApplicableBody> },
+  TContext
+> => {
+  const mutationKey = ["markBillAccountingNotApplicable"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof markBillAccountingNotApplicable>>,
+    { id: number; data: BodyType<MarkBillAccountingNotApplicableBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return markBillAccountingNotApplicable(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MarkBillAccountingNotApplicableMutationResult = NonNullable<
+  Awaited<ReturnType<typeof markBillAccountingNotApplicable>>
+>;
+export type MarkBillAccountingNotApplicableMutationBody =
+  BodyType<MarkBillAccountingNotApplicableBody>;
+export type MarkBillAccountingNotApplicableMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Task
+ */
+export const useMarkBillAccountingNotApplicable = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markBillAccountingNotApplicable>>,
+    TError,
+    { id: number; data: BodyType<MarkBillAccountingNotApplicableBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof markBillAccountingNotApplicable>>,
+  TError,
+  { id: number; data: BodyType<MarkBillAccountingNotApplicableBody> },
+  TContext
+> => {
+  return useMutation(
+    getMarkBillAccountingNotApplicableMutationOptions(options),
+  );
+};
+
+/**
+ * @summary Task
+ */
+export const getListBlockedBillsUrl = (params?: ListBlockedBillsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/accounting/blocked-bills?${stringifiedParams}`
+    : `/api/accounting/blocked-bills`;
+};
+
+export const listBlockedBills = async (
+  params?: ListBlockedBillsParams,
+  options?: RequestInit,
+): Promise<BlockedBillsListResponse> => {
+  return customFetch<BlockedBillsListResponse>(getListBlockedBillsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListBlockedBillsQueryKey = (
+  params?: ListBlockedBillsParams,
+) => {
+  return [
+    `/api/accounting/blocked-bills`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListBlockedBillsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listBlockedBills>>,
+  TError = ErrorType<void>,
+>(
+  params?: ListBlockedBillsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listBlockedBills>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListBlockedBillsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listBlockedBills>>
+  > = ({ signal }) => listBlockedBills(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listBlockedBills>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListBlockedBillsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listBlockedBills>>
+>;
+export type ListBlockedBillsQueryError = ErrorType<void>;
+
+/**
+ * @summary Task
+ */
+
+export function useListBlockedBills<
+  TData = Awaited<ReturnType<typeof listBlockedBills>>,
+  TError = ErrorType<void>,
+>(
+  params?: ListBlockedBillsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listBlockedBills>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListBlockedBillsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Lightweight count of blocked bill legs (used for nav badge)
+ */
+export const getGetBlockedBillsCountUrl = () => {
+  return `/api/accounting/blocked-bills/count`;
+};
+
+export const getBlockedBillsCount = async (
+  options?: RequestInit,
+): Promise<GetBlockedBillsCount200> => {
+  return customFetch<GetBlockedBillsCount200>(getGetBlockedBillsCountUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBlockedBillsCountQueryKey = () => {
+  return [`/api/accounting/blocked-bills/count`] as const;
+};
+
+export const getGetBlockedBillsCountQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBlockedBillsCount>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBlockedBillsCount>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetBlockedBillsCountQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBlockedBillsCount>>
+  > = ({ signal }) => getBlockedBillsCount({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBlockedBillsCount>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBlockedBillsCountQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBlockedBillsCount>>
+>;
+export type GetBlockedBillsCountQueryError = ErrorType<void>;
+
+/**
+ * @summary Lightweight count of blocked bill legs (used for nav badge)
+ */
+
+export function useGetBlockedBillsCount<
+  TData = Awaited<ReturnType<typeof getBlockedBillsCount>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBlockedBillsCount>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBlockedBillsCountQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Bulk re-run accrual/payment draft generation for the given blocked bill legs
+ */
+export const getRetryBlockedBillsUrl = () => {
+  return `/api/accounting/blocked-bills/retry`;
+};
+
+export const retryBlockedBills = async (
+  retryBlockedBillsBody: RetryBlockedBillsBody,
+  options?: RequestInit,
+): Promise<RetryBlockedBills200> => {
+  return customFetch<RetryBlockedBills200>(getRetryBlockedBillsUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(retryBlockedBillsBody),
+  });
+};
+
+export const getRetryBlockedBillsMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof retryBlockedBills>>,
+    TError,
+    { data: BodyType<RetryBlockedBillsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof retryBlockedBills>>,
+  TError,
+  { data: BodyType<RetryBlockedBillsBody> },
+  TContext
+> => {
+  const mutationKey = ["retryBlockedBills"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof retryBlockedBills>>,
+    { data: BodyType<RetryBlockedBillsBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return retryBlockedBills(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RetryBlockedBillsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof retryBlockedBills>>
+>;
+export type RetryBlockedBillsMutationBody = BodyType<RetryBlockedBillsBody>;
+export type RetryBlockedBillsMutationError = ErrorType<void>;
+
+/**
+ * @summary Bulk re-run accrual/payment draft generation for the given blocked bill legs
+ */
+export const useRetryBlockedBills = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof retryBlockedBills>>,
+    TError,
+    { data: BodyType<RetryBlockedBillsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof retryBlockedBills>>,
+  TError,
+  { data: BodyType<RetryBlockedBillsBody> },
+  TContext
+> => {
+  return useMutation(getRetryBlockedBillsMutationOptions(options));
 };
 
 /**

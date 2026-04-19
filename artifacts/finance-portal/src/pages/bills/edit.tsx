@@ -5,6 +5,7 @@ import {
   useUpdateBill,
   useListVendors,
   useListPrograms,
+  useListExpenseCategories,
   getGetBillQueryKey,
   getListBillsQueryKey,
 } from "@workspace/api-client-react";
@@ -48,6 +49,7 @@ const formSchema = z.object({
   amount: z.coerce.number().positive("Amount must be greater than 0"),
   description: z.string().optional(),
   programId: z.string().optional(),
+  categoryId: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -64,6 +66,8 @@ export default function BillEdit() {
   });
   const { data: vendors, isLoading: vendorsLoading } = useListVendors();
   const { data: programs, isLoading: programsLoading } = useListPrograms();
+  const { data: categories, isLoading: categoriesLoading } =
+    useListExpenseCategories();
   const updateBill = useUpdateBill();
 
   const form = useForm<FormValues>({
@@ -76,6 +80,7 @@ export default function BillEdit() {
       amount: 0,
       description: "",
       programId: "none",
+      categoryId: "none",
     },
   });
 
@@ -89,6 +94,7 @@ export default function BillEdit() {
       amount: bill.amount,
       description: bill.description ?? "",
       programId: bill.programId ? String(bill.programId) : "none",
+      categoryId: bill.categoryId ? String(bill.categoryId) : "none",
     });
   }, [bill, form]);
 
@@ -107,6 +113,10 @@ export default function BillEdit() {
             values.programId && values.programId !== "none"
               ? Number(values.programId)
               : undefined,
+          categoryId:
+            values.categoryId && values.categoryId !== "none"
+              ? Number(values.categoryId)
+              : null,
         },
       });
       toast({ title: "Bill updated" });
@@ -278,6 +288,39 @@ export default function BillEdit() {
                             programList.map((p) => (
                               <SelectItem key={p.id} value={p.id.toString()}>
                                 {p.name}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="categoryId"
+                  render={({ field }) => (
+                    <FormItem className="col-span-1 md:col-span-2">
+                      <FormLabel>Expense Category</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value || "none"}
+                      >
+                        <FormControl>
+                          <SelectTrigger data-testid="select-bill-category">
+                            <SelectValue placeholder="Select an expense category" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">Uncategorized</SelectItem>
+                          {!categoriesLoading &&
+                            (categories?.items ?? []).map((c) => (
+                              <SelectItem
+                                key={c.id}
+                                value={c.id.toString()}
+                              >
+                                {c.name}
                               </SelectItem>
                             ))}
                         </SelectContent>

@@ -439,7 +439,7 @@ function isAccountingSourceLinkUniqueViolation(e: unknown): boolean {
   if (err.code !== "23505") return false;
   const constraint = err.constraint ?? err.constraint_name ?? "";
   if (
-    constraint === "accounting_source_links_source_uniq" ||
+    constraint === "accounting_source_links_source_event_uniq" ||
     constraint === "accounting_source_links_idem_key_uniq"
   ) {
     return true;
@@ -447,7 +447,7 @@ function isAccountingSourceLinkUniqueViolation(e: unknown): boolean {
   // Fallback for drivers that omit constraint metadata.
   const msg = err.message ?? "";
   return (
-    msg.includes("accounting_source_links_source_uniq") ||
+    msg.includes("accounting_source_links_source_event_uniq") ||
     msg.includes("accounting_source_links_idem_key_uniq")
   );
 }

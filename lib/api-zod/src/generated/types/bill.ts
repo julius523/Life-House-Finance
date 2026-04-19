@@ -5,6 +5,8 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { BillAccountingPaymentStatus } from "./billAccountingPaymentStatus";
+import type { BillAccountingStatus } from "./billAccountingStatus";
 import type { BillStatus } from "./billStatus";
 
 export interface Bill {
@@ -18,6 +20,9 @@ export interface Bill {
   description?: string;
   programId?: number;
   programName?: string;
+  /** Task */
+  categoryId?: number | null;
+  categoryName?: string | null;
   status: BillStatus;
   approvedBy?: string;
   rejectionReason?: string;
@@ -25,5 +30,13 @@ export interface Bill {
   receiptIds?: number[];
   submittedBy?: string;
   submittedByEmail?: string;
+  /** Task */
+  accountingStatus?: BillAccountingStatus;
+  accountingBlockReason?: string | null;
+  accountingGeneratedAt?: Date | null;
+  /** Task */
+  accountingPaymentStatus?: BillAccountingPaymentStatus;
+  accountingPaymentBlockReason?: string | null;
+  accountingPaymentGeneratedAt?: Date | null;
   createdAt: Date;
 }

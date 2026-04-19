@@ -15,5 +15,7 @@ export const AccountingDraftResultReason = {
   archived_account: "archived_account",
   non_postable_account: "non_postable_account",
   invalid_payment_method_rule: "invalid_payment_method_rule",
+  missing_ap_account: "missing_ap_account",
+  missing_cash_account: "missing_cash_account",
   other: "other",
 } as const;

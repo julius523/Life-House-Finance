@@ -69,7 +69,7 @@ type JournalEntry = {
   // Task #53 — populated by the backend from accounting_source_links
   // (and the legacy agentActionId fallback). Use this directly instead
   // of inferring from agentActionId so 'expense' surfaces correctly.
-  source?: "manual" | "copilot" | "expense";
+  source?: "manual" | "copilot" | "expense" | "bill";
   originatingExpense?: {
     id: number;
     merchant: string;
@@ -82,6 +82,23 @@ type JournalEntry = {
       name: string;
       email: string | null;
     } | null;
+    approvedAt: string | null;
+  } | null;
+  // Task #63 — bill-sourced JEs surface vendor / leg / amount so reviewers
+  // can confirm the entry without opening the bill.
+  originatingBill?: {
+    id: number;
+    eventType: "accrual" | "payment";
+    vendorId: number;
+    vendorName: string;
+    amount: number;
+    invoiceDate: string | null;
+    dueDate: string;
+    status: string;
+    programId: number | null;
+    programName: string | null;
+    categoryId: number | null;
+    categoryName: string | null;
     approvedAt: string | null;
   } | null;
 };
@@ -494,6 +511,101 @@ export default function JournalEntryDetailPage() {
                 <div className="font-medium">
                   {format(
                     new Date(entry.originatingExpense.approvedAt),
+                    "MMM d, yyyy",
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Task #63 — Originating bill card (parallel to expense card). */}
+      {entry.originatingBill && (
+        <Card data-testid="card-originating-bill">
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base">Originating bill</CardTitle>
+              <Badge
+                variant="outline"
+                className="capitalize"
+                data-testid="badge-bill-event-type"
+              >
+                {entry.originatingBill.eventType}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Bill
+              </div>
+              <Link
+                href={`/bills/${entry.originatingBill.id}`}
+                className="font-medium text-primary hover:underline"
+                data-testid="link-originating-bill"
+              >
+                #{entry.originatingBill.id}
+              </Link>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Vendor
+              </div>
+              <div className="font-medium">
+                {entry.originatingBill.vendorName || "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                {entry.originatingBill.invoiceDate ? "Invoice date" : "Due date"}
+              </div>
+              <div className="font-medium">
+                {format(
+                  parseDateOnly(
+                    entry.originatingBill.invoiceDate ??
+                      entry.originatingBill.dueDate,
+                  ),
+                  "MMM d, yyyy",
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Amount
+              </div>
+              <div className="font-medium font-mono">
+                ${entry.originatingBill.amount.toFixed(2)}
+              </div>
+            </div>
+            {entry.originatingBill.categoryName && (
+              <div>
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Category
+                </div>
+                <div className="font-medium">
+                  {entry.originatingBill.categoryName}
+                </div>
+              </div>
+            )}
+            {entry.originatingBill.programName && (
+              <div>
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Program
+                </div>
+                <div className="font-medium">
+                  {entry.originatingBill.programName}
+                </div>
+              </div>
+            )}
+            {entry.originatingBill.approvedAt && (
+              <div>
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Approved
+                </div>
+                <div className="font-medium">
+                  {format(
+                    new Date(entry.originatingBill.approvedAt),
                     "MMM d, yyyy",
                   )}
                 </div>

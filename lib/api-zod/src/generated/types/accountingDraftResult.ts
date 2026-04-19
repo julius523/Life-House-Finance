@@ -8,9 +8,9 @@
 import type { AccountingDraftResultReason } from "./accountingDraftResultReason";
 
 /**
- * Task #52 — outcome of an attempt to bridge an expense (or future
-bill) into a manual journal entry draft. `ok=true` means a draft
-is now linked; `created` distinguishes a brand new draft from
+ * Task #52 / #63 — outcome of an attempt to bridge a source document
+(expense or bill) into a manual journal entry draft. `ok=true` means
+a draft is now linked; `created` distinguishes a brand new draft from
 re-returning an existing one (idempotent retry). `ok=false`
 carries a stable machine-readable `reason` code.
 

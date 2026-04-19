@@ -14,6 +14,8 @@ export interface CreateBillBody {
   amount: number;
   description?: string;
   programId?: number;
+  /** Task */
+  categoryId?: number | null;
   receiptIds?: number[];
   submittedBy?: string;
 }

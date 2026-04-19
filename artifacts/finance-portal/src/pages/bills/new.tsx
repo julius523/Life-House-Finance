@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, Link } from "wouter";
-import { useCreateBill, useListVendors, useListPrograms, useCreateReceipt } from "@workspace/api-client-react";
+import { useCreateBill, useListVendors, useListPrograms, useCreateReceipt, useListExpenseCategories } from "@workspace/api-client-react";
 import { ReceiptUploader, type PendingReceipt } from "@/components/receipt-uploader";
 import { useAuth } from "@/lib/auth";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -22,6 +22,7 @@ const formSchema = z.object({
   amount: z.coerce.number().positive("Amount must be greater than 0"),
   description: z.string().optional(),
   programId: z.string().optional(),
+  categoryId: z.string().optional(),
   firstName: z.string().optional(),
   lastName: z.string().optional(),
 });
@@ -33,6 +34,8 @@ export default function BillNew() {
   const createReceipt = useCreateReceipt();
   const { data: vendors, isLoading: vendorsLoading } = useListVendors();
   const { data: programs, isLoading: programsLoading } = useListPrograms();
+  const { data: categories, isLoading: categoriesLoading } =
+    useListExpenseCategories();
   const [receipts, setReceipts] = useState<PendingReceipt[]>([]);
   const { user } = useAuth();
   const isShared = user?.role === "submitter";
@@ -47,6 +50,7 @@ export default function BillNew() {
       amount: 0,
       description: "",
       programId: "",
+      categoryId: "",
       firstName: "",
       lastName: "",
     },
@@ -74,13 +78,19 @@ export default function BillNew() {
       const { firstName, lastName, ...rest } = values;
       void firstName;
       void lastName;
+      const { categoryId: rawCategoryId, ...restNoCategory } = rest;
+      void rawCategoryId;
       const billData = {
-        ...rest,
+        ...restNoCategory,
         submittedBy,
         programId:
           values.programId && values.programId !== "none"
             ? Number(values.programId)
             : undefined,
+        categoryId:
+          values.categoryId && values.categoryId !== "none"
+            ? Number(values.categoryId)
+            : null,
       };
 
       const result = await createBill.mutateAsync({ data: billData });
@@ -272,6 +282,39 @@ export default function BillNew() {
                           {!programsLoading && (Array.isArray(programs) ? programs : (programs as any)?.items ?? []).map((p: any) => (
                             <SelectItem key={p.id} value={p.id.toString()}>{p.name}</SelectItem>
                           ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="categoryId"
+                  render={({ field }) => (
+                    <FormItem className="col-span-1 md:col-span-2">
+                      <FormLabel>Expense Category</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value || "none"}
+                      >
+                        <FormControl>
+                          <SelectTrigger data-testid="select-bill-category">
+                            <SelectValue placeholder="Select an expense category" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">Uncategorized</SelectItem>
+                          {!categoriesLoading &&
+                            (categories?.items ?? []).map((c) => (
+                              <SelectItem
+                                key={c.id}
+                                value={c.id.toString()}
+                              >
+                                {c.name}
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />

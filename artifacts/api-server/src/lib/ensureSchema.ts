@@ -32,21 +32,7 @@ export async function ensureSchemaConstraints(): Promise<void> {
     "ensureSchemaConstraints: journal_entries_manual_draft_fk verified",
   );
 
-  // Task #52 — backfill expenses.accounting_status for rows that pre-date
-  // this column. Per spec, legacy approved expenses are NOT auto-generated;
-  // they are marked not_applicable so the blocked queue / regenerate
-  // endpoint never picks them up automatically. New expenses default to
-  // 'pending' via the column default and only the /approve hook flips them.
-  //
-  // Predicate (idempotent and safe across boots, no time heuristic):
-  //   - status = 'approved'                  : only pre-existing approved rows
-  //   - accounting_status = 'pending'        : column default, never touched
-  //   - accounting_generated_at IS NULL      : never went through /approve hook
-  //   - accounting_block_reason IS NULL      : never went through /approve hook
-  //   - no row in accounting_source_links    : never produced a draft
-  // The combined predicate is impossible for any row that has ever been
-  // through the new approval hook, so this can run on every boot without
-  // misclassifying legitimate pending or blocked rows.
+  // Task #52 — backfill expenses.accounting_status for legacy approved rows.
   const backfill = await db.execute(sql`
     UPDATE expenses
     SET accounting_status = 'not_applicable'
@@ -62,5 +48,50 @@ export async function ensureSchemaConstraints(): Promise<void> {
   logger.info(
     { rowCount: backfill.rowCount ?? 0 },
     "ensureSchemaConstraints: legacy approved expenses backfilled to not_applicable",
+  );
+
+  // Task #63 — backfill bills.accounting_status / accounting_payment_status
+  // for rows that pre-date the bridge. Same logic as expenses: any bill
+  // that has never been through the new bridge is marked not_applicable so
+  // it never appears in the blocked queue. New bills default to 'pending'
+  // via the column default and only the /approve and payment hooks flip
+  // them. accrual leg keys off status >= approved; payment leg keys off
+  // status = paid.
+  const billAccrualBackfill = await db.execute(sql`
+    UPDATE bills
+    SET accounting_status = 'not_applicable'
+    WHERE status IN ('approved', 'paid')
+      AND accounting_status = 'pending'
+      AND accounting_generated_at IS NULL
+      AND accounting_block_reason IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM accounting_source_links l
+        WHERE l.source_type = 'bill'
+          AND l.source_id = bills.id
+          AND l.event_type = 'accrual'
+      )
+  `);
+  logger.info(
+    { rowCount: billAccrualBackfill.rowCount ?? 0 },
+    "ensureSchemaConstraints: legacy bills accrual backfilled to not_applicable",
+  );
+
+  const billPaymentBackfill = await db.execute(sql`
+    UPDATE bills
+    SET accounting_payment_status = 'not_applicable'
+    WHERE status = 'paid'
+      AND accounting_payment_status = 'pending'
+      AND accounting_payment_generated_at IS NULL
+      AND accounting_payment_block_reason IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM accounting_source_links l
+        WHERE l.source_type = 'bill'
+          AND l.source_id = bills.id
+          AND l.event_type = 'payment'
+      )
+  `);
+  logger.info(
+    { rowCount: billPaymentBackfill.rowCount ?? 0 },
+    "ensureSchemaConstraints: legacy bills payment backfilled to not_applicable",
   );
 }

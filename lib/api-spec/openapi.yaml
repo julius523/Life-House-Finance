@@ -566,11 +566,185 @@ paths:
               $ref: "#/components/schemas/ApprovalActionBody"
       responses:
         "200":
+          description: Updated bill (with accounting bridge result)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Bill"
+                  - type: object
+                    properties:
+                      accounting:
+                        $ref: "#/components/schemas/AccountingDraftResult"
+
+  /bills/{id}/regenerate-accounting-draft:
+    post:
+      operationId: regenerateBillAccountingDraft
+      tags: [bills]
+      summary: Task #63 — manually retry accrual or payment draft generation for a bill
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                eventType:
+                  type: string
+                  enum: [accrual, payment]
+              required: [eventType]
+      responses:
+        "200":
+          description: Generator result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountingDraftResult"
+
+  /bills/{id}/mark-accounting-not-applicable:
+    post:
+      operationId: markBillAccountingNotApplicable
+      tags: [bills]
+      summary: Task #63 — flip a bill's accrual or payment leg to not_applicable with a note
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                eventType:
+                  type: string
+                  enum: [accrual, payment]
+                note:
+                  type: string
+                  minLength: 3
+                  maxLength: 500
+              required: [eventType, note]
+      responses:
+        "200":
           description: Updated bill
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Bill"
+
+  /accounting/blocked-bills:
+    get:
+      operationId: listBlockedBills
+      tags: [accounting]
+      summary: Task #63 — review queue of bills whose accrual or payment draft generation failed
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 25
+        - name: eventType
+          in: query
+          description: Filter to one leg ('accrual' or 'payment'). Omit for both.
+          schema:
+            type: string
+            enum: [accrual, payment]
+        - name: reasonCode
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated blocked-bill rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockedBillsListResponse"
+        "403":
+          description: Admin/approver only
+
+  /accounting/blocked-bills/count:
+    get:
+      operationId: getBlockedBillsCount
+      tags: [accounting]
+      summary: Lightweight count of blocked bill legs (used for nav badge)
+      responses:
+        "200":
+          description: Total count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                required: [total]
+        "403":
+          description: Admin/approver only
+
+  /accounting/blocked-bills/retry:
+    post:
+      operationId: retryBlockedBills
+      tags: [accounting]
+      summary: Bulk re-run accrual/payment draft generation for the given blocked bill legs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      billId:
+                        type: integer
+                      eventType:
+                        type: string
+                        enum: [accrual, payment]
+                    required: [billId, eventType]
+                  minItems: 1
+                  maxItems: 200
+              required: [items]
+      responses:
+        "200":
+          description: Per-leg retry result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        billId:
+                          type: integer
+                        eventType:
+                          type: string
+                        result:
+                          $ref: "#/components/schemas/AccountingDraftResult"
+                      required: [billId, eventType, result]
+                required: [results]
+        "403":
+          description: Admin/approver only
 
   /receipts:
     get:
@@ -2071,9 +2245,9 @@ components:
     AccountingDraftResult:
       type: object
       description: |
-        Task #52 — outcome of an attempt to bridge an expense (or future
-        bill) into a manual journal entry draft. `ok=true` means a draft
-        is now linked; `created` distinguishes a brand new draft from
+        Task #52 / #63 — outcome of an attempt to bridge a source document
+        (expense or bill) into a manual journal entry draft. `ok=true` means
+        a draft is now linked; `created` distinguishes a brand new draft from
         re-returning an existing one (idempotent retry). `ok=false`
         carries a stable machine-readable `reason` code.
       properties:
@@ -2092,12 +2266,77 @@ components:
               archived_account,
               non_postable_account,
               invalid_payment_method_rule,
+              missing_ap_account,
+              missing_cash_account,
               other,
             ]
         message:
           type: string
       required:
         - ok
+
+    BlockedBillRow:
+      type: object
+      description: Task #63 — one row per blocked bill leg in the accounting bridge.
+      properties:
+        billId:
+          type: integer
+        eventType:
+          type: string
+          enum: [accrual, payment]
+        invoiceDate:
+          type: string
+          format: date
+          nullable: true
+        dueDate:
+          type: string
+          format: date
+        amount:
+          type: number
+        vendorId:
+          type: integer
+        vendorName:
+          type: string
+        programId:
+          type: integer
+          nullable: true
+        programName:
+          type: string
+          nullable: true
+        categoryId:
+          type: integer
+          nullable: true
+        categoryName:
+          type: string
+          nullable: true
+        accountingBlockReason:
+          type: string
+          nullable: true
+        accountingGeneratedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [billId, eventType, dueDate, amount, vendorId, vendorName]
+
+    BlockedBillsListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlockedBillRow"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        metrics:
+          type: object
+          description: Counts keyed by accountingBlockReason. Missing keys mean zero.
+          additionalProperties:
+            type: integer
+      required: [items, total, page, pageSize, metrics]
 
     Expense:
       type: object
@@ -2421,6 +2660,13 @@ components:
           type: integer
         programName:
           type: string
+        categoryId:
+          type: integer
+          nullable: true
+          description: Task #63 — expense category that drives the Dr expense leg of the accrual draft.
+        categoryName:
+          type: string
+          nullable: true
         status:
           type: string
           enum: [draft, submitted, approved, paid, overdue, rejected, needs_correction]
@@ -2439,6 +2685,28 @@ components:
           type: string
         submittedByEmail:
           type: string
+        accountingStatus:
+          type: string
+          enum: [pending, draft_created, blocked, not_applicable]
+          description: Task #63 — accrual leg bridge status (draft generated on bill approval).
+        accountingBlockReason:
+          type: string
+          nullable: true
+        accountingGeneratedAt:
+          type: string
+          format: date-time
+          nullable: true
+        accountingPaymentStatus:
+          type: string
+          enum: [pending, draft_created, blocked, not_applicable]
+          description: Task #63 — payment leg bridge status (draft generated on bill payment).
+        accountingPaymentBlockReason:
+          type: string
+          nullable: true
+        accountingPaymentGeneratedAt:
+          type: string
+          format: date-time
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -2470,6 +2738,10 @@ components:
           type: string
         programId:
           type: integer
+        categoryId:
+          type: integer
+          nullable: true
+          description: Task #63 — expense category for the accrual draft Dr leg.
         receiptIds:
           type: array
           items:

@@ -46,6 +46,9 @@ import {
   Link2,
   Pencil,
   RotateCcw,
+  BookOpen,
+  RefreshCw,
+  Ban,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReceiptViewer, type ReceiptViewerFile } from "@/components/receipt-viewer";
@@ -53,6 +56,64 @@ import { LinkedTransactions } from "@/components/linked-transactions";
 import { ReceiptUploader, type PendingReceipt } from "@/components/receipt-uploader";
 import { useAuth } from "@/lib/auth";
 import { apiJson } from "@/lib/api";
+
+// Task #63 — accounting bridge dual-leg badges & block-reason copy.
+// Mirrors the expense bridge but covers two distinct lifecycle legs
+// (accrual on approval, payment on bank-link / convert-to-bill).
+const ACCOUNTING_STATUS_LABEL: Record<string, string> = {
+  pending: "Pending",
+  draft_created: "Draft created",
+  posted: "Posted",
+  blocked: "Blocked",
+  not_applicable: "Not applicable",
+};
+
+function AccountingStatusBadge({
+  status,
+  testid,
+}: {
+  status?: string | null;
+  testid?: string;
+}) {
+  const label = ACCOUNTING_STATUS_LABEL[status ?? ""] ?? "Pending";
+  if (status === "posted")
+    return <Badge data-testid={testid}>{label}</Badge>;
+  if (status === "blocked")
+    return (
+      <Badge variant="destructive" data-testid={testid}>
+        {label}
+      </Badge>
+    );
+  if (status === "draft_created")
+    return (
+      <Badge variant="secondary" data-testid={testid}>
+        {label}
+      </Badge>
+    );
+  return (
+    <Badge variant="outline" data-testid={testid}>
+      {label}
+    </Badge>
+  );
+}
+
+const BLOCK_REASON_LABEL: Record<string, string> = {
+  missing_category: "No expense category set on this bill.",
+  missing_mapping:
+    "The bill's category isn't mapped to a chart-of-accounts account.",
+  archived_account: "The mapped expense account is archived.",
+  non_postable_account: "The mapped account is not postable.",
+  missing_ap_account:
+    "Default Accounts Payable account is not set in Accounting Settings.",
+  missing_cash_account:
+    "Default cash account is not set in Accounting Settings.",
+  other: "Blocked by an accounting rule.",
+};
+
+function humanizeBillBlockReason(reason?: string | null): string {
+  if (!reason) return "Blocked by an accounting rule.";
+  return BLOCK_REASON_LABEL[reason] ?? reason.replace(/_/g, " ");
+}
 
 export default function BillDetail() {
   const [, params] = useRoute("/bills/:id");
@@ -226,6 +287,50 @@ export default function BillDetail() {
     } catch (e) {
       toast({
         title: "Could not remove",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRegenerateAccounting = async (
+    eventType: "accrual" | "payment",
+  ) => {
+    try {
+      await apiJson(`/bills/${id}/regenerate-accounting-draft`, {
+        method: "POST",
+        body: { eventType },
+      });
+      toast({ title: "Accounting draft regenerated" });
+      refresh();
+    } catch (e) {
+      toast({
+        title: "Could not regenerate",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleMarkNotApplicable = async (
+    eventType: "accrual" | "payment",
+  ) => {
+    if (
+      !confirm(
+        `Mark the ${eventType} entry as not applicable? It will be excluded from the accounting bridge queue.`,
+      )
+    )
+      return;
+    try {
+      await apiJson(`/bills/${id}/mark-accounting-not-applicable`, {
+        method: "POST",
+        body: { eventType },
+      });
+      toast({ title: "Marked as not applicable" });
+      refresh();
+    } catch (e) {
+      toast({
+        title: "Could not update",
         description: e instanceof Error ? e.message : undefined,
         variant: "destructive",
       });
@@ -524,6 +629,91 @@ export default function BillDetail() {
               </CardContent>
             </Card>
           )}
+
+          {/*
+            Task #63 — Accounting bridge card. Bills have two
+            independent legs: an accrual entry on approval (Dr expense
+            / Cr A/P) and a payment entry on bank-link or convert-to-
+            bill (Dr A/P / Cr cash). Each has its own status, block
+            reason, and admin actions.
+          */}
+          <Card data-testid="card-accounting-bridge">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4" />
+                Accounting Bridge
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5 text-sm">
+              {(["accrual", "payment"] as const).map((leg) => {
+                const status =
+                  leg === "accrual"
+                    ? bill.accountingStatus
+                    : bill.accountingPaymentStatus;
+                const reason =
+                  leg === "accrual"
+                    ? bill.accountingBlockReason
+                    : bill.accountingPaymentBlockReason;
+                const generatedAt =
+                  leg === "accrual"
+                    ? bill.accountingGeneratedAt
+                    : bill.accountingPaymentGeneratedAt;
+                const legLabel =
+                  leg === "accrual"
+                    ? "Accrual (Dr Expense / Cr A/P)"
+                    : "Payment (Dr A/P / Cr Cash)";
+                const canAct =
+                  isAdmin && status !== "posted" && status !== "not_applicable";
+                return (
+                  <div key={leg} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-muted-foreground">{legLabel}</div>
+                      <AccountingStatusBadge
+                        status={status}
+                        testid={`badge-accounting-${leg}`}
+                      />
+                    </div>
+                    {status === "blocked" && reason && (
+                      <div
+                        className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-destructive"
+                        data-testid={`text-accounting-${leg}-block-reason`}
+                      >
+                        {humanizeBillBlockReason(reason)}
+                      </div>
+                    )}
+                    {generatedAt && (
+                      <div className="text-xs text-muted-foreground">
+                        Last attempted{" "}
+                        {format(new Date(generatedAt), "MMM d, yyyy")}
+                      </div>
+                    )}
+                    {canAct && (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleRegenerateAccounting(leg)}
+                          data-testid={`button-regenerate-${leg}`}
+                        >
+                          <RefreshCw className="mr-1.5 h-3 w-3" />
+                          Regenerate
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleMarkNotApplicable(leg)}
+                          data-testid={`button-not-applicable-${leg}`}
+                        >
+                          <Ban className="mr-1.5 h-3 w-3" />
+                          Mark not applicable
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
         </div>
       </div>
 
