@@ -137,6 +137,15 @@ export const manualJournalEntryDraftsTable = pgTable(
   ],
 );
 
+// Task #29B — true relational FK from journal_entries.manual_draft_id
+// back to this table. drizzle-kit cannot reliably declare cross-table
+// constraints from a circular schema like this one (drafts already
+// imports journal_entries; the reverse import would create a module
+// cycle), so the constraint is applied at app boot via a one-shot
+// IF NOT EXISTS / DO $$ ... $$ DDL block in lib/db/src/ensureSchema.ts.
+// The partial unique index on journal_entries.manual_draft_id still
+// guarantees one-JE-per-draft regardless.
+
 export type ManualJournalEntryDraftRow =
   typeof manualJournalEntryDraftsTable.$inferSelect;
 export type ManualJournalEntryDraftInsert =

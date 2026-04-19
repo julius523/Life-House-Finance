@@ -7,7 +7,7 @@
       "evidence": {
         "status": 201,
         "draftStatus": "draft",
-        "draftId": 13
+        "draftId": 16
       }
     },
     {
@@ -28,7 +28,7 @@
         "status": 200,
         "draftStatus": "submitted",
         "submittedBy": 3,
-        "submittedAt": "2026-04-19T01:27:33.111Z"
+        "submittedAt": "2026-04-19T01:37:19.537Z"
       }
     },
     {
@@ -68,9 +68,9 @@
         "status": 201,
         "idempotent": false,
         "draftStatus": "posted",
-        "jeId": 54,
-        "jeManualDraftId": 13,
-        "draftPostedJeId": 54
+        "jeId": 73,
+        "jeManualDraftId": 16,
+        "draftPostedJeId": 73
       }
     },
     {
@@ -80,7 +80,7 @@
       "evidence": {
         "status": 200,
         "idempotent": true,
-        "jeId": 54
+        "jeId": 73
       }
     },
     {
@@ -89,8 +89,8 @@
       "pass": true,
       "evidence": {
         "matchCount": 1,
-        "matchedId": 54,
-        "jeId": 54
+        "matchedId": 73,
+        "jeId": 73
       }
     },
     {
@@ -161,15 +161,15 @@
       "desc": "Posted JE row links back to draft: journalEntry.manualDraftId === draftId AND evidence_snapshot.idempotency.key === 'manual-draft-{id}'",
       "pass": true,
       "evidence": {
-        "manualDraftId": 13,
-        "idempotencyKey": "manual-draft-13",
-        "expectedKey": "manual-draft-13"
+        "manualDraftId": 16,
+        "idempotencyKey": "manual-draft-16",
+        "expectedKey": "manual-draft-16"
       }
     }
   ],
   "passes": 14,
   "total": 14,
-  "draftId": 13,
-  "draft2Id": 14,
-  "jeId": 54
+  "draftId": 16,
+  "draft2Id": 17,
+  "jeId": 73
 }

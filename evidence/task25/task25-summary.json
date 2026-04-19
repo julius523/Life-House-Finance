@@ -1,62 +1,75 @@
 {
-  "generatedAt": "2026-04-19T01:28:11.551Z",
+  "generatedAt": "2026-04-19T01:37:24.903Z",
   "base": "http://localhost:8080",
   "front": "https://88b8e478-c4e7-419d-b3d2-b2d3cf59bab0-00-zqnc2hhsn5k9.spock.replit.dev",
   "results": [
     {
       "id": "T1",
       "label": "Happy path: balanced manual JE posts (201) and is visible in posted list with actor + timestamp",
-      "pass": false,
+      "pass": true,
       "evidence": {
-        "postStatus": 400,
-        "entryNo": null,
-        "jeId": null,
-        "foundInList": false
+        "postStatus": 201,
+        "entryNo": "JE-2026-000070",
+        "jeId": 74,
+        "foundInList": true,
+        "postedByUserId": 2,
+        "postedAt": "2026-04-19T01:37:24.665Z"
       }
     },
     {
       "id": "T2",
       "label": "Unbalanced JE rejected (422 UNBALANCED) and no JE row created",
-      "pass": false,
+      "pass": true,
       "evidence": {
-        "status": 400,
-        "code": "IDEMPOTENCY_KEY_REQUIRED",
+        "status": 422,
+        "code": "UNBALANCED",
+        "debitsCents": 10000,
+        "creditsCents": 5000,
         "leaked": false
       }
     },
     {
       "id": "T3a",
       "label": "Archived account rejected (400 INVALID_ACCOUNT, reason=archived_account)",
-      "pass": false,
+      "pass": true,
       "evidence": {
         "status": 400,
         "body": {
-          "error": "Missing required header 'Idempotency-Key'. Send a UUID (e.g. crypto.randomUUID()) so duplicate retries are safe.",
-          "code": "IDEMPOTENCY_KEY_REQUIRED"
+          "error": "Posting refused: line 1 — account 'ARCH-T25-644698' is archived.",
+          "code": "INVALID_ACCOUNT",
+          "lineNo": 1,
+          "account": "ARCH-T25-644698",
+          "reason": "archived_account"
         }
       }
     },
     {
       "id": "T3b",
       "label": "allow_manual_posting=false account rejected (400 INVALID_ACCOUNT, reason=not_manual_postable)",
-      "pass": false,
+      "pass": true,
       "evidence": {
         "status": 400,
         "body": {
-          "error": "Missing required header 'Idempotency-Key'. Send a UUID (e.g. crypto.randomUUID()) so duplicate retries are safe.",
-          "code": "IDEMPOTENCY_KEY_REQUIRED"
+          "error": "Posting refused: line 1 — account 'NOMAN-T25-644726' is not allowed for manual posting.",
+          "code": "INVALID_ACCOUNT",
+          "lineNo": 1,
+          "account": "NOMAN-T25-644726",
+          "reason": "manual_posting_disabled"
         }
       }
     },
     {
       "id": "T3c",
       "label": "Unknown account rejected (400 INVALID_ACCOUNT, reason=unknown_account)",
-      "pass": false,
+      "pass": true,
       "evidence": {
         "status": 400,
         "body": {
-          "error": "Missing required header 'Idempotency-Key'. Send a UUID (e.g. crypto.randomUUID()) so duplicate retries are safe.",
-          "code": "IDEMPOTENCY_KEY_REQUIRED"
+          "error": "Posting refused: line 1 — account 'ZZZ-NOPE-T25' is not in the chart of accounts.",
+          "code": "INVALID_ACCOUNT",
+          "lineNo": 1,
+          "account": "ZZZ-NOPE-T25",
+          "reason": "unknown_account"
         }
       }
     },
@@ -71,12 +84,14 @@
     {
       "id": "T4",
       "label": "Posting into a closed/non-existent period rejected (409 PERIOD_LOCKED) and no JE created",
-      "pass": false,
+      "pass": true,
       "evidence": {
-        "status": 400,
+        "status": 409,
         "body": {
-          "error": "Missing required header 'Idempotency-Key'. Send a UUID (e.g. crypto.randomUUID()) so duplicate retries are safe.",
-          "code": "IDEMPOTENCY_KEY_REQUIRED"
+          "error": "Posting refused: 2020-01-15 falls in no open accounting period.",
+          "code": "PERIOD_LOCKED",
+          "entryDate": "2020-01-15",
+          "periodLabel": null
         },
         "leaked": false
       }
@@ -95,9 +110,10 @@
     {
       "id": "T5b",
       "label": "Approver allowed (201)",
-      "pass": false,
+      "pass": true,
       "evidence": {
-        "status": 400
+        "status": 201,
+        "entryNo": "JE-2026-000071"
       }
     },
     {
@@ -113,27 +129,39 @@
       "label": "Duplicate-submit behavior (informational — no idempotency key in merged route)",
       "pass": true,
       "evidence": {
-        "dup1Status": 400,
-        "dup2Status": 400,
-        "distinctJeCount": 0,
-        "gap": "Only one JE posted (idempotent at the route level)."
+        "dup1Status": 201,
+        "dup2Status": 201,
+        "dup1Id": 76,
+        "dup2Id": 77,
+        "distinctJeCount": 2,
+        "gap": "BOTH submissions posted distinct JEs — the merged route has no idempotency key. Recommend adding one (e.g. Idempotency-Key header) when Task #29 introduces drafts."
       }
     },
     {
       "id": "T7",
       "label": "JE detail endpoint returns posted JE with id, entryNo, postedByUserId, postedAt, evidenceSnapshot.source='manual_ui' and lines",
-      "pass": false,
+      "pass": true,
       "evidence": {
-        "status": 0,
-        "lineCount": 0
+        "status": 200,
+        "jeId": 74,
+        "entryNo": "JE-2026-000070",
+        "postedByUserId": 2,
+        "postedAt": "2026-04-19T01:37:24.665Z",
+        "evidenceSource": "manual_ui",
+        "lineCount": 2
       }
     },
     {
       "id": "T8",
       "label": "Step-8 reversal still works against a manually-posted JE (creates inverse JE, original goes status=reversed)",
-      "pass": false,
+      "pass": true,
       "evidence": {
-        "status": 0
+        "status": 201,
+        "originalId": 74,
+        "originalStatus": "reversed",
+        "reversalId": 78,
+        "reversalEntryNo": "JE-2026-000074",
+        "reversesJournalEntryId": 74
       }
     },
     {

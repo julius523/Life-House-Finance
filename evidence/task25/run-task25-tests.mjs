@@ -57,6 +57,31 @@ async function api(s, method, urlPath, body) {
   }
   return { status: r.status, data };
 }
+// Task 25A made `Idempotency-Key` mandatory on the manual-post route.
+// Wrap POST /accounting/journal-entries calls so this suite (which
+// pre-dated Task 25A) sends a fresh key for each call. Two POSTs that
+// must hit the duplicate-detection path share a key explicitly via the
+// optional `key` argument.
+async function apiPost(s, urlPath, body, key) {
+  const headers = {
+    Cookie: s.cookie,
+    "Content-Type": "application/json",
+    "Idempotency-Key": key ?? crypto.randomUUID(),
+  };
+  const r = await fetch(`${BASE}${urlPath}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  let data = null;
+  const text = await r.text();
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { raw: text };
+  }
+  return { status: r.status, data };
+}
 
 (async () => {
   log("---", "Task #25 — Manual Journal Entry direct-post acceptance");
@@ -70,7 +95,7 @@ async function api(s, method, urlPath, body) {
   // --------------------------------------------------------------------
   const today = new Date().toISOString().slice(0, 10);
   const happyMemo = `T25-T1 happy path ${Date.now()}`;
-  const happy = await api(admin, "POST", "/api/accounting/journal-entries", {
+  const happy = await apiPost(admin, "/api/accounting/journal-entries", {
     entryDate: today,
     memo: happyMemo,
     lines: [
@@ -108,7 +133,7 @@ async function api(s, method, urlPath, body) {
   // --------------------------------------------------------------------
   // T2 — Unbalanced rejection
   // --------------------------------------------------------------------
-  const unbalanced = await api(admin, "POST", "/api/accounting/journal-entries", {
+  const unbalanced = await apiPost(admin, "/api/accounting/journal-entries", {
     entryDate: today,
     memo: `T25-T2 unbalanced ${Date.now()}`,
     lines: [
@@ -160,7 +185,7 @@ async function api(s, method, urlPath, body) {
     allowManualPosting: false,
   });
 
-  const archPost = await api(admin, "POST", "/api/accounting/journal-entries", {
+  const archPost = await apiPost(admin, "/api/accounting/journal-entries", {
     entryDate: today,
     memo: `T25-T3a archived ${Date.now()}`,
     lines: [
@@ -168,7 +193,7 @@ async function api(s, method, urlPath, body) {
       { type: "credit", amount: 1, account_code: "1000" },
     ],
   });
-  const noManPost = await api(admin, "POST", "/api/accounting/journal-entries", {
+  const noManPost = await apiPost(admin, "/api/accounting/journal-entries", {
     entryDate: today,
     memo: `T25-T3b non-manual ${Date.now()}`,
     lines: [
@@ -176,7 +201,7 @@ async function api(s, method, urlPath, body) {
       { type: "credit", amount: 1, account_code: "1000" },
     ],
   });
-  const unknownPost = await api(admin, "POST", "/api/accounting/journal-entries", {
+  const unknownPost = await apiPost(admin, "/api/accounting/journal-entries", {
     entryDate: today,
     memo: `T25-T3c unknown ${Date.now()}`,
     lines: [
@@ -227,7 +252,7 @@ async function api(s, method, urlPath, body) {
   // 409 PERIOD_LOCKED with periodLabel:null per the route. Either flavor
   // is the right behavior for "you cannot post here".
   const closedDate = "2020-01-15";
-  const closedPost = await api(admin, "POST", "/api/accounting/journal-entries", {
+  const closedPost = await apiPost(admin, "/api/accounting/journal-entries", {
     entryDate: closedDate,
     memo: `T25-T4 closed ${Date.now()}`,
     lines: [
@@ -251,7 +276,7 @@ async function api(s, method, urlPath, body) {
   // --------------------------------------------------------------------
   // T5 — Authorization matrix
   // --------------------------------------------------------------------
-  const submitterPost = await api(submitter, "POST", "/api/accounting/journal-entries", {
+  const submitterPost = await apiPost(submitter, "/api/accounting/journal-entries", {
     entryDate: today,
     memo: `T25-T5 submitter ${Date.now()}`,
     lines: [
@@ -259,7 +284,7 @@ async function api(s, method, urlPath, body) {
       { type: "credit", amount: 1, account_code: "1000" },
     ],
   });
-  const approverPost = await api(approver, "POST", "/api/accounting/journal-entries", {
+  const approverPost = await apiPost(approver, "/api/accounting/journal-entries", {
     entryDate: today,
     memo: `T25-T5 approver ${Date.now()}`,
     lines: [
@@ -318,8 +343,8 @@ async function api(s, method, urlPath, body) {
     ],
   };
   const [dup1, dup2] = await Promise.all([
-    api(admin, "POST", "/api/accounting/journal-entries", dupBody),
-    api(admin, "POST", "/api/accounting/journal-entries", dupBody),
+    apiPost(admin, "/api/accounting/journal-entries", dupBody),
+    apiPost(admin, "/api/accounting/journal-entries", dupBody),
   ]);
   const distinctIds = new Set(
     [dup1.data?.journalEntry?.id, dup2.data?.journalEntry?.id].filter(Boolean),

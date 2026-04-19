@@ -676,6 +676,93 @@ export type PostManualJournalEntryResult =
       existingJournalEntryId: number;
     };
 
+/**
+ * Task #29B — submit-time validation. Runs the same account / balance /
+ * period checks that `postManualJournalEntry` runs, but inside a
+ * read-only transaction that never inserts. Lets the /submit endpoint
+ * reject a draft up-front if it would fail at /post time, so reviewers
+ * never see drafts that can't actually be posted.
+ *
+ * Returns the same discriminated-union result kinds as the post path so
+ * the route can map errors with a single switch. The "ok" kind here
+ * carries no JE — it just means the payload is post-eligible right now.
+ */
+export type ValidateManualJournalEntryResult =
+  | { kind: "ok"; debitsCents: number; creditsCents: number }
+  | { kind: "forbidden"; reason: string }
+  | { kind: "invalid_payload"; reason: string }
+  | { kind: "unbalanced"; debitsCents: number; creditsCents: number }
+  | {
+      kind: "invalid_account";
+      lineNo: number;
+      account: string;
+      reason:
+        | "unknown_account"
+        | "archived_account"
+        | "manual_posting_disabled";
+    }
+  | {
+      kind: "period_locked";
+      entryDate: string;
+      periodLabel: string | null;
+    };
+
+export async function validateManualJournalEntryForSubmit(
+  input: ManualJournalEntryInput,
+  actor: PostingActor,
+): Promise<ValidateManualJournalEntryResult> {
+  if (!POSTING_ALLOWED_ROLES.includes(actor.role)) {
+    return {
+      kind: "forbidden",
+      reason: `Role '${actor.role}' is not allowed to post journal entries. Allowed roles: ${POSTING_ALLOWED_ROLES.join(", ")}.`,
+    };
+  }
+  if (typeof input.entryDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input.entryDate)) {
+    return { kind: "invalid_payload", reason: "Entry date must be in YYYY-MM-DD format." };
+  }
+  if (typeof input.memo !== "string" || input.memo.trim().length === 0) {
+    return { kind: "invalid_payload", reason: "Memo is required." };
+  }
+  return await db.transaction(async (tx) => {
+    const sanitized = await sanitizeLines(tx, input.lines);
+    if (!sanitized.ok) {
+      if ("kind" in sanitized && sanitized.kind === "invalid_account") {
+        return {
+          kind: "invalid_account" as const,
+          lineNo: sanitized.lineNo,
+          account: sanitized.account,
+          reason: sanitized.accountReason,
+        };
+      }
+      return { kind: "invalid_payload" as const, reason: sanitized.reason };
+    }
+    let debitsCents = 0;
+    let creditsCents = 0;
+    for (const ln of sanitized.lines) {
+      const cents = toCents(ln.amount)!;
+      if (ln.type === "debit") debitsCents += cents;
+      else creditsCents += cents;
+    }
+    if (debitsCents === 0) {
+      return { kind: "invalid_payload" as const, reason: "Journal entry total must be greater than zero." };
+    }
+    if (debitsCents !== creditsCents) {
+      return { kind: "unbalanced" as const, debitsCents, creditsCents };
+    }
+    const period = await findCoveringPeriod(tx as unknown as typeof db, input.entryDate);
+    if (!period || period.status !== "open") {
+      return {
+        kind: "period_locked" as const,
+        entryDate: input.entryDate,
+        periodLabel: period?.label ?? null,
+      };
+    }
+    // Roll back the (read-only) transaction implicitly by returning
+    // before any insert — we did no writes.
+    return { kind: "ok" as const, debitsCents, creditsCents };
+  });
+}
+
 export async function postManualJournalEntry(
   input: ManualJournalEntryInput,
   actor: PostingActor,
@@ -846,8 +933,14 @@ export async function postManualJournalEntry(
       type: "journal_entry_posted",
       description: `${actor.firstName ?? ""} ${actor.lastName ?? ""} manually posted ${je!.entryNo} (${(debitsCents / 100).toFixed(2)})`,
       actor: `${actor.firstName ?? ""} ${actor.lastName ?? ""}`.trim() || actor.email || `user#${actor.id}`,
+      // Task #29B — populate the new structured actor user id alongside
+      // the legacy display string so audit queries can join cleanly.
+      actorUserId: actor.id,
       referenceId: je!.id,
       referenceType: "journal_entry",
+      metadata: typeof input.manualDraftId === "number" && input.manualDraftId > 0
+        ? { manualDraftId: input.manualDraftId, entryNo: je!.entryNo }
+        : { entryNo: je!.entryNo },
     });
 
     return {

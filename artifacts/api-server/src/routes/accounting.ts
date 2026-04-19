@@ -32,6 +32,7 @@ import { requireAuth } from "../lib/auth";
 import {
   postApprovedJournalEntry,
   postManualJournalEntry,
+  validateManualJournalEntryForSubmit,
   reverseJournalEntry,
   type PostingActor,
 } from "../lib/postingService";
@@ -2174,13 +2175,18 @@ async function logDraftActivity(
     lastName?: string | null;
   },
   description: string,
+  metadata?: Record<string, unknown>,
 ): Promise<void> {
   await db.insert(activityLogTable).values({
     type,
     description,
     actor: actorLabel(actor),
+    // Task #29B — structured actor user id so audit queries can join
+    // activity_log -> users without parsing the display string.
+    actorUserId: actor.id,
     referenceId: draftId,
     referenceType: "manual_journal_entry_draft",
+    metadata: metadata ?? null,
   });
 }
 
@@ -2480,6 +2486,104 @@ router.post(
         status: existing.status,
       });
       return;
+    }
+    // Task #29B — submit-time policy enforcement. The acceptance gate
+    // requires that the SAME closed-period and archived/non-manual
+    // account rules from Task #25 apply at submit time, not only at
+    // post time. We adapt the stored draft payload to the wire schema
+    // and run the shared validator from postingService — this is the
+    // exact same validation pipeline (sanitizeLines + balance check +
+    // findCoveringPeriod) that the /post path uses, so a draft can
+    // only enter the reviewer's queue if it would actually post today.
+    const draftPayloadForSubmit = (existing.payload ?? {}) as Record<string, unknown>;
+    const adaptAmt = (v: unknown): number | unknown => {
+      if (typeof v === "number") return v;
+      if (typeof v === "string") {
+        const n = Number(v.trim());
+        return Number.isFinite(n) ? n : v;
+      }
+      return v;
+    };
+    const adaptedForSubmit = {
+      entryDate: draftPayloadForSubmit["entryDate"],
+      memo: draftPayloadForSubmit["memo"],
+      lines: Array.isArray(draftPayloadForSubmit["lines"])
+        ? (draftPayloadForSubmit["lines"] as Array<Record<string, unknown>>).map((ln) => ({
+            type: ln["type"],
+            amount: adaptAmt(ln["amount"]),
+            account_code: ln["accountCode"] ?? ln["account_code"],
+            program:
+              typeof ln["program"] === "string" && ln["program"].length > 0
+                ? ln["program"]
+                : null,
+            fund:
+              typeof ln["fund"] === "string" && ln["fund"].length > 0
+                ? ln["fund"]
+                : null,
+            memo:
+              typeof ln["memo"] === "string" && ln["memo"].length > 0
+                ? ln["memo"]
+                : null,
+          }))
+        : [],
+    };
+    const submitParsed = ManualJournalEntryBody.safeParse(adaptedForSubmit);
+    if (!submitParsed.success) {
+      res.status(422).json({
+        error: `Draft cannot be submitted: ${submitParsed.error.issues[0]?.message ?? "invalid payload"}`,
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    const validation = await validateManualJournalEntryForSubmit(
+      {
+        entryDate: submitParsed.data.entryDate,
+        memo: submitParsed.data.memo,
+        lines: submitParsed.data.lines,
+      },
+      toPostingActor(req),
+    );
+    switch (validation.kind) {
+      case "ok":
+        break;
+      case "forbidden":
+        res.status(403).json({ error: validation.reason, code: "FORBIDDEN" });
+        return;
+      case "invalid_payload":
+        res.status(422).json({ error: validation.reason, code: "INVALID_PAYLOAD" });
+        return;
+      case "unbalanced":
+        res.status(422).json({
+          error: `Cannot submit: debits (${(validation.debitsCents / 100).toFixed(2)}) do not equal credits (${(validation.creditsCents / 100).toFixed(2)}).`,
+          code: "UNBALANCED",
+          debitsCents: validation.debitsCents,
+          creditsCents: validation.creditsCents,
+        });
+        return;
+      case "invalid_account": {
+        const reasonText =
+          validation.reason === "unknown_account"
+            ? `account '${validation.account}' is not in the chart of accounts`
+            : validation.reason === "archived_account"
+              ? `account '${validation.account}' is archived`
+              : `account '${validation.account}' is not allowed for manual posting`;
+        res.status(400).json({
+          error: `Cannot submit: line ${validation.lineNo} — ${reasonText}.`,
+          code: "INVALID_ACCOUNT",
+          lineNo: validation.lineNo,
+          account: validation.account,
+          reason: validation.reason,
+        });
+        return;
+      }
+      case "period_locked":
+        res.status(409).json({
+          error: `Cannot submit: ${validation.entryDate} falls in ${validation.periodLabel ? `closed period '${validation.periodLabel}'` : "no open accounting period"}.`,
+          code: "PERIOD_LOCKED",
+          entryDate: validation.entryDate,
+          periodLabel: validation.periodLabel,
+        });
+        return;
     }
     const [updated] = await db
       .update(manualJournalEntryDraftsTable)
@@ -2792,6 +2896,13 @@ router.post(
             existing.id,
             user,
             `${actorLabel(user)} posted manual JE draft #${existing.id} as ${result.journalEntry.entryNo}`,
+            // Task #29B — structured cross-reference to the resulting JE
+            // so an auditor can pivot from the draft event to the ledger
+            // row without parsing the description.
+            {
+              journalEntryId: result.journalEntry.id,
+              entryNo: result.journalEntry.entryNo,
+            },
           );
         }
         res.status(result.idempotent ? 200 : 201).json({
