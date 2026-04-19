@@ -1,0 +1,106 @@
+Here’s the straight call on what to do next, based on risk vs. leverage:
+
+⚠️ Don’t wait on idempotency
+
+That gap isn’t theoretical—it’s a financial integrity risk.
+
+If two identical POSTs can create two JEs, you’ve got:
+
+duplicate expenses or revenue
+broken audit trails
+messy reversals later
+zero trust from auditors once discovered
+
+Waiting until Task #29 is too late if this endpoint is even remotely callable right now.
+
+🔧 Recommended move (no hesitation)
+Spin off a micro-task immediately: “Task 25A — Idempotency Hardening”
+
+Do NOT bundle it into Task #29.
+
+Why:
+
+It’s orthogonal to approval workflow
+It’s small, surgical, and high impact
+It protects everything already shipped
+🧠 Exact implementation (keep it tight)
+1. DB change
+
+Add column:
+
+idempotency_key TEXT UNIQUE
+
+Index:
+
+CREATE UNIQUE INDEX ux_journal_entries_idempotency
+ON journal_entries (idempotency_key)
+WHERE idempotency_key IS NOT NULL;
+2. API contract (required, not optional)
+
+Header:
+
+Idempotency-Key: <uuid>
+
+Rules:
+
+Required for POST /accounting/journal-entries
+Same key = same logical request
+Different payload + same key = reject (409)
+3. Insert logic (this is the whole game)
+INSERT ...
+ON CONFLICT (idempotency_key)
+DO NOTHING
+RETURNING *
+
+Then:
+
+If row returned → normal success
+If no row returned → fetch existing JE by idempotency_key and return it
+4. Response behavior (important)
+
+Same response for:
+
+first request
+retried request
+
+No duplicates. Ever.
+
+5. Add 3 acceptance tests (minimum)
+✅ same key + same payload → returns same JE (no duplicate)
+❌ same key + different payload → 409 conflict
+⚡ parallel requests with same key → only 1 JE created
+📊 Priority order from here
+Task 25A (Idempotency) ← do this next
+Task #28 (read-side visibility is fine to continue)
+Task #32 (UX improvement, low risk)
+Task #29 (full workflow + separation of duties)
+🧾 One correction to your current status framing
+
+This line needs tightening:
+
+“Carried forward, not silently passed.”
+
+Make it sharper:
+
+“Blocking control gap for production exposure — must be resolved before enabling external or automated posting.”
+
+That wording prevents someone from flipping a feature flag too early.
+
+🧠 Strategic note (this is bigger than this task)
+
+You’re building something that eventually:
+
+produces financial statements
+could be audited
+might be relied on for real decisions
+
+That means your system must behave like Generally Accepted Accounting Principles-adjacent software, even if you're not formally certified.
+
+And in that world:
+
+duplicate entries = unacceptable
+audit trail integrity = everything
+Bottom line
+Task #25: ✅ Accepted (correctly)
+System safety: ❌ Not yet acceptable without idempotency
+Next move: Ship Task 25A immediately
