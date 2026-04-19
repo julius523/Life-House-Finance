@@ -27,3 +27,5 @@ export * from "./accounting_settings";
 export * from "./journal_entries";
 export * from "./manual_journal_entry_drafts";
 export * from "./accounting_source_links";
+export * from "./journal_entry_export_schedules";
+export * from "./journal_entry_export_send_log";

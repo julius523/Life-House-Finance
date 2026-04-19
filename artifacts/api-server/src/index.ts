@@ -5,6 +5,7 @@ import { ensureTodaySnapshot } from "./lib/dailySnapshot";
 import { seedChartOfAccountsAndSettings } from "./lib/seedChartOfAccounts";
 import { seedExpenseCategories } from "./lib/seedExpenseCategories";
 import { ensureSchemaConstraints } from "./lib/ensureSchema";
+import { startJournalEntryExportScheduler } from "./lib/journalEntryExportScheduler";
 
 const rawPort = process.env["PORT"];
 
@@ -61,6 +62,8 @@ ensureSchemaConstraints()
   .catch((err) => {
     logger.error({ err }, "Failed to capture daily snapshot at boot");
   });
+
+startJournalEntryExportScheduler();
 
 app.listen(port, (err) => {
   if (err) {

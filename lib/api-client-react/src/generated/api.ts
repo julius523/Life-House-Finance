@@ -86,6 +86,7 @@ import type {
   GetJournalEntry200,
   GetJournalEntryApprovalHistory200,
   GetJournalEntryDraft200,
+  GetJournalEntryExportScheduleLogParams,
   GetProgramSpendingParams,
   GetRecentActivityParams,
   GetReconciliationSummaryParams,
@@ -93,6 +94,12 @@ import type {
   HealthStatus,
   JournalEntryDraftActionBody,
   JournalEntryDraftActionResponse,
+  JournalEntryExportRunNowResponse,
+  JournalEntryExportScheduleBody,
+  JournalEntryExportSchedulePatchBody,
+  JournalEntryExportScheduleResponse,
+  JournalEntryExportSchedulesListResponse,
+  JournalEntryExportSendLogListResponse,
   LinkTransactionToBillBody,
   LinkTransactionToExpenseBody,
   LinkTransactionToProgramBody,
@@ -11416,3 +11423,564 @@ export const usePingAccountingDiagnostics = <
 > => {
   return useMutation(getPingAccountingDiagnosticsMutationOptions(options));
 };
+
+/**
+ * @summary List configured CSV export schedules (admin only)
+ */
+export const getListJournalEntryExportSchedulesUrl = () => {
+  return `/api/journal-entry-export-schedules`;
+};
+
+export const listJournalEntryExportSchedules = async (
+  options?: RequestInit,
+): Promise<JournalEntryExportSchedulesListResponse> => {
+  return customFetch<JournalEntryExportSchedulesListResponse>(
+    getListJournalEntryExportSchedulesUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListJournalEntryExportSchedulesQueryKey = () => {
+  return [`/api/journal-entry-export-schedules`] as const;
+};
+
+export const getListJournalEntryExportSchedulesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listJournalEntryExportSchedules>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listJournalEntryExportSchedules>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListJournalEntryExportSchedulesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listJournalEntryExportSchedules>>
+  > = ({ signal }) =>
+    listJournalEntryExportSchedules({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listJournalEntryExportSchedules>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListJournalEntryExportSchedulesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listJournalEntryExportSchedules>>
+>;
+export type ListJournalEntryExportSchedulesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List configured CSV export schedules (admin only)
+ */
+
+export function useListJournalEntryExportSchedules<
+  TData = Awaited<ReturnType<typeof listJournalEntryExportSchedules>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listJournalEntryExportSchedules>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListJournalEntryExportSchedulesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a recurring CSV export schedule (admin only)
+ */
+export const getCreateJournalEntryExportScheduleUrl = () => {
+  return `/api/journal-entry-export-schedules`;
+};
+
+export const createJournalEntryExportSchedule = async (
+  journalEntryExportScheduleBody: JournalEntryExportScheduleBody,
+  options?: RequestInit,
+): Promise<JournalEntryExportScheduleResponse> => {
+  return customFetch<JournalEntryExportScheduleResponse>(
+    getCreateJournalEntryExportScheduleUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(journalEntryExportScheduleBody),
+    },
+  );
+};
+
+export const getCreateJournalEntryExportScheduleMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createJournalEntryExportSchedule>>,
+    TError,
+    { data: BodyType<JournalEntryExportScheduleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createJournalEntryExportSchedule>>,
+  TError,
+  { data: BodyType<JournalEntryExportScheduleBody> },
+  TContext
+> => {
+  const mutationKey = ["createJournalEntryExportSchedule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createJournalEntryExportSchedule>>,
+    { data: BodyType<JournalEntryExportScheduleBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createJournalEntryExportSchedule(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateJournalEntryExportScheduleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createJournalEntryExportSchedule>>
+>;
+export type CreateJournalEntryExportScheduleMutationBody =
+  BodyType<JournalEntryExportScheduleBody>;
+export type CreateJournalEntryExportScheduleMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a recurring CSV export schedule (admin only)
+ */
+export const useCreateJournalEntryExportSchedule = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createJournalEntryExportSchedule>>,
+    TError,
+    { data: BodyType<JournalEntryExportScheduleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createJournalEntryExportSchedule>>,
+  TError,
+  { data: BodyType<JournalEntryExportScheduleBody> },
+  TContext
+> => {
+  return useMutation(
+    getCreateJournalEntryExportScheduleMutationOptions(options),
+  );
+};
+
+/**
+ * @summary Update an existing CSV export schedule (admin only)
+ */
+export const getUpdateJournalEntryExportScheduleUrl = (id: number) => {
+  return `/api/journal-entry-export-schedules/${id}`;
+};
+
+export const updateJournalEntryExportSchedule = async (
+  id: number,
+  journalEntryExportSchedulePatchBody: JournalEntryExportSchedulePatchBody,
+  options?: RequestInit,
+): Promise<JournalEntryExportScheduleResponse> => {
+  return customFetch<JournalEntryExportScheduleResponse>(
+    getUpdateJournalEntryExportScheduleUrl(id),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(journalEntryExportSchedulePatchBody),
+    },
+  );
+};
+
+export const getUpdateJournalEntryExportScheduleMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateJournalEntryExportSchedule>>,
+    TError,
+    { id: number; data: BodyType<JournalEntryExportSchedulePatchBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateJournalEntryExportSchedule>>,
+  TError,
+  { id: number; data: BodyType<JournalEntryExportSchedulePatchBody> },
+  TContext
+> => {
+  const mutationKey = ["updateJournalEntryExportSchedule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateJournalEntryExportSchedule>>,
+    { id: number; data: BodyType<JournalEntryExportSchedulePatchBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateJournalEntryExportSchedule(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateJournalEntryExportScheduleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateJournalEntryExportSchedule>>
+>;
+export type UpdateJournalEntryExportScheduleMutationBody =
+  BodyType<JournalEntryExportSchedulePatchBody>;
+export type UpdateJournalEntryExportScheduleMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update an existing CSV export schedule (admin only)
+ */
+export const useUpdateJournalEntryExportSchedule = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateJournalEntryExportSchedule>>,
+    TError,
+    { id: number; data: BodyType<JournalEntryExportSchedulePatchBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateJournalEntryExportSchedule>>,
+  TError,
+  { id: number; data: BodyType<JournalEntryExportSchedulePatchBody> },
+  TContext
+> => {
+  return useMutation(
+    getUpdateJournalEntryExportScheduleMutationOptions(options),
+  );
+};
+
+/**
+ * @summary Delete a CSV export schedule (admin only)
+ */
+export const getDeleteJournalEntryExportScheduleUrl = (id: number) => {
+  return `/api/journal-entry-export-schedules/${id}`;
+};
+
+export const deleteJournalEntryExportSchedule = async (
+  id: number,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteJournalEntryExportScheduleUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteJournalEntryExportScheduleMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteJournalEntryExportSchedule>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteJournalEntryExportSchedule>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["deleteJournalEntryExportSchedule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteJournalEntryExportSchedule>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteJournalEntryExportSchedule(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteJournalEntryExportScheduleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteJournalEntryExportSchedule>>
+>;
+
+export type DeleteJournalEntryExportScheduleMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a CSV export schedule (admin only)
+ */
+export const useDeleteJournalEntryExportSchedule = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteJournalEntryExportSchedule>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteJournalEntryExportSchedule>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(
+    getDeleteJournalEntryExportScheduleMutationOptions(options),
+  );
+};
+
+/**
+ * @summary Manually trigger a CSV export schedule (admin only)
+ */
+export const getRunJournalEntryExportScheduleNowUrl = (id: number) => {
+  return `/api/journal-entry-export-schedules/${id}/run-now`;
+};
+
+export const runJournalEntryExportScheduleNow = async (
+  id: number,
+  options?: RequestInit,
+): Promise<JournalEntryExportRunNowResponse> => {
+  return customFetch<JournalEntryExportRunNowResponse>(
+    getRunJournalEntryExportScheduleNowUrl(id),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getRunJournalEntryExportScheduleNowMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runJournalEntryExportScheduleNow>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof runJournalEntryExportScheduleNow>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["runJournalEntryExportScheduleNow"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof runJournalEntryExportScheduleNow>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return runJournalEntryExportScheduleNow(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RunJournalEntryExportScheduleNowMutationResult = NonNullable<
+  Awaited<ReturnType<typeof runJournalEntryExportScheduleNow>>
+>;
+
+export type RunJournalEntryExportScheduleNowMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Manually trigger a CSV export schedule (admin only)
+ */
+export const useRunJournalEntryExportScheduleNow = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runJournalEntryExportScheduleNow>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof runJournalEntryExportScheduleNow>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(
+    getRunJournalEntryExportScheduleNowMutationOptions(options),
+  );
+};
+
+/**
+ * @summary Recent send-log entries for a schedule (admin only)
+ */
+export const getGetJournalEntryExportScheduleLogUrl = (
+  id: number,
+  params?: GetJournalEntryExportScheduleLogParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/journal-entry-export-schedules/${id}/log?${stringifiedParams}`
+    : `/api/journal-entry-export-schedules/${id}/log`;
+};
+
+export const getJournalEntryExportScheduleLog = async (
+  id: number,
+  params?: GetJournalEntryExportScheduleLogParams,
+  options?: RequestInit,
+): Promise<JournalEntryExportSendLogListResponse> => {
+  return customFetch<JournalEntryExportSendLogListResponse>(
+    getGetJournalEntryExportScheduleLogUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetJournalEntryExportScheduleLogQueryKey = (
+  id: number,
+  params?: GetJournalEntryExportScheduleLogParams,
+) => {
+  return [
+    `/api/journal-entry-export-schedules/${id}/log`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetJournalEntryExportScheduleLogQueryOptions = <
+  TData = Awaited<ReturnType<typeof getJournalEntryExportScheduleLog>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  params?: GetJournalEntryExportScheduleLogParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getJournalEntryExportScheduleLog>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetJournalEntryExportScheduleLogQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getJournalEntryExportScheduleLog>>
+  > = ({ signal }) =>
+    getJournalEntryExportScheduleLog(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getJournalEntryExportScheduleLog>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetJournalEntryExportScheduleLogQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getJournalEntryExportScheduleLog>>
+>;
+export type GetJournalEntryExportScheduleLogQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Recent send-log entries for a schedule (admin only)
+ */
+
+export function useGetJournalEntryExportScheduleLog<
+  TData = Awaited<ReturnType<typeof getJournalEntryExportScheduleLog>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  params?: GetJournalEntryExportScheduleLogParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getJournalEntryExportScheduleLog>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetJournalEntryExportScheduleLogQueryOptions(
+    id,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}

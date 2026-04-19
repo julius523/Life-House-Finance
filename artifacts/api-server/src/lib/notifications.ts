@@ -172,29 +172,81 @@ export async function getTemplate(
   return DEFAULT_EMAIL_TEMPLATES[type] ?? null;
 }
 
+export type EmailAttachment = {
+  filename: string;
+  /** MIME type, e.g. "text/csv". */
+  type: string;
+  /** Base64-encoded file content (no data: URL prefix). */
+  contentBase64: string;
+};
+
 export async function deliverEmail(opts: {
-  to: string;
+  to: string | string[];
   subject: string;
   body: string;
   link?: string | null;
+  /**
+   * Task #49 — Optional file attachments delivered alongside the message.
+   * SendGrid caps a single request at 30 MB total payload; the caller is
+   * responsible for not exceeding that.
+   */
+  attachments?: EmailAttachment[];
 }): Promise<DeliveryResult> {
   const apiKey = process.env["SENDGRID_API_KEY"];
   const fromAddress = process.env["NOTIFICATION_FROM_EMAIL"];
   const fromName = await getSenderName();
+  const recipients = (Array.isArray(opts.to) ? opts.to : [opts.to])
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (recipients.length === 0) {
+    return { status: "not_attempted", reason: "No recipients" };
+  }
   if (!apiKey || !fromAddress) {
     logger.info(
-      { to: opts.to, subject: opts.subject, link: opts.link, fromName },
-      `[notification email] ${opts.subject} -> ${opts.to}`,
+      {
+        to: recipients,
+        subject: opts.subject,
+        link: opts.link,
+        fromName,
+        attachmentCount: opts.attachments?.length ?? 0,
+      },
+      `[notification email] ${opts.subject} -> ${recipients.join(", ")}`,
     );
     return {
       status: "not_attempted",
-      reason: "Email provider not configured (missing SENDGRID_API_KEY or NOTIFICATION_FROM_EMAIL).",
+      reason:
+        "Email provider not configured (missing SENDGRID_API_KEY or NOTIFICATION_FROM_EMAIL).",
     };
   }
 
   const absoluteLink = opts.link ? resolveAbsoluteLink(opts.link) : null;
   const plainText = `${opts.body}${absoluteLink ? `\n\n${absoluteLink}` : ""}`;
-  const htmlBody = renderHtmlEmail(opts);
+  const htmlBody = renderHtmlEmail({
+    ...opts,
+    to: recipients[0]!,
+  });
+
+  const payload: Record<string, unknown> = {
+    personalizations: [{ to: recipients.map((email) => ({ email })) }],
+    from: { email: fromAddress, name: fromName },
+    subject: opts.subject,
+    content: [
+      { type: "text/plain", value: plainText },
+      { type: "text/html", value: htmlBody },
+    ],
+    tracking_settings: {
+      click_tracking: { enable: false, enable_text: false },
+      open_tracking: { enable: false },
+    },
+  };
+  if (opts.attachments && opts.attachments.length > 0) {
+    payload["attachments"] = opts.attachments.map((a) => ({
+      filename: a.filename,
+      type: a.type,
+      content: a.contentBase64,
+      disposition: "attachment",
+    }));
+  }
 
   try {
     const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
@@ -203,26 +255,14 @@ export async function deliverEmail(opts: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        personalizations: [{ to: [{ email: opts.to }] }],
-        from: { email: fromAddress, name: fromName },
-        subject: opts.subject,
-        content: [
-          { type: "text/plain", value: plainText },
-          { type: "text/html", value: htmlBody },
-        ],
-        tracking_settings: {
-          click_tracking: { enable: false, enable_text: false },
-          open_tracking: { enable: false },
-        },
-      }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const responseBody = await res.text().catch(() => "");
       logger.warn(
         {
           status: res.status,
-          to: opts.to,
+          to: recipients,
           subject: opts.subject,
           response: responseBody.slice(0, 500),
         },
@@ -236,13 +276,17 @@ export async function deliverEmail(opts: {
       };
     }
     logger.info(
-      { to: opts.to, subject: opts.subject },
+      {
+        to: recipients,
+        subject: opts.subject,
+        attachmentCount: opts.attachments?.length ?? 0,
+      },
       "Notification email sent via SendGrid",
     );
     return { status: "sent" };
   } catch (err) {
     logger.warn(
-      { err, to: opts.to, subject: opts.subject },
+      { err, to: recipients, subject: opts.subject },
       "Error sending notification email",
     );
     return {

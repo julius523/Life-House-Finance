@@ -1826,6 +1826,184 @@ export interface JournalEntryDraftActionResponse {
   [key: string]: unknown;
 }
 
+export type JournalEntryExportScheduleCadence =
+  (typeof JournalEntryExportScheduleCadence)[keyof typeof JournalEntryExportScheduleCadence];
+
+export const JournalEntryExportScheduleCadence = {
+  daily: "daily",
+  weekly: "weekly",
+  monthly: "monthly",
+} as const;
+
+export type JournalEntryExportScheduleFilterStatus =
+  | (typeof JournalEntryExportScheduleFilterStatus)[keyof typeof JournalEntryExportScheduleFilterStatus]
+  | null;
+
+export const JournalEntryExportScheduleFilterStatus = {
+  posted: "posted",
+  reversed: "reversed",
+} as const;
+
+export type JournalEntryExportScheduleFilterSource =
+  | (typeof JournalEntryExportScheduleFilterSource)[keyof typeof JournalEntryExportScheduleFilterSource]
+  | null;
+
+export const JournalEntryExportScheduleFilterSource = {
+  copilot: "copilot",
+  manual: "manual",
+  expense: "expense",
+  bill: "bill",
+} as const;
+
+export interface JournalEntryExportSchedule {
+  id: number;
+  name: string;
+  enabled: boolean;
+  cadence: JournalEntryExportScheduleCadence;
+  recipients: string[];
+  filterStatus?: JournalEntryExportScheduleFilterStatus;
+  filterSource?: JournalEntryExportScheduleFilterSource;
+  includeLines: boolean;
+  createdByUserId?: number | null;
+  createdAt: string;
+  updatedAt: string;
+  lastRunAt?: string | null;
+  lastRunStatus?: string | null;
+  lastRunError?: string | null;
+  nextRunAt?: string | null;
+}
+
+export interface JournalEntryExportSchedulesListResponse {
+  schedules: JournalEntryExportSchedule[];
+}
+
+export interface JournalEntryExportScheduleResponse {
+  schedule: JournalEntryExportSchedule;
+}
+
+export type JournalEntryExportScheduleBodyCadence =
+  (typeof JournalEntryExportScheduleBodyCadence)[keyof typeof JournalEntryExportScheduleBodyCadence];
+
+export const JournalEntryExportScheduleBodyCadence = {
+  daily: "daily",
+  weekly: "weekly",
+  monthly: "monthly",
+} as const;
+
+export type JournalEntryExportScheduleBodyFilterStatus =
+  | (typeof JournalEntryExportScheduleBodyFilterStatus)[keyof typeof JournalEntryExportScheduleBodyFilterStatus]
+  | null;
+
+export const JournalEntryExportScheduleBodyFilterStatus = {
+  posted: "posted",
+  reversed: "reversed",
+} as const;
+
+export type JournalEntryExportScheduleBodyFilterSource =
+  | (typeof JournalEntryExportScheduleBodyFilterSource)[keyof typeof JournalEntryExportScheduleBodyFilterSource]
+  | null;
+
+export const JournalEntryExportScheduleBodyFilterSource = {
+  copilot: "copilot",
+  manual: "manual",
+  expense: "expense",
+  bill: "bill",
+} as const;
+
+export interface JournalEntryExportScheduleBody {
+  name: string;
+  enabled?: boolean;
+  cadence: JournalEntryExportScheduleBodyCadence;
+  recipients: string[];
+  filterStatus?: JournalEntryExportScheduleBodyFilterStatus;
+  filterSource?: JournalEntryExportScheduleBodyFilterSource;
+  includeLines?: boolean;
+}
+
+export type JournalEntryExportSchedulePatchBodyCadence =
+  (typeof JournalEntryExportSchedulePatchBodyCadence)[keyof typeof JournalEntryExportSchedulePatchBodyCadence];
+
+export const JournalEntryExportSchedulePatchBodyCadence = {
+  daily: "daily",
+  weekly: "weekly",
+  monthly: "monthly",
+} as const;
+
+export type JournalEntryExportSchedulePatchBodyFilterStatus =
+  | (typeof JournalEntryExportSchedulePatchBodyFilterStatus)[keyof typeof JournalEntryExportSchedulePatchBodyFilterStatus]
+  | null;
+
+export const JournalEntryExportSchedulePatchBodyFilterStatus = {
+  posted: "posted",
+  reversed: "reversed",
+} as const;
+
+export type JournalEntryExportSchedulePatchBodyFilterSource =
+  | (typeof JournalEntryExportSchedulePatchBodyFilterSource)[keyof typeof JournalEntryExportSchedulePatchBodyFilterSource]
+  | null;
+
+export const JournalEntryExportSchedulePatchBodyFilterSource = {
+  copilot: "copilot",
+  manual: "manual",
+  expense: "expense",
+  bill: "bill",
+} as const;
+
+export interface JournalEntryExportSchedulePatchBody {
+  name?: string;
+  enabled?: boolean;
+  cadence?: JournalEntryExportSchedulePatchBodyCadence;
+  recipients?: string[];
+  filterStatus?: JournalEntryExportSchedulePatchBodyFilterStatus;
+  filterSource?: JournalEntryExportSchedulePatchBodyFilterSource;
+  includeLines?: boolean;
+}
+
+export type JournalEntryExportRunResultStatus =
+  (typeof JournalEntryExportRunResultStatus)[keyof typeof JournalEntryExportRunResultStatus];
+
+export const JournalEntryExportRunResultStatus = {
+  sent: "sent",
+  empty: "empty",
+  failed: "failed",
+} as const;
+
+export type JournalEntryExportRunResultRange = {
+  from: string;
+  to: string;
+};
+
+export interface JournalEntryExportRunResult {
+  status: JournalEntryExportRunResultStatus;
+  rowCount: number;
+  filename: string;
+  range: JournalEntryExportRunResultRange;
+  error?: string;
+}
+
+export interface JournalEntryExportRunNowResponse {
+  result: JournalEntryExportRunResult;
+}
+
+export interface JournalEntryExportSendLogEntry {
+  id: number;
+  scheduleId: number;
+  sentAt: string;
+  recipients: string[];
+  rowCount: number;
+  rangeFrom?: string | null;
+  rangeTo?: string | null;
+  status: string;
+  errorMessage?: string | null;
+  filename: string;
+  triggeredBy: string;
+  triggeredByUserId?: number | null;
+}
+
+export interface JournalEntryExportSendLogListResponse {
+  entries: JournalEntryExportSendLogEntry[];
+}
+
 export type GetRecentActivityParams = {
   limit?: number;
 };
@@ -2416,4 +2594,8 @@ export type RejectJournalEntryDraftBody = JournalEntryDraftActionBody & {
 export type PingAccountingDiagnostics200 = {
   status: string;
   detail: string;
+};
+
+export type GetJournalEntryExportScheduleLogParams = {
+  limit?: number;
 };

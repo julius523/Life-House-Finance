@@ -630,6 +630,18 @@ export default function JournalEntriesListPage() {
               <Download className="h-4 w-4 mr-1" />
               {exporting ? "Exporting…" : "Download CSV"}
             </Button>
+            {user?.role === "admin" ? (
+              <Button
+                asChild
+                variant="ghost"
+                size="sm"
+                data-testid="button-schedule-exports"
+              >
+                <Link href="/accounting/journal-export-schedules">
+                  Schedule exports
+                </Link>
+              </Button>
+            ) : null}
           </div>
         </CardHeader>
         <CardContent className="p-0">

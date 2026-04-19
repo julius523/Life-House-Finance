@@ -4920,3 +4920,137 @@ export const PingAccountingDiagnosticsResponse = zod.object({
   status: zod.string(),
   detail: zod.string(),
 });
+
+/**
+ * @summary List configured CSV export schedules (admin only)
+ */
+export const ListJournalEntryExportSchedulesResponse = zod.object({
+  schedules: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      enabled: zod.boolean(),
+      cadence: zod.enum(["daily", "weekly", "monthly"]),
+      recipients: zod.array(zod.string()),
+      filterStatus: zod.enum(["posted", "reversed"]).nullish(),
+      filterSource: zod
+        .enum(["copilot", "manual", "expense", "bill"])
+        .nullish(),
+      includeLines: zod.boolean(),
+      createdByUserId: zod.number().nullish(),
+      createdAt: zod.string(),
+      updatedAt: zod.string(),
+      lastRunAt: zod.string().nullish(),
+      lastRunStatus: zod.string().nullish(),
+      lastRunError: zod.string().nullish(),
+      nextRunAt: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary Create a recurring CSV export schedule (admin only)
+ */
+export const CreateJournalEntryExportScheduleBody = zod.object({
+  name: zod.string(),
+  enabled: zod.boolean().optional(),
+  cadence: zod.enum(["daily", "weekly", "monthly"]),
+  recipients: zod.array(zod.string()),
+  filterStatus: zod.enum(["posted", "reversed"]).nullish(),
+  filterSource: zod.enum(["copilot", "manual", "expense", "bill"]).nullish(),
+  includeLines: zod.boolean().optional(),
+});
+
+/**
+ * @summary Update an existing CSV export schedule (admin only)
+ */
+export const UpdateJournalEntryExportScheduleParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateJournalEntryExportScheduleBody = zod.object({
+  name: zod.string().optional(),
+  enabled: zod.boolean().optional(),
+  cadence: zod.enum(["daily", "weekly", "monthly"]).optional(),
+  recipients: zod.array(zod.string()).optional(),
+  filterStatus: zod.enum(["posted", "reversed"]).nullish(),
+  filterSource: zod.enum(["copilot", "manual", "expense", "bill"]).nullish(),
+  includeLines: zod.boolean().optional(),
+});
+
+export const UpdateJournalEntryExportScheduleResponse = zod.object({
+  schedule: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    enabled: zod.boolean(),
+    cadence: zod.enum(["daily", "weekly", "monthly"]),
+    recipients: zod.array(zod.string()),
+    filterStatus: zod.enum(["posted", "reversed"]).nullish(),
+    filterSource: zod.enum(["copilot", "manual", "expense", "bill"]).nullish(),
+    includeLines: zod.boolean(),
+    createdByUserId: zod.number().nullish(),
+    createdAt: zod.string(),
+    updatedAt: zod.string(),
+    lastRunAt: zod.string().nullish(),
+    lastRunStatus: zod.string().nullish(),
+    lastRunError: zod.string().nullish(),
+    nextRunAt: zod.string().nullish(),
+  }),
+});
+
+/**
+ * @summary Delete a CSV export schedule (admin only)
+ */
+export const DeleteJournalEntryExportScheduleParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+/**
+ * @summary Manually trigger a CSV export schedule (admin only)
+ */
+export const RunJournalEntryExportScheduleNowParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const RunJournalEntryExportScheduleNowResponse = zod.object({
+  result: zod.object({
+    status: zod.enum(["sent", "empty", "failed"]),
+    rowCount: zod.number(),
+    filename: zod.string(),
+    range: zod.object({
+      from: zod.string(),
+      to: zod.string(),
+    }),
+    error: zod.string().optional(),
+  }),
+});
+
+/**
+ * @summary Recent send-log entries for a schedule (admin only)
+ */
+export const GetJournalEntryExportScheduleLogParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetJournalEntryExportScheduleLogQueryParams = zod.object({
+  limit: zod.coerce.number().optional(),
+});
+
+export const GetJournalEntryExportScheduleLogResponse = zod.object({
+  entries: zod.array(
+    zod.object({
+      id: zod.number(),
+      scheduleId: zod.number(),
+      sentAt: zod.string(),
+      recipients: zod.array(zod.string()),
+      rowCount: zod.number(),
+      rangeFrom: zod.string().nullish(),
+      rangeTo: zod.string().nullish(),
+      status: zod.string(),
+      errorMessage: zod.string().nullish(),
+      filename: zod.string(),
+      triggeredBy: zod.string(),
+      triggeredByUserId: zod.number().nullish(),
+    }),
+  ),
+});

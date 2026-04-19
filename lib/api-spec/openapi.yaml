@@ -3043,6 +3043,116 @@ paths:
                     type: string
                 required: [status, detail]
 
+  /journal-entry-export-schedules:
+    get:
+      operationId: listJournalEntryExportSchedules
+      tags: [accounting]
+      summary: List configured CSV export schedules (admin only)
+      responses:
+        "200":
+          description: Schedules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntryExportSchedulesListResponse"
+    post:
+      operationId: createJournalEntryExportSchedule
+      tags: [accounting]
+      summary: Create a recurring CSV export schedule (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JournalEntryExportScheduleBody"
+      responses:
+        "201":
+          description: Created schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntryExportScheduleResponse"
+
+  /journal-entry-export-schedules/{id}:
+    patch:
+      operationId: updateJournalEntryExportSchedule
+      tags: [accounting]
+      summary: Update an existing CSV export schedule (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JournalEntryExportSchedulePatchBody"
+      responses:
+        "200":
+          description: Updated schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntryExportScheduleResponse"
+    delete:
+      operationId: deleteJournalEntryExportSchedule
+      tags: [accounting]
+      summary: Delete a CSV export schedule (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /journal-entry-export-schedules/{id}/run-now:
+    post:
+      operationId: runJournalEntryExportScheduleNow
+      tags: [accounting]
+      summary: Manually trigger a CSV export schedule (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Run result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntryExportRunNowResponse"
+
+  /journal-entry-export-schedules/{id}/log:
+    get:
+      operationId: getJournalEntryExportScheduleLog
+      tags: [accounting]
+      summary: Recent send-log entries for a schedule (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntryExportSendLogListResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -6044,3 +6154,209 @@ components:
               type: string
       required:
         - draft
+
+    JournalEntryExportSchedule:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        enabled:
+          type: boolean
+        cadence:
+          type: string
+          enum: [daily, weekly, monthly]
+        recipients:
+          type: array
+          items:
+            type: string
+        filterStatus:
+          type: string
+          enum: [posted, reversed]
+          nullable: true
+        filterSource:
+          type: string
+          enum: [copilot, manual, expense, bill]
+          nullable: true
+        includeLines:
+          type: boolean
+        createdByUserId:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        lastRunAt:
+          type: string
+          nullable: true
+        lastRunStatus:
+          type: string
+          nullable: true
+        lastRunError:
+          type: string
+          nullable: true
+        nextRunAt:
+          type: string
+          nullable: true
+      required:
+        - id
+        - name
+        - enabled
+        - cadence
+        - recipients
+        - includeLines
+        - createdAt
+        - updatedAt
+
+    JournalEntryExportSchedulesListResponse:
+      type: object
+      properties:
+        schedules:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalEntryExportSchedule"
+      required: [schedules]
+
+    JournalEntryExportScheduleResponse:
+      type: object
+      properties:
+        schedule:
+          $ref: "#/components/schemas/JournalEntryExportSchedule"
+      required: [schedule]
+
+    JournalEntryExportScheduleBody:
+      type: object
+      properties:
+        name:
+          type: string
+        enabled:
+          type: boolean
+        cadence:
+          type: string
+          enum: [daily, weekly, monthly]
+        recipients:
+          type: array
+          items:
+            type: string
+        filterStatus:
+          type: string
+          enum: [posted, reversed]
+          nullable: true
+        filterSource:
+          type: string
+          enum: [copilot, manual, expense, bill]
+          nullable: true
+        includeLines:
+          type: boolean
+      required:
+        - name
+        - cadence
+        - recipients
+
+    JournalEntryExportSchedulePatchBody:
+      type: object
+      properties:
+        name:
+          type: string
+        enabled:
+          type: boolean
+        cadence:
+          type: string
+          enum: [daily, weekly, monthly]
+        recipients:
+          type: array
+          items:
+            type: string
+        filterStatus:
+          type: string
+          enum: [posted, reversed]
+          nullable: true
+        filterSource:
+          type: string
+          enum: [copilot, manual, expense, bill]
+          nullable: true
+        includeLines:
+          type: boolean
+
+    JournalEntryExportRunResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [sent, empty, failed]
+        rowCount:
+          type: integer
+        filename:
+          type: string
+        range:
+          type: object
+          properties:
+            from:
+              type: string
+            to:
+              type: string
+          required: [from, to]
+        error:
+          type: string
+      required: [status, rowCount, filename, range]
+
+    JournalEntryExportRunNowResponse:
+      type: object
+      properties:
+        result:
+          $ref: "#/components/schemas/JournalEntryExportRunResult"
+      required: [result]
+
+    JournalEntryExportSendLogEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        scheduleId:
+          type: integer
+        sentAt:
+          type: string
+        recipients:
+          type: array
+          items:
+            type: string
+        rowCount:
+          type: integer
+        rangeFrom:
+          type: string
+          nullable: true
+        rangeTo:
+          type: string
+          nullable: true
+        status:
+          type: string
+        errorMessage:
+          type: string
+          nullable: true
+        filename:
+          type: string
+        triggeredBy:
+          type: string
+        triggeredByUserId:
+          type: integer
+          nullable: true
+      required:
+        - id
+        - scheduleId
+        - sentAt
+        - recipients
+        - rowCount
+        - status
+        - filename
+        - triggeredBy
+
+    JournalEntryExportSendLogListResponse:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalEntryExportSendLogEntry"
+      required: [entries]

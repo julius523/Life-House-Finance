@@ -2613,33 +2613,17 @@ router.get(
 // instead of one row per entry. Capped to keep memory bounded — exports
 // larger than the cap return 413 so reviewers narrow their filters
 // rather than silently getting a truncated file.
-const CSV_EXPORT_MAX_ENTRIES = 10_000;
-
-function csvEscape(value: string | number | null | undefined): string {
-  if (value === null || value === undefined) return "";
-  let s = String(value);
-  // Neutralize spreadsheet formula injection (CWE-1236): cells whose first
-  // character is =, +, -, @, or a leading tab/CR are interpreted as
-  // formulas by Excel/Sheets when the file is opened. Prefix with a single
-  // quote so the cell is treated as text. Genuine numeric strings (e.g.
-  // "-12.34" from formatCentsForCsv) are left alone so debit/credit
-  // columns still aggregate as numbers in the spreadsheet.
-  if (s.length > 0 && /^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) {
-    s = `'${s}`;
-  }
-  if (/[",\r\n]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
-
-function formatCentsForCsv(cents: number): string {
-  const negative = cents < 0;
-  const abs = Math.abs(cents);
-  const whole = Math.floor(abs / 100);
-  const frac = (abs % 100).toString().padStart(2, "0");
-  return `${negative ? "-" : ""}${whole}.${frac}`;
-}
+//
+// Task #49 — CSV rendering, escape, and overflow logic moved into
+// `lib/journalEntryCsvService.ts` so the scheduled-export job can call
+// the same code path. Keep these aliases so the rest of accounting.ts
+// (e.g. drilldown CSVs farther down) keeps working unchanged.
+import {
+  CSV_EXPORT_MAX_ENTRIES,
+  csvEscape,
+  formatCentsForCsv,
+  generateJournalEntryCsv,
+} from "../lib/journalEntryCsvService";
 
 router.get(
   "/accounting/journal-entries.csv",
@@ -2650,209 +2634,45 @@ router.get(
       return;
     }
     const q = req.query;
-    const status = typeof q["status"] === "string" ? (q["status"] as string) : null;
-    const source = typeof q["source"] === "string" ? (q["source"] as string) : null;
-    const from =
-      typeof q["from"] === "string" && /^\d{4}-\d{2}-\d{2}$/.test(q["from"] as string)
-        ? (q["from"] as string)
-        : null;
-    const to =
-      typeof q["to"] === "string" && /^\d{4}-\d{2}-\d{2}$/.test(q["to"] as string)
-        ? (q["to"] as string)
-        : null;
-    const includeLines = q["includeLines"] === "true" || q["includeLines"] === "1";
+    const statusRaw =
+      typeof q["status"] === "string" ? (q["status"] as string) : null;
+    const sourceRaw =
+      typeof q["source"] === "string" ? (q["source"] as string) : null;
+    const from = typeof q["from"] === "string" ? (q["from"] as string) : null;
+    const to = typeof q["to"] === "string" ? (q["to"] as string) : null;
+    const includeLines =
+      q["includeLines"] === "true" || q["includeLines"] === "1";
 
-    const conds = [];
-    if (status === "posted" || status === "reversed") {
-      conds.push(eq(journalEntriesTable.status, status));
-    }
-    // Task #53 — keep CSV filter semantics in lock-step with the JSON list
-    // endpoint, including the new 'expense' bucket. Without this, exporting
-    // with source=expense from the UI silently fell back to "all sources".
-    if (source === "copilot") {
-      conds.push(sql`${journalEntriesTable.agentActionId} IS NOT NULL`);
-    } else if (source === "manual") {
-      conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
-      conds.push(sql`NOT EXISTS (
-        SELECT 1 FROM ${accountingSourceLinksTable}
-        WHERE ${accountingSourceLinksTable.sourceType} IN ('expense','bill')
-          AND (
-            ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
-            OR (
-              ${journalEntriesTable.manualDraftId} IS NOT NULL
-              AND ${accountingSourceLinksTable.manualJournalEntryDraftId} = ${journalEntriesTable.manualDraftId}
-            )
-          )
-      )`);
-    } else if (source === "expense") {
-      conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
-      conds.push(sql`EXISTS (
-        SELECT 1 FROM ${accountingSourceLinksTable}
-        WHERE ${accountingSourceLinksTable.sourceType} = 'expense'
-          AND (
-            ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
-            OR (
-              ${journalEntriesTable.manualDraftId} IS NOT NULL
-              AND ${accountingSourceLinksTable.manualJournalEntryDraftId} = ${journalEntriesTable.manualDraftId}
-            )
-          )
-      )`);
-    } else if (source === "bill") {
-      // Task #63 — CSV mirrors JSON list filter semantics for the bill bucket.
-      conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
-      conds.push(sql`EXISTS (
-        SELECT 1 FROM ${accountingSourceLinksTable}
-        WHERE ${accountingSourceLinksTable.sourceType} = 'bill'
-          AND (
-            ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
-            OR (
-              ${journalEntriesTable.manualDraftId} IS NOT NULL
-              AND ${accountingSourceLinksTable.manualJournalEntryDraftId} = ${journalEntriesTable.manualDraftId}
-            )
-          )
-      )`);
-    }
-    if (from) {
-      conds.push(sql`${journalEntriesTable.entryDate} >= ${from}`);
-    }
-    if (to) {
-      conds.push(sql`${journalEntriesTable.entryDate} <= ${to}`);
-    }
-    const whereExpr = conds.length ? and(...conds) : undefined;
+    const result = await generateJournalEntryCsv({
+      status:
+        statusRaw === "posted" || statusRaw === "reversed" ? statusRaw : null,
+      source:
+        sourceRaw === "copilot" ||
+        sourceRaw === "manual" ||
+        sourceRaw === "expense" ||
+        sourceRaw === "bill"
+          ? sourceRaw
+          : null,
+      from,
+      to,
+      includeLines,
+    });
 
-    const entries = await db
-      .select()
-      .from(journalEntriesTable)
-      .where(whereExpr)
-      .orderBy(desc(journalEntriesTable.postedAt))
-      .limit(CSV_EXPORT_MAX_ENTRIES + 1);
-
-    if (entries.length > CSV_EXPORT_MAX_ENTRIES) {
+    if (!result.ok) {
       res.status(413).json({
-        error: `Export would exceed ${CSV_EXPORT_MAX_ENTRIES} entries. Narrow the filters (e.g. by date range) and try again.`,
+        error: `Export would exceed ${result.max} entries. Narrow the filters (e.g. by date range) and try again.`,
         code: "EXPORT_TOO_LARGE",
-        max: CSV_EXPORT_MAX_ENTRIES,
+        max: result.max,
       });
       return;
     }
 
-    const linesByEntry = new Map<
-      number,
-      Array<typeof journalEntryLinesTable.$inferSelect>
-    >();
-    if (includeLines && entries.length > 0) {
-      const ids = entries.map((e) => e.id);
-      const allLines = await db
-        .select()
-        .from(journalEntryLinesTable)
-        .where(inArray(journalEntryLinesTable.journalEntryId, ids))
-        .orderBy(
-          asc(journalEntryLinesTable.journalEntryId),
-          asc(journalEntryLinesTable.lineNo),
-        );
-      for (const ln of allLines) {
-        const arr = linesByEntry.get(ln.journalEntryId) ?? [];
-        arr.push(ln);
-        linesByEntry.set(ln.journalEntryId, arr);
-      }
-    }
-
-    const rows: string[] = [];
-    if (includeLines) {
-      rows.push(
-        [
-          "entry_date",
-          "entry_no",
-          "memo",
-          "source",
-          "status",
-          "line_no",
-          "account",
-          "debit",
-          "credit",
-          "program",
-          "fund",
-          "line_memo",
-        ].join(","),
-      );
-      for (const e of entries) {
-        const src = e.agentActionId !== null ? "copilot" : "manual";
-        const lines = linesByEntry.get(e.id) ?? [];
-        if (lines.length === 0) {
-          rows.push(
-            [
-              csvEscape(e.entryDate),
-              csvEscape(e.entryNo),
-              csvEscape(e.memo),
-              csvEscape(src),
-              csvEscape(e.status),
-              "",
-              "",
-              "",
-              "",
-              "",
-              "",
-              "",
-            ].join(","),
-          );
-          continue;
-        }
-        for (const ln of lines) {
-          rows.push(
-            [
-              csvEscape(e.entryDate),
-              csvEscape(e.entryNo),
-              csvEscape(e.memo),
-              csvEscape(src),
-              csvEscape(e.status),
-              csvEscape(ln.lineNo),
-              csvEscape(ln.account),
-              csvEscape(ln.type === "debit" ? formatCentsForCsv(ln.amountCents) : ""),
-              csvEscape(ln.type === "credit" ? formatCentsForCsv(ln.amountCents) : ""),
-              csvEscape(ln.program),
-              csvEscape(ln.fund),
-              csvEscape(ln.memo),
-            ].join(","),
-          );
-        }
-      }
-    } else {
-      rows.push(
-        [
-          "entry_date",
-          "entry_no",
-          "memo",
-          "total_debits",
-          "total_credits",
-          "source",
-          "status",
-        ].join(","),
-      );
-      for (const e of entries) {
-        const src = e.agentActionId !== null ? "copilot" : "manual";
-        rows.push(
-          [
-            csvEscape(e.entryDate),
-            csvEscape(e.entryNo),
-            csvEscape(e.memo),
-            csvEscape(formatCentsForCsv(e.totalsDebitsCents)),
-            csvEscape(formatCentsForCsv(e.totalsCreditsCents)),
-            csvEscape(src),
-            csvEscape(e.status),
-          ].join(","),
-        );
-      }
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    const filename = `journal-entries-${today}${includeLines ? "-with-lines" : ""}.csv`;
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${filename}"`,
+      `attachment; filename="${result.filename}"`,
     );
-    // Prepend UTF-8 BOM so Excel opens non-ASCII memos correctly.
-    res.send("\uFEFF" + rows.join("\r\n") + "\r\n");
+    res.send(result.csv);
   },
 );
 

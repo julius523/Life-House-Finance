@@ -1,0 +1,74 @@
+import {
+  pgTable,
+  serial,
+  text,
+  integer,
+  boolean,
+  timestamp,
+} from "drizzle-orm/pg-core";
+import { usersTable } from "./users";
+
+/**
+ * Task #49 — Scheduled CSV exports of journal entries.
+ *
+ * One row per recurring export configuration. The scheduler reads
+ * `enabled = true AND next_run_at <= now()` and claims rows by
+ * atomically advancing `next_run_at` to the next boundary (so a
+ * concurrent tick or a duplicate process cannot double-send).
+ *
+ * Cadence semantics — the exported date range is derived deterministically
+ * from cadence at run time:
+ *   - daily   → previous calendar day (single-day window)
+ *   - weekly  → previous 7 calendar days ending yesterday
+ *   - monthly → previous calendar month
+ *
+ * The actual run hour (UTC) is encoded in `next_run_at`; humans configure
+ * cadence + recipients only.
+ */
+export const EXPORT_CADENCES = ["daily", "weekly", "monthly"] as const;
+export type ExportCadence = (typeof EXPORT_CADENCES)[number];
+
+export const EXPORT_FILTER_STATUSES = ["posted", "reversed"] as const;
+export type ExportFilterStatus = (typeof EXPORT_FILTER_STATUSES)[number];
+
+export const EXPORT_FILTER_SOURCES = [
+  "copilot",
+  "manual",
+  "expense",
+  "bill",
+] as const;
+export type ExportFilterSource = (typeof EXPORT_FILTER_SOURCES)[number];
+
+export const EXPORT_RUN_STATUSES = ["sent", "failed", "empty"] as const;
+export type ExportRunStatus = (typeof EXPORT_RUN_STATUSES)[number];
+
+export const journalEntryExportSchedulesTable = pgTable(
+  "journal_entry_export_schedules",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    cadence: text("cadence").notNull(),
+    /** Postgres text[]; stored lower-cased + trimmed by the API layer. */
+    recipients: text("recipients").array().notNull(),
+    filterStatus: text("filter_status"),
+    filterSource: text("filter_source"),
+    includeLines: boolean("include_lines").notNull().default(false),
+    createdByUserId: integer("created_by_user_id").references(
+      () => usersTable.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    lastRunAt: timestamp("last_run_at"),
+    lastRunStatus: text("last_run_status"),
+    lastRunError: text("last_run_error"),
+    /** When NULL the schedule never runs; fill on enable. */
+    nextRunAt: timestamp("next_run_at"),
+  },
+);
+
+export type JournalEntryExportSchedule =
+  typeof journalEntryExportSchedulesTable.$inferSelect;
+export type InsertJournalEntryExportSchedule =
+  typeof journalEntryExportSchedulesTable.$inferInsert;
