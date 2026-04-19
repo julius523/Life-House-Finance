@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, Link, useSearch } from "wouter";
 import {
   Card,
@@ -92,6 +92,17 @@ type DraftRecord = {
   updatedAt: string;
 };
 
+function formatRelativeSaved(savedAt: Date, now: number): string {
+  const diffSec = Math.max(0, Math.floor((now - savedAt.getTime()) / 1000));
+  if (diffSec < 5) return "saved just now";
+  if (diffSec < 60) return `saved ${diffSec}s ago`;
+  const min = Math.floor(diffSec / 60);
+  if (min < 60) return `saved ${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `saved ${hr}h ago`;
+  return `saved ${savedAt.toLocaleString()}`;
+}
+
 function rehydrateLine(
   line: DraftPayload["lines"][number],
   fallbackType: "debit" | "credit",
@@ -148,15 +159,35 @@ export default function JournalEntriesNewPage() {
   const [draftLoading, setDraftLoading] = useState(false);
   const [draftLoadError, setDraftLoadError] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  // Task #35 — background auto-save state. The serialized snapshot in the
+  // ref is the last payload the server has acknowledged; we compare against
+  // it to decide if there are unsaved changes worth flushing.
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [autoSaveError, setAutoSaveError] = useState<string | null>(null);
+  const [autoSaveTick, setAutoSaveTick] = useState(0);
+  const lastSavedPayloadRef = useRef<string | null>(null);
+  const autoSaveInFlightRef = useRef(false);
+  // Re-render the relative "saved Xs ago" indicator on a timer.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Load existing draft if ?draft=ID is in the URL.
   useEffect(() => {
     if (!canPost) return;
-    if (draftIdParam === null) {
-      setDraftId(null);
-      setDraftLoadError(null);
-      return;
-    }
+    // Task #35 — when the auto-save POSTs a new draft it sets draftId(X)
+    // and replaces the URL with ?draft=X. If React doesn't batch those two
+    // updates, this effect can briefly observe draftIdParam=null while
+    // draftId=X. We must NOT clear the freshly-created draft id in that
+    // window, so we just bail here instead of resetting local state.
+    if (draftIdParam === null) return;
+    // When the URL already points at the draft we hold in memory (e.g.
+    // right after the auto-create finishes and pushes ?draft=<id>), skip
+    // the GET — refetching would clobber any keystrokes the accountant
+    // has typed since the POST went out.
+    if (draftIdParam === draftId) return;
     let cancelled = false;
     setDraftLoading(true);
     setDraftLoadError(null);
@@ -168,6 +199,9 @@ export default function JournalEntriesNewPage() {
         setDraftId(draft.id);
         setDraftVersion(draft.version);
         setLastSavedAt(draft.updatedAt);
+        // Reset baseline so the auto-save effect doesn't immediately
+        // re-PATCH the freshly-loaded draft.
+        lastSavedPayloadRef.current = null;
         const p = draft.payload ?? { entryDate: "", memo: "", lines: [] };
         // Restore exactly what was saved — including blank values — so
         // a paused, partially-filled entry reopens identically.
@@ -198,7 +232,7 @@ export default function JournalEntriesNewPage() {
     return () => {
       cancelled = true;
     };
-  }, [draftIdParam, canPost]);
+  }, [draftIdParam, canPost, draftId]);
 
   const postableAccounts = useMemo(
     () => accounts.filter((a) => a.isActive && a.allowManualPosting),
@@ -294,10 +328,100 @@ export default function JournalEntriesNewPage() {
     })),
   });
 
+  // Task #35 — debounced background auto-save. Watches the editable form
+  // values and PATCHes (or POSTs the first time) when they settle. Errors
+  // are surfaced as a quiet inline note instead of a toast so they don't
+  // interrupt typing.
+  const runAutoSave = async (serialized: string) => {
+    if (autoSaveInFlightRef.current) return;
+    autoSaveInFlightRef.current = true;
+    setAutoSaving(true);
+    try {
+      const payload = buildDraftPayload();
+      if (draftId !== null) {
+        const data = await apiJson<{ draft: DraftRecord }>(
+          `/accounting/journal-entry-drafts/${draftId}`,
+          {
+            method: "PATCH",
+            body: {
+              payload,
+              ...(draftVersion !== null
+                ? { expectedVersion: draftVersion }
+                : {}),
+            },
+          },
+        );
+        setDraftVersion(data.draft.version);
+        setLastSavedAt(data.draft.updatedAt);
+      } else {
+        const data = await apiJson<{ draft: DraftRecord }>(
+          "/accounting/journal-entry-drafts",
+          { method: "POST", body: { payload } },
+        );
+        setDraftId(data.draft.id);
+        setDraftVersion(data.draft.version);
+        setLastSavedAt(data.draft.updatedAt);
+        // Reflect the new draft id in the URL so a refresh resumes correctly.
+        setLocation(
+          `/accounting/journal-entries/new?draft=${data.draft.id}`,
+          { replace: true },
+        );
+      }
+      lastSavedPayloadRef.current = serialized;
+      setAutoSaveError(null);
+    } catch (e) {
+      setAutoSaveError(
+        e instanceof Error ? e.message : "Auto-save failed",
+      );
+    } finally {
+      autoSaveInFlightRef.current = false;
+      setAutoSaving(false);
+      // Re-trigger the watcher effect so any edits made while the save
+      // was in flight get flushed on the next debounce window.
+      setAutoSaveTick((n) => n + 1);
+    }
+  };
+
+  useEffect(() => {
+    if (!canPost) return;
+    if (draftLoading || savingDraft || submitting || discardingDraft) return;
+    // If the URL pins us to an existing draft we haven't loaded yet
+    // (or that failed to load), don't auto-create a new one underneath.
+    if (draftIdParam !== null && draftId === null) return;
+
+    const currentSerialized = JSON.stringify(buildDraftPayload());
+    if (lastSavedPayloadRef.current === null) {
+      // First time the form is settled — establish the baseline so we
+      // don't auto-save the untouched defaults.
+      lastSavedPayloadRef.current = currentSerialized;
+      return;
+    }
+    if (lastSavedPayloadRef.current === currentSerialized) return;
+
+    const timer = setTimeout(() => {
+      void runAutoSave(currentSerialized);
+    }, 1500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    entryDate,
+    memo,
+    lines,
+    canPost,
+    draftLoading,
+    savingDraft,
+    submitting,
+    discardingDraft,
+    draftIdParam,
+    draftId,
+    autoSaveTick,
+  ]);
+
   const saveDraft = async () => {
     setSavingDraft(true);
     try {
       const payload = buildDraftPayload();
+      const serialized = JSON.stringify(payload);
       if (draftId !== null) {
         const data = await apiJson<{ draft: DraftRecord }>(
           `/accounting/journal-entry-drafts/${draftId}`,
@@ -315,6 +439,8 @@ export default function JournalEntriesNewPage() {
         );
         setDraftVersion(data.draft.version);
         setLastSavedAt(data.draft.updatedAt);
+        lastSavedPayloadRef.current = serialized;
+        setAutoSaveError(null);
         toast({
           title: "Draft saved",
           description: "Your changes are stored.",
@@ -327,6 +453,8 @@ export default function JournalEntriesNewPage() {
         setDraftId(data.draft.id);
         setDraftVersion(data.draft.version);
         setLastSavedAt(data.draft.updatedAt);
+        lastSavedPayloadRef.current = serialized;
+        setAutoSaveError(null);
         // Reflect the draft id in the URL so a refresh resumes correctly.
         setLocation(`/accounting/journal-entries/new?draft=${data.draft.id}`, {
           replace: true,
@@ -459,9 +587,23 @@ export default function JournalEntriesNewPage() {
             hand. Save a draft to come back to later, or post it straight to
             the ledger.
           </p>
-          {lastSavedAt && (
-            <p className="text-xs text-muted-foreground mt-1" data-testid="text-draft-status">
-              Draft saved {new Date(lastSavedAt).toLocaleString()}
+          <p
+            className="text-xs text-muted-foreground mt-1"
+            data-testid="text-draft-status"
+          >
+            {autoSaving
+              ? "Saving draft…"
+              : lastSavedAt
+                ? `Draft ${formatRelativeSaved(new Date(lastSavedAt), nowTick)}`
+                : "Draft will save automatically as you type."}
+          </p>
+          {autoSaveError && !autoSaving && (
+            <p
+              className="text-xs text-muted-foreground mt-1"
+              data-testid="text-autosave-error"
+            >
+              Couldn't auto-save just now ({autoSaveError}). Will retry on the
+              next change.
             </p>
           )}
           {draftLoadError && (
