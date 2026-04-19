@@ -1,0 +1,41 @@
+Proceed with the next phase: switch the remaining finance portal surfaces to typed API hooks.
+
+Priority:
+- Do not start new accounting features yet.
+- Do not start copilot reconciliation yet.
+- Finish the client-side API hardening pass first.
+
+Scope:
+- Replace remaining ad-hoc fetch calls, hand-rolled request helpers, and loosely typed response handling in the finance portal with the generated typed API hooks/client.
+- Standardize query loading, error, empty, and retry states across the remaining pages.
+- Remove duplicated request/response shaping in UI components where the typed client already defines the contract.
+- Preserve existing behavior; this is a migration/hardening pass, not a product redesign.
+
+Focus areas:
+- Reports-adjacent pages and accounting pages first.
+- Journal entry pages, draft pages, bill pages, expense pages, blocked queue pages, and related admin/config pages.
+- Any page still manually parsing API responses, building raw query strings, or using inconsistent mutation handling.
+
+Acceptance:
+- Remaining finance portal API reads/writes use the generated typed hooks/client wherever available.
+- No page relies on hand-written response shapes when a typed schema already exists.
+- Loading/error states are consistent and user-visible.
+- Mutations invalidate/refetch the correct typed queries.
+- No behavior regressions on reports, journal entries, drafts, bills, expenses, blocked queues, or admin accounting pages.
+
+Verification:
+- Identify every remaining untyped API surface and convert them in a tracked checklist.
+- Smoke test critical flows after migration:
+  - Reports load and filters still work
+  - Journal entry list/detail/draft flows still work
+  - Expense and bill detail actions still work
+  - Blocked queue actions still work
+  - Admin mapping/config pages still work
+
+Out of scope:
+- New report features
+- Copilot reconciliation
+- CSV/export revisions
+- Scheduled email export revisions
+
+After this migration is complete, the next phase is copilot reconciliation on top of the now-stable typed/reporting foundation.

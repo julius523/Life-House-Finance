@@ -11,6 +11,8 @@ import {
   useDeleteBill,
   useDeleteReceipt,
   useLinkTransactionToBill,
+  useRegenerateBillAccountingDraft,
+  useMarkBillAccountingNotApplicable,
   getGetBillQueryKey,
   getListBillsQueryKey,
   getListReceiptsQueryKey,
@@ -214,6 +216,8 @@ export default function BillDetail() {
   const deleteBillMut = useDeleteBill();
   const deleteReceiptMut = useDeleteReceipt();
   const linkTxBillMut = useLinkTransactionToBill();
+  const regenerateBillDraftMut = useRegenerateBillAccountingDraft();
+  const markBillNotApplicableMut = useMarkBillAccountingNotApplicable();
 
   const handleReject = async (data: {
     reason: string;
@@ -311,9 +315,9 @@ export default function BillDetail() {
     eventType: "accrual" | "payment",
   ) => {
     try {
-      await apiJson(`/bills/${id}/regenerate-accounting-draft`, {
-        method: "POST",
-        body: { eventType },
+      await regenerateBillDraftMut.mutateAsync({
+        id,
+        data: { eventType },
       });
       toast({ title: "Accounting draft regenerated" });
       refresh();
@@ -350,9 +354,9 @@ export default function BillDetail() {
       return;
     }
     try {
-      await apiJson(`/bills/${id}/mark-accounting-not-applicable`, {
-        method: "POST",
-        body: { eventType, note: trimmed },
+      await markBillNotApplicableMut.mutateAsync({
+        id,
+        data: { eventType, note: trimmed },
       });
       toast({ title: "Marked as not applicable" });
       refresh();

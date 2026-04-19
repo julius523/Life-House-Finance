@@ -5200,3 +5200,211 @@ export const GetJournalEntryExportScheduleLogResponse = zod.object({
     }),
   ),
 });
+
+/**
+ * @summary Info about today's restore-point snapshot (admin only)
+ */
+export const GetDailySnapshotInfoResponse = zod.object({
+  date: zod.string(),
+  exists: zod.boolean(),
+  createdAt: zod.string().nullish(),
+});
+
+/**
+ * @summary Restore database to today's start-of-day snapshot (admin only)
+ */
+export const RestoreTodayBody = zod.object({
+  masterPassword: zod.string(),
+});
+
+export const RestoreTodayResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary Permanently delete all transactional data (admin only)
+ */
+export const WipeAllDataBody = zod.object({
+  masterPassword: zod.string(),
+});
+
+export const WipeAllDataResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary Get the configurable email templates and sender name (admin only)
+ */
+export const GetEmailSettingsResponse = zod.object({
+  senderName: zod.string(),
+  defaultSenderName: zod.string(),
+  templates: zod.array(
+    zod.object({
+      type: zod.string(),
+      subject: zod.string(),
+      body: zod.string(),
+      defaultSubject: zod.string(),
+      defaultBody: zod.string(),
+      variables: zod.array(zod.string()),
+      sampleVariables: zod.record(zod.string(), zod.string()),
+      updatedAt: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary Replace the email templates and sender name (admin only)
+ */
+export const UpdateEmailSettingsBody = zod.object({
+  senderName: zod.string(),
+  templates: zod.array(
+    zod.object({
+      type: zod.string(),
+      subject: zod.string(),
+      body: zod.string(),
+    }),
+  ),
+});
+
+export const UpdateEmailSettingsResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary Send a test email of one template to the current admin user
+ */
+export const SendEmailSettingsTestBody = zod.object({
+  type: zod.string(),
+  subject: zod.string(),
+  body: zod.string(),
+});
+
+export const SendEmailSettingsTestResponse = zod.object({
+  ok: zod.boolean(),
+  delivered: zod.boolean(),
+  to: zod.string().optional(),
+  subject: zod.string().optional(),
+  body: zod.string().optional(),
+  note: zod.string().optional(),
+});
+
+/**
+ * @summary List the most recent 200 notifications and their email delivery status (admin only)
+ */
+export const ListAdminNotificationsResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      userId: zod.number(),
+      type: zod.string(),
+      title: zod.string(),
+      body: zod.string(),
+      link: zod.string().optional(),
+      emailTo: zod.string().optional(),
+      emailStatus: zod.enum(["sent", "failed", "not_attempted"]),
+      emailError: zod.string().optional(),
+      emailSentAt: zod.string().optional(),
+      emailLastAttemptAt: zod.string().optional(),
+      emailAttempts: zod.number(),
+      createdAt: zod.string(),
+      recipientName: zod.string().optional(),
+      recipientEmail: zod.string().optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Re-send the email for a specific notification (admin only)
+ */
+export const ResendAdminNotificationParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ResendAdminNotificationResponse = zod.object({
+  ok: zod.boolean().optional(),
+  status: zod.string(),
+  error: zod.string().optional(),
+});
+
+/**
+ * @summary Auto-match unmatched debit transactions to existing expenses
+ */
+export const AutoMatchTransactionsResponse = zod.object({
+  scanned: zod.number(),
+  linked: zod.number(),
+  ambiguous: zod.number(),
+  matches: zod.array(
+    zod.object({
+      transactionId: zod.number(),
+      expenseId: zod.number(),
+    }),
+  ),
+});
+
+/**
+ * @summary Send a user message into a copilot thread and get the assistant reply
+ */
+export const SendCopilotMessageParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const SendCopilotMessageBody = zod.object({
+  message: zod.string(),
+  pageContext: zod.record(zod.string(), zod.unknown()).nullish(),
+});
+
+export const SendCopilotMessageResponse = zod.object({
+  userMessage: zod
+    .object({
+      id: zod.number(),
+      threadId: zod.number(),
+      role: zod.enum(["user", "assistant"]),
+      status: zod.string(),
+      userText: zod.string().nullish(),
+      answer: zod.string().nullish(),
+      why: zod.string().nullish(),
+      missingInformation: zod.string().nullish(),
+      riskFlags: zod.string().nullish(),
+      recommendedNextStep: zod.string().nullish(),
+      humanReviewNeeded: zod.boolean().nullish(),
+      confidence: zod.string().nullish(),
+      pageContext: zod.unknown().nullish(),
+      modelName: zod.string().nullish(),
+      latencyMs: zod.number().nullish(),
+      errorCode: zod.string().nullish(),
+      createdAt: zod.string(),
+      toolCalls: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+      sources: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+      agentActions: zod
+        .array(zod.record(zod.string(), zod.unknown()))
+        .optional(),
+    })
+    .optional(),
+  assistantMessage: zod
+    .object({
+      id: zod.number(),
+      threadId: zod.number(),
+      role: zod.enum(["user", "assistant"]),
+      status: zod.string(),
+      userText: zod.string().nullish(),
+      answer: zod.string().nullish(),
+      why: zod.string().nullish(),
+      missingInformation: zod.string().nullish(),
+      riskFlags: zod.string().nullish(),
+      recommendedNextStep: zod.string().nullish(),
+      humanReviewNeeded: zod.boolean().nullish(),
+      confidence: zod.string().nullish(),
+      pageContext: zod.unknown().nullish(),
+      modelName: zod.string().nullish(),
+      latencyMs: zod.number().nullish(),
+      errorCode: zod.string().nullish(),
+      createdAt: zod.string(),
+      toolCalls: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+      sources: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+      agentActions: zod
+        .array(zod.record(zod.string(), zod.unknown()))
+        .optional(),
+    })
+    .optional(),
+  error: zod.string().optional(),
+});

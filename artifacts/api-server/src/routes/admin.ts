@@ -516,13 +516,17 @@ router.post("/admin/email-settings/test", async (req, res): Promise<void> => {
 
   res.json({
     ok: true,
-    delivered: sent,
+    delivered: sent.status === "sent",
     to: me.email,
     subject,
     body,
-    note: sent
-      ? "Test email queued for delivery."
-      : "No SMTP provider is configured (SENDGRID_API_KEY + NOTIFICATION_FROM_EMAIL). The rendered email was logged to the server logs instead.",
+    note:
+      sent.status === "sent"
+        ? "Test email queued for delivery."
+        : sent.status === "failed"
+          ? `Delivery failed: ${sent.error}`
+          : sent.reason ??
+            "No SMTP provider is configured (SENDGRID_API_KEY + NOTIFICATION_FROM_EMAIL). The rendered email was logged to the server logs instead.",
   });
 });
 // --- Notification email delivery status ---------------------------------

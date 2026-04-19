@@ -3304,6 +3304,188 @@ paths:
               schema:
                 $ref: "#/components/schemas/JournalEntryExportSendLogListResponse"
 
+  /admin/daily-snapshot:
+    get:
+      operationId: getDailySnapshotInfo
+      tags: [admin]
+      summary: Info about today's restore-point snapshot (admin only)
+      responses:
+        "200":
+          description: Snapshot info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailySnapshotInfo"
+
+  /admin/restore-day:
+    post:
+      operationId: restoreToday
+      tags: [admin]
+      summary: Restore database to today's start-of-day snapshot (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MasterPasswordBody"
+      responses:
+        "200":
+          description: Restore result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestoreDayResponse"
+
+  /admin/wipe-data:
+    post:
+      operationId: wipeAllData
+      tags: [admin]
+      summary: Permanently delete all transactional data (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MasterPasswordBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /admin/email-settings:
+    get:
+      operationId: getEmailSettings
+      tags: [admin]
+      summary: Get the configurable email templates and sender name (admin only)
+      responses:
+        "200":
+          description: Email settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailSettingsResponse"
+    put:
+      operationId: updateEmailSettings
+      tags: [admin]
+      summary: Replace the email templates and sender name (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailSettingsUpdateBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /admin/email-settings/test:
+    post:
+      operationId: sendEmailSettingsTest
+      tags: [admin]
+      summary: Send a test email of one template to the current admin user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailSettingsTestBody"
+      responses:
+        "200":
+          description: Test email send result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailSettingsTestResponse"
+
+  /admin/notifications:
+    get:
+      operationId: listAdminNotifications
+      tags: [admin]
+      summary: List the most recent 200 notifications and their email delivery status (admin only)
+      responses:
+        "200":
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminNotificationListResponse"
+
+  /admin/notifications/{id}/resend:
+    post:
+      operationId: resendAdminNotification
+      tags: [admin]
+      summary: Re-send the email for a specific notification (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Resent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResendAdminNotificationResponse"
+        "502":
+          description: Email could not be sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResendAdminNotificationResponse"
+
+  /transactions/auto-match:
+    post:
+      operationId: autoMatchTransactions
+      tags: [transactions]
+      summary: Auto-match unmatched debit transactions to existing expenses
+      responses:
+        "200":
+          description: Auto-match result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoMatchResponse"
+
+  /accounting/threads/{id}/messages:
+    post:
+      operationId: sendCopilotMessage
+      tags: [accounting]
+      summary: Send a user message into a copilot thread and get the assistant reply
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendCopilotMessageBody"
+      responses:
+        "200":
+          description: Assistant reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendCopilotMessageResponse"
+        "503":
+          description: OpenAI key missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendCopilotMessageResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -6633,3 +6815,243 @@ components:
           items:
             $ref: "#/components/schemas/JournalEntryExportSendLogEntry"
       required: [entries]
+
+
+    OkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required: [ok]
+
+    MasterPasswordBody:
+      type: object
+      properties:
+        masterPassword:
+          type: string
+      required: [masterPassword]
+
+    DailySnapshotInfo:
+      type: object
+      properties:
+        date:
+          type: string
+        exists:
+          type: boolean
+        createdAt:
+          type: string
+          nullable: true
+      required: [date, exists]
+
+    RestoreDayResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        ok:
+          type: boolean
+      required: [ok]
+
+    EmailTemplate:
+      type: object
+      properties:
+        type:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+        defaultSubject:
+          type: string
+        defaultBody:
+          type: string
+        variables:
+          type: array
+          items:
+            type: string
+        sampleVariables:
+          type: object
+          additionalProperties:
+            type: string
+        updatedAt:
+          type: string
+          nullable: true
+      required:
+        - type
+        - subject
+        - body
+        - defaultSubject
+        - defaultBody
+        - variables
+        - sampleVariables
+
+    EmailSettingsResponse:
+      type: object
+      properties:
+        senderName:
+          type: string
+        defaultSenderName:
+          type: string
+        templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmailTemplate"
+      required: [senderName, defaultSenderName, templates]
+
+    EmailTemplateUpdate:
+      type: object
+      properties:
+        type:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+      required: [type, subject, body]
+
+    EmailSettingsUpdateBody:
+      type: object
+      properties:
+        senderName:
+          type: string
+        templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmailTemplateUpdate"
+      required: [senderName, templates]
+
+    EmailSettingsTestBody:
+      type: object
+      properties:
+        type:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+      required: [type, subject, body]
+
+    EmailSettingsTestResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        delivered:
+          type: boolean
+        to:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+        note:
+          type: string
+      required: [ok, delivered]
+
+    AdminNotification:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        type:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+        link:
+          type: string
+        emailTo:
+          type: string
+        emailStatus:
+          type: string
+          enum: [sent, failed, not_attempted]
+        emailError:
+          type: string
+        emailSentAt:
+          type: string
+        emailLastAttemptAt:
+          type: string
+        emailAttempts:
+          type: integer
+        createdAt:
+          type: string
+        recipientName:
+          type: string
+        recipientEmail:
+          type: string
+      required:
+        - id
+        - userId
+        - type
+        - title
+        - body
+        - emailStatus
+        - emailAttempts
+        - createdAt
+
+    AdminNotificationListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminNotification"
+      required: [items]
+
+    ResendAdminNotificationResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        status:
+          type: string
+        error:
+          type: string
+      required: [status]
+
+    AutoMatchResponseMatch:
+      type: object
+      properties:
+        transactionId:
+          type: integer
+        expenseId:
+          type: integer
+      required: [transactionId, expenseId]
+
+    AutoMatchResponse:
+      type: object
+      properties:
+        scanned:
+          type: integer
+        linked:
+          type: integer
+        ambiguous:
+          type: integer
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutoMatchResponseMatch"
+      required: [scanned, linked, ambiguous, matches]
+
+    SendCopilotMessageBody:
+      type: object
+      properties:
+        message:
+          type: string
+        pageContext:
+          type: object
+          additionalProperties: true
+          nullable: true
+      required: [message]
+
+    SendCopilotMessageResponse:
+      type: object
+      properties:
+        userMessage:
+          $ref: "#/components/schemas/CopilotMessage"
+        assistantMessage:
+          $ref: "#/components/schemas/CopilotMessage"
+        error:
+          type: string

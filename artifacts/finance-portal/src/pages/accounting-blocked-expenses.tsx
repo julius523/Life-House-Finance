@@ -7,6 +7,8 @@ import {
   useRegenerateAccountingDraftForExpense,
   useListBlockedBills,
   useRetryBlockedBills,
+  useRegenerateBillAccountingDraft,
+  useMarkBillAccountingNotApplicable,
   getListBlockedExpensesQueryKey,
   getGetBlockedExpensesCountQueryKey,
   getListBlockedBillsQueryKey,
@@ -15,7 +17,6 @@ import {
   type BlockedBillRow,
 } from "@workspace/api-client-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { apiJson } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Card,
@@ -648,6 +649,8 @@ function BlockedBillsTab() {
     query: { queryKey: getListBlockedBillsQueryKey(params) },
   });
   const retryMut = useRetryBlockedBills();
+  const regenerateBillDraftMut = useRegenerateBillAccountingDraft();
+  const markBillNotApplicableMut = useMarkBillAccountingNotApplicable();
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -714,9 +717,9 @@ function BlockedBillsTab() {
     const key = billRowKey(r);
     setSingleBusy(key);
     try {
-      await apiJson(`/bills/${r.billId}/regenerate-accounting-draft`, {
-        method: "POST",
-        body: { eventType: r.eventType },
+      await regenerateBillDraftMut.mutateAsync({
+        id: r.billId,
+        data: { eventType: r.eventType },
       });
       toast({
         title: "Draft generated",
@@ -758,9 +761,9 @@ function BlockedBillsTab() {
     const key = billRowKey(r);
     setNaBusy(key);
     try {
-      await apiJson(`/bills/${r.billId}/mark-accounting-not-applicable`, {
-        method: "POST",
-        body: { eventType: r.eventType, note: trimmed },
+      await markBillNotApplicableMut.mutateAsync({
+        id: r.billId,
+        data: { eventType: r.eventType, note: trimmed },
       });
       toast({ title: "Marked not applicable" });
     } catch (err) {

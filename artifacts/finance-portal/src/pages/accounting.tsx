@@ -24,7 +24,9 @@ import {
   useCreateCopilotThread,
   useUpdateCopilotThread,
   useDeleteCopilotThread,
+  useSendCopilotMessage,
   usePingAccountingDiagnostics,
+  ApiError,
   getListCopilotThreadsQueryKey,
   type UpdateCopilotThreadBody,
 } from "@workspace/api-client-react";
@@ -161,6 +163,7 @@ export default function AccountingPage() {
   const createThreadMut = useCreateCopilotThread();
   const updateThreadMut = useUpdateCopilotThread();
   const deleteThreadMut = useDeleteCopilotThread();
+  const sendMessageMut = useSendCopilotMessage();
   const pingDiagnosticsMut = usePingAccountingDiagnostics();
 
   const { data: threadsData, error: threadsError } = useListCopilotThreads();
@@ -267,25 +270,39 @@ export default function AccountingPage() {
       };
       setMessages((m) => [...m, optimisticUser]);
 
-      const res = await fetch(
-        `/api/accounting/threads/${threadId}/messages`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: trimmed, pageContext }),
-        },
-      );
-      const data = (await res.json().catch(() => ({}))) as {
+      type SendResult = {
         userMessage?: CopilotMessage;
         assistantMessage?: CopilotMessage;
         error?: string;
       };
+      let data: SendResult;
+      try {
+        data = (await sendMessageMut.mutateAsync({
+          id: threadId,
+          data: { message: trimmed, pageContext: pageContext ?? undefined },
+        })) as SendResult;
+      } catch (err) {
+        // The 503 "OpenAI key missing" path returns a body containing both
+        // userMessage and assistantMessage. customFetch parses the body and
+        // attaches it to ApiError.data — consume it so the UX still surfaces
+        // the assistant's "no key" message instead of a generic toast.
+        const fallback =
+          err instanceof ApiError ? (err.data as SendResult | null) : null;
+        if (fallback?.userMessage && fallback.assistantMessage) {
+          data = fallback;
+        } else {
+          throw err;
+        }
+      }
 
       if (data.userMessage && data.assistantMessage) {
         setMessages((m) => {
           const without = m.filter((x) => x.id !== optimisticUser.id);
-          return [...without, data.userMessage!, data.assistantMessage!];
+          return [
+            ...without,
+            data.userMessage as CopilotMessage,
+            data.assistantMessage as CopilotMessage,
+          ];
         });
         if (data.error) {
           toast({
@@ -295,7 +312,7 @@ export default function AccountingPage() {
           });
         }
       } else {
-        throw new Error(data.error ?? `Copilot error (${res.status})`);
+        throw new Error(data.error ?? "Copilot error");
       }
 
       // Refresh thread list (titles may have auto-set)

@@ -6,6 +6,19 @@ import {
   type AuthUser,
   type UserRole,
 } from "@/lib/auth";
+import {
+  useGetDailySnapshotInfo,
+  useRestoreToday,
+  useWipeAllData,
+  useGetEmailSettings,
+  useUpdateEmailSettings,
+  useSendEmailSettingsTest,
+  useListAdminNotifications,
+  useResendAdminNotification,
+  getListAdminNotificationsQueryKey,
+  type EmailTemplate,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -232,33 +245,13 @@ function RestoreDayDialog({
 }) {
   const { toast } = useToast();
   const [masterPassword, setMasterPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [info, setInfo] = useState<{
-    date: string;
-    exists: boolean;
-    createdAt: string | null;
-  } | null>(null);
-
-  useEffect(() => {
-    fetch("/api/admin/daily-snapshot", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => setInfo(j))
-      .catch(() => setInfo(null));
-  }, []);
+  const { data: info } = useGetDailySnapshotInfo();
+  const restoreMut = useRestoreToday();
+  const busy = restoreMut.isPending;
 
   const submit = async () => {
-    setBusy(true);
     try {
-      const res = await fetch("/api/admin/restore-day", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ masterPassword }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Restore failed (${res.status})`);
-      }
+      await restoreMut.mutateAsync({ data: { masterPassword } });
       toast({
         title: "Restored to start of day",
         description: "All data has been reverted to this morning's snapshot.",
@@ -272,8 +265,6 @@ function RestoreDayDialog({
         description: e instanceof Error ? e.message : undefined,
         variant: "destructive",
       });
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -348,7 +339,8 @@ function WipeDataDialog({
   const { toast } = useToast();
   const [masterPassword, setMasterPassword] = useState("");
   const [confirmText, setConfirmText] = useState("");
-  const [busy, setBusy] = useState(false);
+  const wipeMut = useWipeAllData();
+  const busy = wipeMut.isPending;
 
   const submit = async () => {
     if (confirmText !== "DELETE EVERYTHING") {
@@ -358,18 +350,8 @@ function WipeDataDialog({
       });
       return;
     }
-    setBusy(true);
     try {
-      const res = await fetch("/api/admin/wipe-data", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ masterPassword }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Wipe failed (${res.status})`);
-      }
+      await wipeMut.mutateAsync({ data: { masterPassword } });
       toast({
         title: "All data cleared",
         description: "Transactions, expenses, bills, and related records were deleted.",
@@ -381,8 +363,6 @@ function WipeDataDialog({
         description: e instanceof Error ? e.message : undefined,
         variant: "destructive",
       });
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -753,42 +733,34 @@ function EmailHtmlPreview({
 
 function EmailSettingsCard() {
   const { toast } = useToast();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [testingType, setTestingType] = useState<string | null>(null);
   const [senderName, setSenderName] = useState("");
   const [defaultSenderName, setDefaultSenderName] = useState("");
   const [templates, setTemplates] = useState<TemplateForm[]>([]);
 
-  const load = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch("/api/admin/email-settings", {
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error(`Failed (${res.status})`);
-      const data = (await res.json()) as {
-        senderName: string;
-        defaultSenderName: string;
-        templates: TemplateForm[];
-      };
-      setSenderName(data.senderName);
-      setDefaultSenderName(data.defaultSenderName);
-      setTemplates(data.templates);
-    } catch (e) {
-      toast({
-        title: "Could not load email settings",
-        description: e instanceof Error ? e.message : undefined,
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data: settings, isLoading: loading, error: loadError } =
+    useGetEmailSettings();
+  const saveMut = useUpdateEmailSettings();
+  const testMut = useSendEmailSettingsTest();
+  const saving = saveMut.isPending;
 
   useEffect(() => {
-    load();
-  }, []);
+    if (loadError) {
+      toast({
+        title: "Could not load email settings",
+        description: loadError instanceof Error ? loadError.message : undefined,
+        variant: "destructive",
+      });
+    }
+  }, [loadError, toast]);
+
+  useEffect(() => {
+    if (settings) {
+      setSenderName(settings.senderName);
+      setDefaultSenderName(settings.defaultSenderName);
+      setTemplates(settings.templates as TemplateForm[]);
+    }
+  }, [settings]);
 
   const updateTemplate = (type: string, patch: Partial<TemplateForm>) => {
     setTemplates((prev) =>
@@ -797,25 +769,17 @@ function EmailSettingsCard() {
   };
 
   const save = async () => {
-    setSaving(true);
     try {
-      const res = await fetch("/api/admin/email-settings", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await saveMut.mutateAsync({
+        data: {
           senderName: senderName.trim(),
           templates: templates.map((t) => ({
-            type: t.type,
+            type: t.type as EmailTemplate["type"],
             subject: t.subject,
             body: t.body,
           })),
-        }),
+        },
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Save failed (${res.status})`);
-      }
       toast({ title: "Email settings saved" });
     } catch (e) {
       toast({
@@ -823,39 +787,24 @@ function EmailSettingsCard() {
         description: e instanceof Error ? e.message : undefined,
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
     }
   };
 
   const sendTest = async (t: TemplateForm) => {
     setTestingType(t.type);
     try {
-      const res = await fetch("/api/admin/email-settings/test", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: t.type,
+      const data = await testMut.mutateAsync({
+        data: {
+          type: t.type as EmailTemplate["type"],
           subject: t.subject,
           body: t.body,
-        }),
+        },
       });
-      const data = (await res.json()) as {
-        ok?: boolean;
-        delivered?: boolean;
-        to?: string;
-        note?: string;
-        error?: string;
-      };
-      if (!res.ok) {
-        throw new Error(data.error ?? `Test failed (${res.status})`);
-      }
       toast({
         title: data.delivered
           ? `Test sent to ${data.to}`
           : "Test email logged (no SMTP configured)",
-        description: data.note,
+        description: data.note ?? undefined,
       });
     } catch (e) {
       toast({
@@ -1047,59 +996,52 @@ type AdminNotification = {
 
 function EmailDeliveryCard() {
   const { toast } = useToast();
-  const [items, setItems] = useState<AdminNotification[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<"all" | "failed" | "not_attempted" | "sent">(
     "all",
   );
   const [resendingId, setResendingId] = useState<number | null>(null);
 
-  const refresh = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch("/api/admin/notifications", {
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error(`Request failed (${res.status})`);
-      const json = (await res.json()) as { items: AdminNotification[] };
-      setItems(json.items);
-    } catch (e) {
-      toast({
-        title: "Could not load notification history",
-        description: e instanceof Error ? e.message : undefined,
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  const {
+    data: notificationsData,
+    isFetching: loading,
+    error: loadError,
+    refetch,
+  } = useListAdminNotifications();
+  const resendMut = useResendAdminNotification();
 
   useEffect(() => {
-    refresh();
-  }, []);
+    if (loadError) {
+      toast({
+        title: "Could not load notification history",
+        description: loadError instanceof Error ? loadError.message : undefined,
+        variant: "destructive",
+      });
+    }
+  }, [loadError, toast]);
+
+  const items = (notificationsData?.items ?? []) as AdminNotification[];
+
+  const refresh = () => {
+    void refetch();
+  };
 
   const resend = async (id: number) => {
     setResendingId(id);
     try {
-      const res = await fetch(`/api/admin/notifications/${id}/resend`, {
-        method: "POST",
-        credentials: "include",
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        status?: string;
-        ok?: boolean;
-      };
-      if (res.ok && body.ok) {
+      const body = await resendMut.mutateAsync({ id });
+      if (body.ok) {
         toast({ title: "Email resent successfully" });
       } else {
         toast({
           title: "Resend failed",
-          description: body.error ?? `Request failed (${res.status})`,
+          description: body.error ?? "Request failed",
           variant: "destructive",
         });
       }
-      await refresh();
+      await queryClient.invalidateQueries({
+        queryKey: getListAdminNotificationsQueryKey(),
+      });
     } catch (e) {
       toast({
         title: "Resend failed",

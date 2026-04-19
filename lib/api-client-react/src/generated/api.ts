@@ -22,12 +22,14 @@ import type {
   AccountingDraftResult,
   AccountingSettingsResponse,
   ActivityItem,
+  AdminNotificationListResponse,
   AgentActionDecisionBody,
   ApprovalActionBody,
   ApprovalQueueItem,
   ApproveAgentAction200,
   ApproveBill200,
   ApproveExpense200,
+  AutoMatchResponse,
   Bill,
   BlockedBillsListResponse,
   BlockedExpensesListResponse,
@@ -63,6 +65,7 @@ import type {
   CreateVendorBody,
   CreateVendorContact201,
   CreditSummary,
+  DailySnapshotInfo,
   DashboardSummary,
   DeleteBill200,
   DeleteChartOfAccountResponse,
@@ -72,6 +75,10 @@ import type {
   DeleteProgramContact200,
   DeleteVendor200,
   DeleteVendorContact200,
+  EmailSettingsResponse,
+  EmailSettingsTestBody,
+  EmailSettingsTestResponse,
+  EmailSettingsUpdateBody,
   Expense,
   ExpenseCategoryListResponse,
   ExpenseCategoryMissingMappingResponse,
@@ -137,10 +144,12 @@ import type {
   MarkAllNotificationsRead200,
   MarkBillAccountingNotApplicableBody,
   MarkExpenseAccountingNotApplicableBody,
+  MasterPasswordBody,
   MissingReceiptItem,
   MonthEndChecklist,
   Notification,
   NotificationListResponse,
+  OkResponse,
   ParseBankStatementBody,
   ParseBankStatementResponse,
   PendingApprovalsCount,
@@ -158,10 +167,14 @@ import type {
   RejectionBody,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
+  ResendAdminNotificationResponse,
+  RestoreDayResponse,
   RetryBlockedBills200,
   RetryBlockedBillsBody,
   RetryBlockedExpenses200,
   RetryBlockedExpensesBody,
+  SendCopilotMessageBody,
+  SendCopilotMessageResponse,
   SpendingByDimension,
   Transaction,
   TransactionListResponse,
@@ -12433,3 +12446,833 @@ export function useGetJournalEntryExportScheduleLog<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Info about today's restore-point snapshot (admin only)
+ */
+export const getGetDailySnapshotInfoUrl = () => {
+  return `/api/admin/daily-snapshot`;
+};
+
+export const getDailySnapshotInfo = async (
+  options?: RequestInit,
+): Promise<DailySnapshotInfo> => {
+  return customFetch<DailySnapshotInfo>(getGetDailySnapshotInfoUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetDailySnapshotInfoQueryKey = () => {
+  return [`/api/admin/daily-snapshot`] as const;
+};
+
+export const getGetDailySnapshotInfoQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDailySnapshotInfo>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getDailySnapshotInfo>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetDailySnapshotInfoQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDailySnapshotInfo>>
+  > = ({ signal }) => getDailySnapshotInfo({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDailySnapshotInfo>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDailySnapshotInfoQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDailySnapshotInfo>>
+>;
+export type GetDailySnapshotInfoQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Info about today's restore-point snapshot (admin only)
+ */
+
+export function useGetDailySnapshotInfo<
+  TData = Awaited<ReturnType<typeof getDailySnapshotInfo>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getDailySnapshotInfo>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDailySnapshotInfoQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Restore database to today's start-of-day snapshot (admin only)
+ */
+export const getRestoreTodayUrl = () => {
+  return `/api/admin/restore-day`;
+};
+
+export const restoreToday = async (
+  masterPasswordBody: MasterPasswordBody,
+  options?: RequestInit,
+): Promise<RestoreDayResponse> => {
+  return customFetch<RestoreDayResponse>(getRestoreTodayUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(masterPasswordBody),
+  });
+};
+
+export const getRestoreTodayMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof restoreToday>>,
+    TError,
+    { data: BodyType<MasterPasswordBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof restoreToday>>,
+  TError,
+  { data: BodyType<MasterPasswordBody> },
+  TContext
+> => {
+  const mutationKey = ["restoreToday"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof restoreToday>>,
+    { data: BodyType<MasterPasswordBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return restoreToday(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RestoreTodayMutationResult = NonNullable<
+  Awaited<ReturnType<typeof restoreToday>>
+>;
+export type RestoreTodayMutationBody = BodyType<MasterPasswordBody>;
+export type RestoreTodayMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Restore database to today's start-of-day snapshot (admin only)
+ */
+export const useRestoreToday = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof restoreToday>>,
+    TError,
+    { data: BodyType<MasterPasswordBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof restoreToday>>,
+  TError,
+  { data: BodyType<MasterPasswordBody> },
+  TContext
+> => {
+  return useMutation(getRestoreTodayMutationOptions(options));
+};
+
+/**
+ * @summary Permanently delete all transactional data (admin only)
+ */
+export const getWipeAllDataUrl = () => {
+  return `/api/admin/wipe-data`;
+};
+
+export const wipeAllData = async (
+  masterPasswordBody: MasterPasswordBody,
+  options?: RequestInit,
+): Promise<OkResponse> => {
+  return customFetch<OkResponse>(getWipeAllDataUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(masterPasswordBody),
+  });
+};
+
+export const getWipeAllDataMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof wipeAllData>>,
+    TError,
+    { data: BodyType<MasterPasswordBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof wipeAllData>>,
+  TError,
+  { data: BodyType<MasterPasswordBody> },
+  TContext
+> => {
+  const mutationKey = ["wipeAllData"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof wipeAllData>>,
+    { data: BodyType<MasterPasswordBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return wipeAllData(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type WipeAllDataMutationResult = NonNullable<
+  Awaited<ReturnType<typeof wipeAllData>>
+>;
+export type WipeAllDataMutationBody = BodyType<MasterPasswordBody>;
+export type WipeAllDataMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Permanently delete all transactional data (admin only)
+ */
+export const useWipeAllData = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof wipeAllData>>,
+    TError,
+    { data: BodyType<MasterPasswordBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof wipeAllData>>,
+  TError,
+  { data: BodyType<MasterPasswordBody> },
+  TContext
+> => {
+  return useMutation(getWipeAllDataMutationOptions(options));
+};
+
+/**
+ * @summary Get the configurable email templates and sender name (admin only)
+ */
+export const getGetEmailSettingsUrl = () => {
+  return `/api/admin/email-settings`;
+};
+
+export const getEmailSettings = async (
+  options?: RequestInit,
+): Promise<EmailSettingsResponse> => {
+  return customFetch<EmailSettingsResponse>(getGetEmailSettingsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetEmailSettingsQueryKey = () => {
+  return [`/api/admin/email-settings`] as const;
+};
+
+export const getGetEmailSettingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getEmailSettings>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getEmailSettings>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetEmailSettingsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getEmailSettings>>
+  > = ({ signal }) => getEmailSettings({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getEmailSettings>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetEmailSettingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getEmailSettings>>
+>;
+export type GetEmailSettingsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get the configurable email templates and sender name (admin only)
+ */
+
+export function useGetEmailSettings<
+  TData = Awaited<ReturnType<typeof getEmailSettings>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getEmailSettings>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetEmailSettingsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Replace the email templates and sender name (admin only)
+ */
+export const getUpdateEmailSettingsUrl = () => {
+  return `/api/admin/email-settings`;
+};
+
+export const updateEmailSettings = async (
+  emailSettingsUpdateBody: EmailSettingsUpdateBody,
+  options?: RequestInit,
+): Promise<OkResponse> => {
+  return customFetch<OkResponse>(getUpdateEmailSettingsUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(emailSettingsUpdateBody),
+  });
+};
+
+export const getUpdateEmailSettingsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateEmailSettings>>,
+    TError,
+    { data: BodyType<EmailSettingsUpdateBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateEmailSettings>>,
+  TError,
+  { data: BodyType<EmailSettingsUpdateBody> },
+  TContext
+> => {
+  const mutationKey = ["updateEmailSettings"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateEmailSettings>>,
+    { data: BodyType<EmailSettingsUpdateBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateEmailSettings(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateEmailSettingsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateEmailSettings>>
+>;
+export type UpdateEmailSettingsMutationBody = BodyType<EmailSettingsUpdateBody>;
+export type UpdateEmailSettingsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Replace the email templates and sender name (admin only)
+ */
+export const useUpdateEmailSettings = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateEmailSettings>>,
+    TError,
+    { data: BodyType<EmailSettingsUpdateBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateEmailSettings>>,
+  TError,
+  { data: BodyType<EmailSettingsUpdateBody> },
+  TContext
+> => {
+  return useMutation(getUpdateEmailSettingsMutationOptions(options));
+};
+
+/**
+ * @summary Send a test email of one template to the current admin user
+ */
+export const getSendEmailSettingsTestUrl = () => {
+  return `/api/admin/email-settings/test`;
+};
+
+export const sendEmailSettingsTest = async (
+  emailSettingsTestBody: EmailSettingsTestBody,
+  options?: RequestInit,
+): Promise<EmailSettingsTestResponse> => {
+  return customFetch<EmailSettingsTestResponse>(getSendEmailSettingsTestUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(emailSettingsTestBody),
+  });
+};
+
+export const getSendEmailSettingsTestMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendEmailSettingsTest>>,
+    TError,
+    { data: BodyType<EmailSettingsTestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof sendEmailSettingsTest>>,
+  TError,
+  { data: BodyType<EmailSettingsTestBody> },
+  TContext
+> => {
+  const mutationKey = ["sendEmailSettingsTest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof sendEmailSettingsTest>>,
+    { data: BodyType<EmailSettingsTestBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return sendEmailSettingsTest(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SendEmailSettingsTestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof sendEmailSettingsTest>>
+>;
+export type SendEmailSettingsTestMutationBody = BodyType<EmailSettingsTestBody>;
+export type SendEmailSettingsTestMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Send a test email of one template to the current admin user
+ */
+export const useSendEmailSettingsTest = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendEmailSettingsTest>>,
+    TError,
+    { data: BodyType<EmailSettingsTestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof sendEmailSettingsTest>>,
+  TError,
+  { data: BodyType<EmailSettingsTestBody> },
+  TContext
+> => {
+  return useMutation(getSendEmailSettingsTestMutationOptions(options));
+};
+
+/**
+ * @summary List the most recent 200 notifications and their email delivery status (admin only)
+ */
+export const getListAdminNotificationsUrl = () => {
+  return `/api/admin/notifications`;
+};
+
+export const listAdminNotifications = async (
+  options?: RequestInit,
+): Promise<AdminNotificationListResponse> => {
+  return customFetch<AdminNotificationListResponse>(
+    getListAdminNotificationsUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListAdminNotificationsQueryKey = () => {
+  return [`/api/admin/notifications`] as const;
+};
+
+export const getListAdminNotificationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAdminNotifications>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAdminNotifications>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListAdminNotificationsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAdminNotifications>>
+  > = ({ signal }) => listAdminNotifications({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAdminNotifications>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAdminNotificationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAdminNotifications>>
+>;
+export type ListAdminNotificationsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List the most recent 200 notifications and their email delivery status (admin only)
+ */
+
+export function useListAdminNotifications<
+  TData = Awaited<ReturnType<typeof listAdminNotifications>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAdminNotifications>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAdminNotificationsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Re-send the email for a specific notification (admin only)
+ */
+export const getResendAdminNotificationUrl = (id: number) => {
+  return `/api/admin/notifications/${id}/resend`;
+};
+
+export const resendAdminNotification = async (
+  id: number,
+  options?: RequestInit,
+): Promise<ResendAdminNotificationResponse> => {
+  return customFetch<ResendAdminNotificationResponse>(
+    getResendAdminNotificationUrl(id),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getResendAdminNotificationMutationOptions = <
+  TError = ErrorType<ResendAdminNotificationResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resendAdminNotification>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resendAdminNotification>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["resendAdminNotification"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resendAdminNotification>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return resendAdminNotification(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResendAdminNotificationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resendAdminNotification>>
+>;
+
+export type ResendAdminNotificationMutationError =
+  ErrorType<ResendAdminNotificationResponse>;
+
+/**
+ * @summary Re-send the email for a specific notification (admin only)
+ */
+export const useResendAdminNotification = <
+  TError = ErrorType<ResendAdminNotificationResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resendAdminNotification>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resendAdminNotification>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getResendAdminNotificationMutationOptions(options));
+};
+
+/**
+ * @summary Auto-match unmatched debit transactions to existing expenses
+ */
+export const getAutoMatchTransactionsUrl = () => {
+  return `/api/transactions/auto-match`;
+};
+
+export const autoMatchTransactions = async (
+  options?: RequestInit,
+): Promise<AutoMatchResponse> => {
+  return customFetch<AutoMatchResponse>(getAutoMatchTransactionsUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAutoMatchTransactionsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof autoMatchTransactions>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof autoMatchTransactions>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["autoMatchTransactions"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof autoMatchTransactions>>,
+    void
+  > = () => {
+    return autoMatchTransactions(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AutoMatchTransactionsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof autoMatchTransactions>>
+>;
+
+export type AutoMatchTransactionsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Auto-match unmatched debit transactions to existing expenses
+ */
+export const useAutoMatchTransactions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof autoMatchTransactions>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof autoMatchTransactions>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getAutoMatchTransactionsMutationOptions(options));
+};
+
+/**
+ * @summary Send a user message into a copilot thread and get the assistant reply
+ */
+export const getSendCopilotMessageUrl = (id: number) => {
+  return `/api/accounting/threads/${id}/messages`;
+};
+
+export const sendCopilotMessage = async (
+  id: number,
+  sendCopilotMessageBody: SendCopilotMessageBody,
+  options?: RequestInit,
+): Promise<SendCopilotMessageResponse> => {
+  return customFetch<SendCopilotMessageResponse>(getSendCopilotMessageUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(sendCopilotMessageBody),
+  });
+};
+
+export const getSendCopilotMessageMutationOptions = <
+  TError = ErrorType<SendCopilotMessageResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendCopilotMessage>>,
+    TError,
+    { id: number; data: BodyType<SendCopilotMessageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof sendCopilotMessage>>,
+  TError,
+  { id: number; data: BodyType<SendCopilotMessageBody> },
+  TContext
+> => {
+  const mutationKey = ["sendCopilotMessage"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof sendCopilotMessage>>,
+    { id: number; data: BodyType<SendCopilotMessageBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return sendCopilotMessage(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SendCopilotMessageMutationResult = NonNullable<
+  Awaited<ReturnType<typeof sendCopilotMessage>>
+>;
+export type SendCopilotMessageMutationBody = BodyType<SendCopilotMessageBody>;
+export type SendCopilotMessageMutationError =
+  ErrorType<SendCopilotMessageResponse>;
+
+/**
+ * @summary Send a user message into a copilot thread and get the assistant reply
+ */
+export const useSendCopilotMessage = <
+  TError = ErrorType<SendCopilotMessageResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendCopilotMessage>>,
+    TError,
+    { id: number; data: BodyType<SendCopilotMessageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof sendCopilotMessage>>,
+  TError,
+  { id: number; data: BodyType<SendCopilotMessageBody> },
+  TContext
+> => {
+  return useMutation(getSendCopilotMessageMutationOptions(options));
+};

@@ -8,6 +8,7 @@ import {
   useLinkTransactionToProgram,
   useLinkTransactionToExpense,
   useLinkTransactionToBill,
+  useAutoMatchTransactions,
   useListPrograms,
   useListVendors,
   useListExpenses,
@@ -79,6 +80,7 @@ export default function TransactionsList() {
   const { data: summary, isLoading: summaryLoading } =
     useGetReconciliationSummary({ month: currentMonth });
   const updateTransaction = useUpdateTransaction();
+  const autoMatchMut = useAutoMatchTransactions();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -129,18 +131,10 @@ export default function TransactionsList() {
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
+            disabled={autoMatchMut.isPending}
             onClick={async () => {
               try {
-                const res = await fetch("/api/transactions/auto-match", {
-                  method: "POST",
-                  credentials: "include",
-                });
-                if (!res.ok) throw new Error(await res.text());
-                const data = (await res.json()) as {
-                  scanned: number;
-                  linked: number;
-                  ambiguous: number;
-                };
+                const data = await autoMatchMut.mutateAsync();
                 toast({
                   title:
                     data.linked > 0

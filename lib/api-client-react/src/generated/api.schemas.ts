@@ -2082,6 +2082,134 @@ export interface JournalEntryExportSendLogListResponse {
   entries: JournalEntryExportSendLogEntry[];
 }
 
+export interface OkResponse {
+  ok: boolean;
+}
+
+export interface MasterPasswordBody {
+  masterPassword: string;
+}
+
+export interface DailySnapshotInfo {
+  date: string;
+  exists: boolean;
+  createdAt?: string | null;
+}
+
+export interface RestoreDayResponse {
+  ok: boolean;
+  [key: string]: unknown;
+}
+
+export type EmailTemplateSampleVariables = { [key: string]: string };
+
+export interface EmailTemplate {
+  type: string;
+  subject: string;
+  body: string;
+  defaultSubject: string;
+  defaultBody: string;
+  variables: string[];
+  sampleVariables: EmailTemplateSampleVariables;
+  updatedAt?: string | null;
+}
+
+export interface EmailSettingsResponse {
+  senderName: string;
+  defaultSenderName: string;
+  templates: EmailTemplate[];
+}
+
+export interface EmailTemplateUpdate {
+  type: string;
+  subject: string;
+  body: string;
+}
+
+export interface EmailSettingsUpdateBody {
+  senderName: string;
+  templates: EmailTemplateUpdate[];
+}
+
+export interface EmailSettingsTestBody {
+  type: string;
+  subject: string;
+  body: string;
+}
+
+export interface EmailSettingsTestResponse {
+  ok: boolean;
+  delivered: boolean;
+  to?: string;
+  subject?: string;
+  body?: string;
+  note?: string;
+}
+
+export type AdminNotificationEmailStatus =
+  (typeof AdminNotificationEmailStatus)[keyof typeof AdminNotificationEmailStatus];
+
+export const AdminNotificationEmailStatus = {
+  sent: "sent",
+  failed: "failed",
+  not_attempted: "not_attempted",
+} as const;
+
+export interface AdminNotification {
+  id: number;
+  userId: number;
+  type: string;
+  title: string;
+  body: string;
+  link?: string;
+  emailTo?: string;
+  emailStatus: AdminNotificationEmailStatus;
+  emailError?: string;
+  emailSentAt?: string;
+  emailLastAttemptAt?: string;
+  emailAttempts: number;
+  createdAt: string;
+  recipientName?: string;
+  recipientEmail?: string;
+}
+
+export interface AdminNotificationListResponse {
+  items: AdminNotification[];
+}
+
+export interface ResendAdminNotificationResponse {
+  ok?: boolean;
+  status: string;
+  error?: string;
+}
+
+export interface AutoMatchResponseMatch {
+  transactionId: number;
+  expenseId: number;
+}
+
+export interface AutoMatchResponse {
+  scanned: number;
+  linked: number;
+  ambiguous: number;
+  matches: AutoMatchResponseMatch[];
+}
+
+export type SendCopilotMessageBodyPageContext = {
+  [key: string]: unknown;
+} | null;
+
+export interface SendCopilotMessageBody {
+  message: string;
+  pageContext?: SendCopilotMessageBodyPageContext;
+}
+
+export interface SendCopilotMessageResponse {
+  userMessage?: CopilotMessage;
+  assistantMessage?: CopilotMessage;
+  error?: string;
+}
+
 export type GetRecentActivityParams = {
   limit?: number;
 };
