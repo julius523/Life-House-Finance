@@ -11,10 +11,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Printer, BarChart3, Lock } from "lucide-react";
+import { Printer, BarChart3, Lock, AlertTriangle } from "lucide-react";
 import { format } from "date-fns";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PeriodDraftsBanner } from "@/components/period-drafts-banner";
+import { PanelErrorBoundary } from "@/components/error-boundary";
+import { isValidYmd, isValidRange, safeFormatDate } from "@/lib/safe-date";
 
 const fmtMoney = (n: number) =>
   new Intl.NumberFormat("en-US", {
@@ -28,6 +30,21 @@ const fmtPct = (n?: number) =>
 
 const titleCase = (s: string) =>
   s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+/** Convert a react-query error to a user-friendly string. */
+function errorMessage(err: unknown): string | null {
+  if (!err) return null;
+  // Heuristics for orval's HTTP error shape: { message, status, response }.
+  const anyErr = err as {
+    status?: number;
+    response?: { status?: number };
+    message?: string;
+  };
+  const status = anyErr?.status ?? anyErr?.response?.status;
+  if (status === 401) return "Your session has expired. Please sign in again.";
+  if (status === 403) return "You don't have permission to view this report.";
+  return String(anyErr?.message ?? err);
+}
 
 type SectionKey =
   | "summary"
@@ -48,10 +65,20 @@ export default function ReportsPage() {
   const [fromDate, setFromDate] = useState<string>(monthAgo);
   const [toDate, setToDate] = useState<string>(today);
 
+  // Task #60 — gate every downstream computation/query on a fully valid
+  // YYYY-MM-DD range. While the user is mid-edit a date input emits ""
+  // or partial strings; firing report queries against those produces
+  // either a 400 or — historically — a white-screen via date-fns
+  // throwing on Invalid Date.
+  const validRange = isValidRange(fromDate, toDate);
+  const inverted =
+    isValidYmd(fromDate) && isValidYmd(toDate) && fromDate > toDate;
+
   // Task #48 — show a banner when the report range overlaps any closed
   // accounting period so reviewers know those numbers are locked.
   const { data: periodsData } = useListAccountingPeriods();
   const closedOverlaps = useMemo(() => {
+    if (!validRange) return [];
     const all = (periodsData as
       | {
           periods?: Array<{
@@ -69,7 +96,7 @@ export default function ReportsPage() {
         p.periodStart <= toDate &&
         p.periodEnd >= fromDate,
     );
-  }, [periodsData, fromDate, toDate]);
+  }, [periodsData, fromDate, toDate, validRange]);
 
   const iso = (d: Date) => d.toISOString().split("T")[0]!;
   const setRange = (from: Date, to: Date) => {
@@ -165,21 +192,24 @@ export default function ReportsPage() {
 
   // Step 9 — operational vs ledger source toggle for P&L / Balance Sheet.
   const [source, setSource] = useState<"operational" | "ledger">("operational");
-  const { data: opData, isLoading: opLoading } = useGetFinancialSummaryReport({
-    fromDate,
-    toDate,
-  });
+  const {
+    data: opData,
+    isLoading: opLoading,
+    error: opErrorObj,
+  } = useGetFinancialSummaryReport(
+    { fromDate, toDate },
+    { query: { enabled: validRange } },
+  );
   const {
     data: ledgerData,
     isLoading: ledgerLoading,
     error: ledgerErrorObj,
   } = useGetFinancialSummaryReport(
     { fromDate, toDate, source: "ledger" },
-    { query: { enabled: source === "ledger" } },
+    { query: { enabled: validRange && source === "ledger" } },
   );
-  const ledgerError = ledgerErrorObj
-    ? String((ledgerErrorObj as Error)?.message ?? ledgerErrorObj)
-    : null;
+  const opError = errorMessage(opErrorObj);
+  const ledgerError = errorMessage(ledgerErrorObj);
   const data = source === "ledger" ? ledgerData ?? opData : opData;
   const isLoading =
     source === "ledger"
@@ -190,10 +220,11 @@ export default function ReportsPage() {
     data: tb,
     isLoading: tbLoading,
     error: tbErrorObj,
-  } = useGetTrialBalanceReport({ fromDate, toDate });
-  const tbError = tbErrorObj
-    ? String((tbErrorObj as Error)?.message ?? tbErrorObj)
-    : null;
+  } = useGetTrialBalanceReport(
+    { fromDate, toDate },
+    { query: { enabled: validRange } },
+  );
+  const tbError = errorMessage(tbErrorObj);
   type TbSortKey = "code" | "name" | "type" | "debits" | "credits" | "balance";
   const [tbSort, setTbSort] = useState<{ key: TbSortKey; dir: "asc" | "desc" }>({
     key: "code",
@@ -430,31 +461,59 @@ export default function ReportsPage() {
       <div className="hidden print:block space-y-1 mb-4">
         <h1 className="text-2xl font-bold">Life House Reentry — Financial Summary</h1>
         <p className="text-sm text-muted-foreground">
-          Period: {format(new Date(fromDate), "MMM d, yyyy")} —{" "}
-          {format(new Date(toDate), "MMM d, yyyy")}
+          Period: {safeFormatDate(fromDate, "MMM d, yyyy")} —{" "}
+          {safeFormatDate(toDate, "MMM d, yyyy")}
         </p>
         {data?.generatedAt && (
           <p className="text-xs text-muted-foreground">
-            Generated {format(new Date(data.generatedAt), "PPpp")}
+            Generated {safeFormatDate(data.generatedAt, "PPpp")}
           </p>
         )}
       </div>
+
+      {!validRange && (
+        <div
+          className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm"
+          data-testid="banner-invalid-range"
+        >
+          <AlertTriangle className="h-4 w-4 mt-0.5 text-warning shrink-0" />
+          <div>
+            <div className="font-medium">
+              Enter a valid date range to view reports
+            </div>
+            <div className="text-muted-foreground">
+              {inverted
+                ? "The “From” date must be on or before the “To” date."
+                : "Use the date pickers above to select a complete From and To date."}
+            </div>
+          </div>
+        </div>
+      )}
 
       {source === "ledger" && ledgerError && (
         <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
           Could not load General Ledger data: {ledgerError}. Falling back to operational figures.
         </div>
       )}
-      {isLoading || !data ? (
+      {validRange && !data && opError && (
+        <div
+          className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive"
+          data-testid="banner-summary-error"
+        >
+          Could not load financial summary: {opError}
+        </div>
+      )}
+      {!validRange ? null : isLoading ? (
         <div className="grid gap-4 md:grid-cols-2">
           <Skeleton className="h-48" />
           <Skeleton className="h-48" />
           <Skeleton className="h-48" />
           <Skeleton className="h-48" />
         </div>
-      ) : (
+      ) : !data ? null : (
         <>
           {selected.summary && (
+          <PanelErrorBoundary label="Summary">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <SummaryStat
               label="Total income (P&L)"
@@ -476,9 +535,11 @@ export default function ReportsPage() {
               accent={data.balanceSheet.cashOnHand >= 0 ? "ok" : "warn"}
             />
           </div>
+          </PanelErrorBoundary>
           )}
 
           {selected.pl && (
+          <PanelErrorBoundary label="Profit & Loss">
           <Card className="print-page-break">
             <CardHeader>
               <CardTitle className="text-base">
@@ -585,14 +646,16 @@ export default function ReportsPage() {
               </div>
             </CardContent>
           </Card>
+          </PanelErrorBoundary>
           )}
 
           {selected.balance && (
+          <PanelErrorBoundary label="Balance Sheet">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Balance Sheet</CardTitle>
               <CardDescription>
-                Snapshot as of {format(new Date(toDate), "MMM d, yyyy")}.
+                Snapshot as of {safeFormatDate(toDate, "MMM d, yyyy")}.
                 {source === "ledger" &&
                   " Click a row to see the underlying accounts."}
               </CardDescription>
@@ -721,6 +784,7 @@ export default function ReportsPage() {
               </div>
             </CardContent>
           </Card>
+          </PanelErrorBoundary>
           )}
 
           {selected.trialBalance && <div className="print-page-break" />}
@@ -730,12 +794,13 @@ export default function ReportsPage() {
               <PeriodDraftsBanner
                 fromDate={fromDate}
                 toDate={toDate}
-                periodLabel={`${format(new Date(fromDate), "MMM d, yyyy")} – ${format(new Date(toDate), "MMM d, yyyy")}`}
+                periodLabel={`${safeFormatDate(fromDate, "MMM d, yyyy")} – ${safeFormatDate(toDate, "MMM d, yyyy")}`}
               />
             </div>
           )}
 
           {selected.trialBalance && (
+            <PanelErrorBoundary label="Trial Balance">
             <Card>
               <CardHeader>
                 <div className="flex items-start justify-between gap-4">
@@ -767,9 +832,9 @@ export default function ReportsPage() {
                     Could not load trial balance: {tbError}
                   </div>
                 )}
-                {tbLoading || !tb ? (
+                {tbLoading ? (
                   <Skeleton className="h-32" />
-                ) : (
+                ) : !tb ? null : (
                   <>
                     <div
                       className={`mb-3 text-sm rounded-md px-3 py-2 ${
@@ -867,11 +932,13 @@ export default function ReportsPage() {
                 )}
               </CardContent>
             </Card>
+            </PanelErrorBoundary>
           )}
 
           {selected.byStatus && <div className="print-page-break" />}
 
           {selected.byStatus && (
+          <PanelErrorBoundary label="Expenses & Bills by Status">
           <div className="grid gap-6 md:grid-cols-2">
             <Card>
               <CardHeader>
@@ -947,9 +1014,11 @@ export default function ReportsPage() {
               </CardContent>
             </Card>
           </div>
+          </PanelErrorBoundary>
           )}
 
           {selected.spendByProgram && (
+          <PanelErrorBoundary label="Spend by Program">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Spend by Program / Grant</CardTitle>
@@ -995,9 +1064,11 @@ export default function ReportsPage() {
               </table>
             </CardContent>
           </Card>
+          </PanelErrorBoundary>
           )}
 
           {selected.missingReceipts && (
+          <PanelErrorBoundary label="Missing Receipts">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Expenses Missing Receipts</CardTitle>
@@ -1052,9 +1123,11 @@ export default function ReportsPage() {
               </table>
             </CardContent>
           </Card>
+          </PanelErrorBoundary>
           )}
 
           {(selected.topVendors || selected.bank) && (
+          <PanelErrorBoundary label="Top Vendors & Bank Reconciliation">
           <div className="grid gap-6 md:grid-cols-2">
             {selected.topVendors && (
             <Card>
@@ -1123,6 +1196,7 @@ export default function ReportsPage() {
             </Card>
             )}
           </div>
+          </PanelErrorBoundary>
           )}
         </>
       )}
@@ -1253,13 +1327,12 @@ function AccountDrillDownRow({
   parentSlug: string;
 }) {
   const [open, setOpen] = useState(false);
+  const rangeOk = isValidRange(fromDate, toDate);
   const { data, isLoading, error } = useGetAccountActivityReport(
     { accountId: account.accountId, from: fromDate, to: toDate },
-    { query: { enabled: open } },
+    { query: { enabled: open && rangeOk } },
   );
-  const errMsg = error
-    ? String((error as Error)?.message ?? error)
-    : null;
+  const errMsg = error ? errorMessage(error) : null;
   const fmt = (n: number) =>
     new Intl.NumberFormat("en-US", {
       style: "currency",
