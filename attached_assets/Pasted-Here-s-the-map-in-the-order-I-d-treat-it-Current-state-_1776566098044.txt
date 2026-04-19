@@ -1,0 +1,224 @@
+Here’s the map, in the order I’d treat it.
+
+Current state
+1) What is already integrated
+
+Accounting core
+
+Chart of Accounts
+manual JE direct post
+manual JE draft workflow
+submit / approve / reject / post controls
+no-self-approval server-side
+idempotent posting
+approval history
+optimistic locking
+trial balance
+ledger-backed report modes
+
+That part is real.
+
+2) What is partially integrated
+
+Reporting
+
+Trial Balance is ledger-native
+P&L and Balance Sheet have ledger mode available
+operational mode still exists side-by-side
+
+So reporting is partly integrated, but not fully cut over.
+
+3) What is not yet integrated
+
+Expenses / bills / operational money movement into accounting
+
+expenses do not automatically generate JEs
+bills do not automatically generate JEs
+approvals on expenses are not yet tied to ledger posting
+expense categories are not yet mapped cleanly to CoA posting rules
+the copilot is not yet doing controlled expense-to-ledger drafting/posting
+
+That is the biggest missing bridge.
+
+Gap map
+Gap A — Expense → ledger integration
+
+Status: missing
+Why it matters: right now the expense system and ledger system are still separate tracks.
+
+Missing pieces
+expense category to CoA mapping
+vendor / payee handling rules
+draft JE creation from approved expense
+attachment / receipt linkage carried into accounting evidence
+posting timing rule:
+on submit?
+on approval?
+on payment?
+reversal / correction handling when an expense changes after accounting draft exists
+Done looks like
+
+A valid approved expense can create an accounting draft or posted JE through one controlled path, with traceability back to the originating expense.
+
+Priority
+
+Highest
+
+Gap B — Bill / AP-lite → ledger integration
+
+Status: missing
+Why it matters: bills are accounting-sensitive and usually hit liabilities, not just expenses.
+
+Missing pieces
+bill create/edit/approve lifecycle connected to ledger
+AP account defaulting from settings / CoA
+accrual logic:
+Dr expense
+Cr A/P
+payment logic:
+Dr A/P
+Cr Cash
+partial payment handling
+void / reversal / correction path
+Done looks like
+
+Bills create proper liability-aware accounting entries instead of living as operational records only.
+
+Priority
+
+Very high, right after expense integration if bills are active in daily ops.
+
+Gap C — Reporting cutover confidence
+
+Status: partial
+Why it matters: you have side-by-side reporting, but not full trust convergence yet.
+
+Missing pieces
+tie-out checks between:
+operational P&L vs ledger P&L
+operational BS vs ledger BS
+exception reports showing mismatches
+clear source-of-truth designation per report
+cutover readiness criteria
+Done looks like
+
+You can prove ledger reports match or intentionally explain differences, then eventually retire the operational version.
+
+Priority
+
+High, but after transaction generation is reliable.
+
+Gap D — Copilot to operational accounting bridge
+
+Status: partial
+Why it matters: the copilot knows accounting, but it is not yet the full orchestrator across expenses and reports.
+
+Missing pieces
+copilot can inspect an expense and draft the JE from the real CoA
+copilot can explain why a posting is suggested
+copilot can surface blocked conditions:
+archived account
+closed period
+missing receipt
+invalid category mapping
+copilot can reconcile “why doesn’t this report match that expense list?”
+Done looks like
+
+The copilot becomes a controlled accountant assistant, not just a JE helper.
+
+Priority
+
+High, but only after A and B are solid.
+
+Gap E — Source-of-truth linkage across objects
+
+Status: incomplete
+Why it matters: auditors hate scavenger hunts.
+
+Missing pieces
+
+Every ledger result should be able to answer:
+
+what expense/bill/draft created this?
+who submitted it?
+who approved it?
+what attachment supported it?
+what report line includes it?
+Done looks like
+
+One-click traceability:
+Report line → JE → draft → originating expense/bill → receipt/evidence → actors
+
+Priority
+
+High
+
+Gap F — Report detail drilldowns
+
+Status: partly there
+Why it matters: summaries without drilldown are pretty lies.
+
+Missing pieces
+P&L line click → underlying JEs / originating transactions
+BS line click → underlying account activity
+expense report line click → accounting effect
+ledger vs operational difference view
+Done looks like
+
+Every number on a financial report can be explained from the UI.
+
+Priority
+
+Medium-high
+
+Gap G — Period-close controls across expenses and bills
+
+Status: accounting side stronger than operational side
+Why it matters: if accounting periods lock but expenses can still mutate prior-period financial behavior, that gets ugly fast.
+
+Missing pieces
+expense edit restrictions once posted / period closed
+bill edit restrictions once posted / period closed
+forced correction via reversal/adjustment instead of silent mutation
+close checklist
+Done looks like
+
+Closed means closed. Corrections go through explicit accounting actions.
+
+Priority
+
+Medium-high
+
+Recommended build sequence
+Phase 1 — Complete the money bridge
+Expense → JE automation
+Bill / AP-lite → JE automation
+Traceability links across expense/bill/draft/JE
+
+This is the real integration layer.
+
+Phase 2 — Make reporting trustworthy
+Tie-out / variance view between operational and ledger reports
+Report drilldowns
+Cutover readiness checklist
+Phase 3 — Make copilot truly useful
+Copilot reads expenses/bills and drafts compliant postings
+Copilot explains mismatches and blocked postings
+Copilot helps reconcile reports
+Plain-English truth
+
+Right now you have:
+
+a real accounting engine
+a partly connected reporting layer
+an expense system that still stops short of the ledger
+
+So the next big milestone is not “more reports.”
+It is making expenses and bills actually hit accounting in a controlled, traceable way.
+
+If I were setting the next three priorities
+Expense → JE automation
+Bill / A/P → JE automation
+Ledger vs operational report tie-out screen
+
+That trio turns the platform from “accounting features exist” into “the accounting side is actually connected to operations.”
