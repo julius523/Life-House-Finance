@@ -1,0 +1,211 @@
+Plan the bills → accounting bridge next.
+
+That is the right next dependency. Reporting can wait a beat.
+
+Why:
+
+Expenses are now bridged. Bills are the other major operational stream still sitting outside the accounting control path.
+If you do reporting first, you polish outputs while a core input is still missing.
+Bills have more accounting risk than expenses because of the accrual/payment split. Better to lock that down before you build drilldowns and exports on top.
+
+Use this as the full planning prompt in one place:
+
+Bills → accounting bridge (draft JE, not direct post)
+What & Why
+
+Expenses are now connected to accounting through the controlled draft → submit → approve → reject → post workflow, using the shared accounting_source_links bridge and the existing hardened manual journal entry controls. Bills are the next operational accounting gap.
+
+This task connects bills into the same accounting control layer. When a bill reaches the configured accounting trigger, the server should generate a manual journal entry draft, not a posted ledger row. That draft must then flow through the existing draft approval workflow unchanged. No bypass route, no silent posting, no second posting implementation.
+
+Bills differ from expenses because they have an A/P lifecycle:
+
+At accrual/approval: Dr expense, Cr accounts payable
+At payment: Dr accounts payable, Cr cash
+
+This work should use the same accounting_source_links table so bills plug into the same traceability model as expenses, and so later reporting and copilot reconciliation can read one canonical source of truth.
+
+Done looks like
+Bills can generate accounting drafts using the shared accounting_source_links table with sourceType='bill'.
+The system creates draft JEs, not posted JEs.
+Generated bill drafts use the existing manual JE workflow: draft → submit → approve → reject → post.
+No second posting path is introduced. Any eventual posting must reuse the hardened posting service already used by manual drafts.
+The accrual event creates a draft with:
+Debit: bill expense account
+Credit: accounts payable liability account
+The payment event creates a draft with:
+Debit: accounts payable liability account
+Credit: cash / bank account
+The bridge is idempotent:
+same bill + same accounting event cannot create duplicate drafts
+retries and concurrent calls converge on the same draft/link row
+Mapping failures do not block operational bill approval/payment. They set accounting status to blocked with a stable reason code and leave an audit trail.
+Bills get the same accounting status model as expenses where applicable:
+pending | draft_created | posted | blocked | not_applicable
+Blocked bill generation is visible and retryable through the same overall pattern already used for blocked expenses, whether by extending the queue or creating a bill-specific companion queue.
+Two-way traceability exists:
+bill detail links to draft / posted JE
+JE detail can show originating bill
+all traversals go through accounting_source_links
+Audit history is preserved:
+generation attempt
+blocked reason
+retry
+mark not applicable
+eventual posted linkage
+Locked design constraints
+Use the existing shared bridge table: accounting_source_links
+Do not put ad hoc source fields directly on journal entries or drafts as the canonical bridge
+Do not direct-post to the ledger from the bill workflow
+Do not create a new JE posting implementation
+Reuse the existing manual draft workflow and hardened posting path
+Keep the server as the source of truth for all validations, even if the UI filters options
+Preserve the audit chain; never “clean up” by deleting linkage rows that would sever provenance
+Accounting model
+1) Bill accrual / approval event
+
+When a bill reaches the configured accrual trigger, generate one draft JE:
+
+Dr expense account
+Cr accounts payable liability account
+
+Suggested default trigger for v1:
+
+on bill approval
+2) Bill payment event
+
+When a bill is actually paid, generate a second draft JE:
+
+Dr accounts payable liability account
+Cr cash / bank account
+
+If the current bill system does not yet have a reliable payment event/state, plan this as either:
+
+part of the same task if the payment state already exists and is stable, or
+a tightly-coupled follow-up slice if payment tracking is not ready
+
+But the planning doc must explicitly account for both sides of the A/P lifecycle.
+
+Stable enums / reason codes
+
+Use stable reason codes mirroring the expense bridge as closely as possible, extended only where bills truly need extra cases.
+
+Accounting status:
+
+pending
+draft_created
+posted
+blocked
+not_applicable
+
+Block reason codes:
+
+missing_category
+missing_mapping
+archived_account
+non_postable_account
+invalid_payment_method_rule
+missing_ap_account
+missing_cash_account
+other
+
+Only add a new code if the bill flow genuinely requires it.
+
+Recommended schema shape
+
+Plan for the minimum schema needed to support the bridge cleanly:
+
+Reuse accounting_source_links
+sourceType
+sourceId
+draftId
+journalEntryId
+deterministic idempotency key
+unique constraint so one logical source event cannot fan out into duplicates
+Bills table additions, as needed:
+accountingStatus
+accountingBlockReason
+accountingGeneratedAt
+separate fields if needed to distinguish accrual-draft vs payment-draft lifecycle clearly
+If a single bill can legitimately create more than one accounting event, the link model must account for that explicitly.
+Either extend the link table with an eventType such as accrual | payment
+Or use another equally explicit mechanism
+Do not rely on vague inference later
+
+This part matters. Bills are not one-event like the expense v1 bridge. The planning doc should treat that honestly.
+
+Idempotency
+
+Use deterministic idempotency keys, same style as the manual draft and expense bridge work.
+
+Recommended pattern:
+
+bill-accrual-draft-{billId}
+bill-payment-draft-{billId}
+
+If event granularity needs to be finer, include the bill payment record id instead of just bill id.
+
+Requirements:
+
+sequential retries return the same draft
+concurrent requests converge to one draft
+DB constraints are the real fence, not just app-level checks
+API expectations
+
+Plan the necessary endpoints and hooks, including:
+
+Bill approval/accrual hook → generate accounting draft
+Bill payment hook → generate payment-side accounting draft
+Manual retry endpoint for bill accounting draft generation
+Read APIs to surface:
+linked draft summary
+linked posted JE summary
+originating bill summary on JE detail
+Blocked queue support for bill-side accounting failures
+Any admin-only mark-not-applicable action, with required note and audit log
+UI expectations
+
+Plan for parity with the expense bridge pattern:
+
+Bill detail page:
+accounting status badge
+linked draft
+linked posted JE
+block reason
+one-click links
+Draft detail / JE detail:
+originating bill card when source is a bill
+JE list:
+source badge/filter should eventually distinguish manual / expense / bill
+Blocked queue:
+either extend the blocked accounting queue to support bills too
+or define a bill-specific blocked queue with the same operator actions:
+retry
+edit mapping target
+mark not applicable
+Out of scope
+Copilot reconciliation
+Report drilldowns and CSV polish
+Auto-posting
+Vendor-specific smart accounting rules unless they are already required by the existing bill domain
+Full AP subledger redesign
+Multi-entity accounting unless already present elsewhere in the system
+Acceptance gate
+
+Do not call this done unless all of the following are true:
+
+Bills generate draft JEs only, never direct-posts
+Generated bill drafts flow through the existing draft approval workflow
+Posting still goes through the existing hardened posting service
+Both bill accrual and bill payment accounting shapes are explicitly handled in the plan
+Idempotency is enforced for bill-generated drafts at the DB layer
+Blocked generation does not break operational bill progress, but is visible and retryable
+Two-way traceability uses accounting_source_links, not ad hoc shortcuts
+Audit history remains queryable end to end
+Dependency order after this
+
+After the bills bridge is planned and shipped:
+
+reporting fixes / follow-ups: #60, #61, #62
+then copilot reconciliation
+
+Because reports should sit on top of a fuller accounting truth, not a half-bridged one.
