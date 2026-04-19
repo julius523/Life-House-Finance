@@ -2043,6 +2043,215 @@ router.get(
   },
 );
 
+// Task #33 — CSV export of the journal entries list. Honors the same
+// filters as the JSON list endpoint so reviewers can download exactly
+// what they're currently looking at. When `includeLines=true`, emits one
+// row per journal entry line (with account/debit/credit/program/fund/memo)
+// instead of one row per entry. Capped to keep memory bounded — exports
+// larger than the cap return 413 so reviewers narrow their filters
+// rather than silently getting a truncated file.
+const CSV_EXPORT_MAX_ENTRIES = 10_000;
+
+function csvEscape(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  let s = String(value);
+  // Neutralize spreadsheet formula injection (CWE-1236): cells whose first
+  // character is =, +, -, @, or a leading tab/CR are interpreted as
+  // formulas by Excel/Sheets when the file is opened. Prefix with a single
+  // quote so the cell is treated as text. Genuine numeric strings (e.g.
+  // "-12.34" from formatCentsForCsv) are left alone so debit/credit
+  // columns still aggregate as numbers in the spreadsheet.
+  if (s.length > 0 && /^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) {
+    s = `'${s}`;
+  }
+  if (/[",\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function formatCentsForCsv(cents: number): string {
+  const negative = cents < 0;
+  const abs = Math.abs(cents);
+  const whole = Math.floor(abs / 100);
+  const frac = (abs % 100).toString().padStart(2, "0");
+  return `${negative ? "-" : ""}${whole}.${frac}`;
+}
+
+router.get(
+  "/accounting/journal-entries.csv",
+  async (req, res): Promise<void> => {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const q = req.query;
+    const status = typeof q["status"] === "string" ? (q["status"] as string) : null;
+    const source = typeof q["source"] === "string" ? (q["source"] as string) : null;
+    const from =
+      typeof q["from"] === "string" && /^\d{4}-\d{2}-\d{2}$/.test(q["from"] as string)
+        ? (q["from"] as string)
+        : null;
+    const to =
+      typeof q["to"] === "string" && /^\d{4}-\d{2}-\d{2}$/.test(q["to"] as string)
+        ? (q["to"] as string)
+        : null;
+    const includeLines = q["includeLines"] === "true" || q["includeLines"] === "1";
+
+    const conds = [];
+    if (status === "posted" || status === "reversed") {
+      conds.push(eq(journalEntriesTable.status, status));
+    }
+    if (source === "copilot") {
+      conds.push(sql`${journalEntriesTable.agentActionId} IS NOT NULL`);
+    } else if (source === "manual") {
+      conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
+    }
+    if (from) {
+      conds.push(sql`${journalEntriesTable.entryDate} >= ${from}`);
+    }
+    if (to) {
+      conds.push(sql`${journalEntriesTable.entryDate} <= ${to}`);
+    }
+    const whereExpr = conds.length ? and(...conds) : undefined;
+
+    const entries = await db
+      .select()
+      .from(journalEntriesTable)
+      .where(whereExpr)
+      .orderBy(desc(journalEntriesTable.postedAt))
+      .limit(CSV_EXPORT_MAX_ENTRIES + 1);
+
+    if (entries.length > CSV_EXPORT_MAX_ENTRIES) {
+      res.status(413).json({
+        error: `Export would exceed ${CSV_EXPORT_MAX_ENTRIES} entries. Narrow the filters (e.g. by date range) and try again.`,
+        code: "EXPORT_TOO_LARGE",
+        max: CSV_EXPORT_MAX_ENTRIES,
+      });
+      return;
+    }
+
+    const linesByEntry = new Map<
+      number,
+      Array<typeof journalEntryLinesTable.$inferSelect>
+    >();
+    if (includeLines && entries.length > 0) {
+      const ids = entries.map((e) => e.id);
+      const allLines = await db
+        .select()
+        .from(journalEntryLinesTable)
+        .where(inArray(journalEntryLinesTable.journalEntryId, ids))
+        .orderBy(
+          asc(journalEntryLinesTable.journalEntryId),
+          asc(journalEntryLinesTable.lineNo),
+        );
+      for (const ln of allLines) {
+        const arr = linesByEntry.get(ln.journalEntryId) ?? [];
+        arr.push(ln);
+        linesByEntry.set(ln.journalEntryId, arr);
+      }
+    }
+
+    const rows: string[] = [];
+    if (includeLines) {
+      rows.push(
+        [
+          "entry_date",
+          "entry_no",
+          "memo",
+          "source",
+          "status",
+          "line_no",
+          "account",
+          "debit",
+          "credit",
+          "program",
+          "fund",
+          "line_memo",
+        ].join(","),
+      );
+      for (const e of entries) {
+        const src = e.agentActionId !== null ? "copilot" : "manual";
+        const lines = linesByEntry.get(e.id) ?? [];
+        if (lines.length === 0) {
+          rows.push(
+            [
+              csvEscape(e.entryDate),
+              csvEscape(e.entryNo),
+              csvEscape(e.memo),
+              csvEscape(src),
+              csvEscape(e.status),
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+            ].join(","),
+          );
+          continue;
+        }
+        for (const ln of lines) {
+          rows.push(
+            [
+              csvEscape(e.entryDate),
+              csvEscape(e.entryNo),
+              csvEscape(e.memo),
+              csvEscape(src),
+              csvEscape(e.status),
+              csvEscape(ln.lineNo),
+              csvEscape(ln.account),
+              csvEscape(ln.type === "debit" ? formatCentsForCsv(ln.amountCents) : ""),
+              csvEscape(ln.type === "credit" ? formatCentsForCsv(ln.amountCents) : ""),
+              csvEscape(ln.program),
+              csvEscape(ln.fund),
+              csvEscape(ln.memo),
+            ].join(","),
+          );
+        }
+      }
+    } else {
+      rows.push(
+        [
+          "entry_date",
+          "entry_no",
+          "memo",
+          "total_debits",
+          "total_credits",
+          "source",
+          "status",
+        ].join(","),
+      );
+      for (const e of entries) {
+        const src = e.agentActionId !== null ? "copilot" : "manual";
+        rows.push(
+          [
+            csvEscape(e.entryDate),
+            csvEscape(e.entryNo),
+            csvEscape(e.memo),
+            csvEscape(formatCentsForCsv(e.totalsDebitsCents)),
+            csvEscape(formatCentsForCsv(e.totalsCreditsCents)),
+            csvEscape(src),
+            csvEscape(e.status),
+          ].join(","),
+        );
+      }
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const filename = `journal-entries-${today}${includeLines ? "-with-lines" : ""}.csv`;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"`,
+    );
+    // Prepend UTF-8 BOM so Excel opens non-ASCII memos correctly.
+    res.send("\uFEFF" + rows.join("\r\n") + "\r\n");
+  },
+);
+
 router.get(
   "/accounting/journal-entries/:id",
   async (req, res): Promise<void> => {

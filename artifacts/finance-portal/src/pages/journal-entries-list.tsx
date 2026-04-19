@@ -32,9 +32,11 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { apiJson } from "@/lib/api";
 import { format } from "date-fns";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   ArrowLeft,
   BookOpen,
+  Download,
   FileEdit,
   Filter,
   Plus,
@@ -141,6 +143,9 @@ export default function JournalEntriesListPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [includeLines, setIncludeLines] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [draftsLoading, setDraftsLoading] = useState(true);
@@ -273,6 +278,50 @@ export default function JournalEntriesListPage() {
 
   const filtersActive =
     status !== "all" || source !== "all" || from !== "" || to !== "";
+
+  const downloadCsv = async () => {
+    setExporting(true);
+    try {
+      const p = new URLSearchParams();
+      if (status !== "all") p.set("status", status);
+      if (source !== "all") p.set("source", source);
+      if (from) p.set("from", from);
+      if (to) p.set("to", to);
+      if (includeLines) p.set("includeLines", "true");
+      const res = await fetch(`/api/accounting/journal-entries.csv?${p.toString()}`, {
+        credentials: "include",
+      });
+      if (!res.ok) {
+        let msg = `Export failed (${res.status})`;
+        try {
+          const body = (await res.json()) as { error?: string };
+          if (body?.error) msg = body.error;
+        } catch {
+          // non-JSON error body — keep default message
+        }
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const today = new Date().toISOString().slice(0, 10);
+      const filename = `journal-entries-${today}${includeLines ? "-with-lines" : ""}.csv`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast({
+        title: "Could not export journal entries",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -528,6 +577,29 @@ export default function JournalEntriesListPage() {
                   ? "No entries match the current filters."
                   : `Showing ${startIdx}–${endIdx} of ${total}`}
             </CardDescription>
+          </div>
+          <div className="flex items-center gap-3">
+            <label
+              className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none"
+              title="One row per journal entry line, with account, debit, credit, program, fund, and memo."
+            >
+              <Checkbox
+                checked={includeLines}
+                onCheckedChange={(v) => setIncludeLines(v === true)}
+                data-testid="checkbox-include-lines"
+              />
+              Include lines
+            </label>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={downloadCsv}
+              disabled={exporting || loading || total === 0}
+              data-testid="button-download-csv"
+            >
+              <Download className="h-4 w-4 mr-1" />
+              {exporting ? "Exporting…" : "Download CSV"}
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="p-0">
