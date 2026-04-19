@@ -123,6 +123,81 @@ function isExportCadence(value: unknown): value is ExportCadence {
 }
 
 /**
+ * Task #69 — minimal config a schedule needs to materialize its CSV.
+ * Intentionally narrower than `JournalEntryExportSchedule` so the
+ * preview endpoint can pass an unsaved draft (no id/recipients/etc.)
+ * through the same code path the scheduler uses, guaranteeing the
+ * preview bytes match the bytes the next email would attach.
+ */
+export type ScheduleCsvConfig = {
+  cadence: string;
+  filterStatus: string | null;
+  filterSource: string | null;
+  includeLines: boolean;
+};
+
+export type BuildScheduleCsvResult =
+  | {
+      ok: true;
+      csv: string;
+      filename: string;
+      rowCount: number;
+      range: { from: string; to: string };
+    }
+  | { ok: false; reason: "invalid_cadence" | "too_large"; max?: number };
+
+/**
+ * Task #69 — single source of truth for "what bytes does this schedule
+ * produce for `runAt`?". Used by:
+ *   - runSchedule (the scheduled email + manual "Run now")
+ *   - the preview endpoint that lets admins inspect the file before
+ *     saving the schedule
+ *
+ * Both paths must resolve filters, range, header set, and filename
+ * identically — that parity is the point of this helper.
+ */
+export async function buildScheduleCsv(
+  config: ScheduleCsvConfig,
+  runAt: Date,
+): Promise<BuildScheduleCsvResult> {
+  if (!isExportCadence(config.cadence)) {
+    return { ok: false, reason: "invalid_cadence" };
+  }
+  const range = computeExportRange(config.cadence, runAt);
+  const filterStatus =
+    config.filterStatus === "posted" || config.filterStatus === "reversed"
+      ? config.filterStatus
+      : null;
+  const filterSource =
+    config.filterSource === "copilot" ||
+    config.filterSource === "manual" ||
+    config.filterSource === "expense" ||
+    config.filterSource === "bill"
+      ? config.filterSource
+      : null;
+  const result = await generateJournalEntryCsv({
+    status: filterStatus,
+    source: filterSource,
+    from: range.from,
+    to: range.to,
+    includeLines: config.includeLines,
+  });
+  if (!result.ok) {
+    return { ok: false, reason: "too_large", max: result.max };
+  }
+  const filename = `journal-entries-${range.from}_to_${range.to}${
+    config.includeLines ? "-with-lines" : ""
+  }.csv`;
+  return {
+    ok: true,
+    csv: result.csv,
+    filename,
+    rowCount: result.rowCount,
+    range,
+  };
+}
+
+/**
  * Run a single schedule end-to-end: build the CSV for the cadence
  * window, email it, log the attempt. Used by both the tick loop and
  * the manual "Run now" admin button.
@@ -172,24 +247,25 @@ export async function runSchedule(
   let errorMessage: string | undefined;
 
   try {
-    const result = await generateJournalEntryCsv({
-      status: filterStatus,
-      source: filterSource,
-      from: range.from,
-      to: range.to,
-      includeLines: schedule.includeLines,
-    });
-    if (!result.ok) {
+    const built = await buildScheduleCsv(
+      {
+        cadence: schedule.cadence,
+        filterStatus,
+        filterSource,
+        includeLines: schedule.includeLines,
+      },
+      runAt,
+    );
+    if (!built.ok) {
       throw new Error(
-        `Export would exceed ${result.max} entries; narrow filters.`,
+        built.reason === "too_large"
+          ? `Export would exceed ${built.max} entries; narrow filters.`
+          : `Invalid cadence: ${schedule.cadence}`,
       );
     }
-    rowCount = result.rowCount;
-    // Use scheduled-export naming so the attached file is recognizable
-    // independent of the on-demand download naming convention.
-    filename = `journal-entries-${range.from}_to_${range.to}${
-      schedule.includeLines ? "-with-lines" : ""
-    }.csv`;
+    const result = { csv: built.csv };
+    rowCount = built.rowCount;
+    filename = built.filename;
 
     if (rowCount === 0) {
       status = "empty";

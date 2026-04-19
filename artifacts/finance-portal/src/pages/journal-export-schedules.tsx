@@ -55,7 +55,7 @@ import {
   JournalEntryExportScheduleBodyFilterStatus,
   JournalEntryExportScheduleBodyFilterSource,
 } from "@workspace/api-client-react";
-import { Plus, Pencil, Trash2, Play, ArrowLeft, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Trash2, Play, ArrowLeft, AlertTriangle, Download } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 type Cadence = "daily" | "weekly" | "monthly";
@@ -109,6 +109,7 @@ export default function JournalExportSchedulesPage() {
   const queryClient = useQueryClient();
 
   const [editing, setEditing] = useState<FormState | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [selectedScheduleId, setSelectedScheduleId] = useState<number | null>(
     null,
@@ -267,6 +268,75 @@ export default function JournalExportSchedulesPage() {
           : (form.filterSource as JournalEntryExportScheduleBodyFilterSource),
       includeLines: form.includeLines,
     };
+  }
+
+  // Task #69 — POSTs the in-flight form values to the preview endpoint
+  // and downloads the returned CSV. Goes through the same buildScheduleCsv
+  // helper the scheduler uses, so the file admins see here is the file
+  // the next scheduled email would attach (no need to save first).
+  async function previewCsv() {
+    if (!editing) return;
+    if (previewing) return;
+    setPreviewing(true);
+    try {
+      const body = {
+        cadence: editing.cadence,
+        filterStatus:
+          editing.filterStatus === "all" ? null : editing.filterStatus,
+        filterSource:
+          editing.filterSource === "all" ? null : editing.filterSource,
+        includeLines: editing.includeLines,
+      };
+      const res = await fetch("/api/journal-entry-export-schedules/preview", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        let msg = `Preview failed (${res.status})`;
+        try {
+          const j = (await res.json()) as { error?: string };
+          if (j?.error) msg = j.error;
+        } catch {
+          // non-JSON body — keep default
+        }
+        throw new Error(msg);
+      }
+      const rowCountHeader = res.headers.get("X-Preview-Row-Count");
+      const rangeFrom = res.headers.get("X-Preview-Range-From");
+      const rangeTo = res.headers.get("X-Preview-Range-To");
+      // Parse a sensible filename out of Content-Disposition; fall back to
+      // a date-stamped default if the header is unavailable for any reason.
+      const cd = res.headers.get("Content-Disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(cd);
+      const filename =
+        match?.[1] ??
+        `journal-entries-preview-${new Date().toISOString().slice(0, 10)}.csv`;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      const rowCount = rowCountHeader ? Number(rowCountHeader) : NaN;
+      const desc =
+        Number.isFinite(rowCount) && rangeFrom && rangeTo
+          ? `${rowCount} entr${rowCount === 1 ? "y" : "ies"} for ${rangeFrom} → ${rangeTo}.`
+          : "Downloaded the CSV the next run would send.";
+      toast({ title: "Preview downloaded", description: desc });
+    } catch (e) {
+      toast({
+        title: "Could not preview CSV",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setPreviewing(false);
+    }
   }
 
   function submitForm() {
@@ -690,17 +760,29 @@ export default function JournalExportSchedulesPage() {
               </div>
             </div>
           ) : null}
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setEditing(null)}>
-              Cancel
-            </Button>
+          <DialogFooter className="gap-2 sm:justify-between">
             <Button
-              onClick={submitForm}
-              disabled={createMut.isPending || updateMut.isPending}
-              data-testid="button-save"
+              variant="outline"
+              onClick={previewCsv}
+              disabled={previewing}
+              data-testid="button-preview-csv"
+              title="Download the CSV the next scheduled run would send"
             >
-              {editing?.id === null ? "Create" : "Save"}
+              <Download className="h-4 w-4 mr-1" />
+              {previewing ? "Preparing…" : "Preview CSV"}
             </Button>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => setEditing(null)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={submitForm}
+                disabled={createMut.isPending || updateMut.isPending}
+                data-testid="button-save"
+              >
+                {editing?.id === null ? "Create" : "Save"}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

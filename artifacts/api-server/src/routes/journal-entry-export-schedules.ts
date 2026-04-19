@@ -21,6 +21,7 @@ import { requireAuth, requireRole } from "../lib/auth";
 import { logger } from "../lib/logger";
 import {
   applyRunOutcome,
+  buildScheduleCsv,
   computeNextRunAt,
   runSchedule,
 } from "../lib/journalEntryExportScheduler";
@@ -189,6 +190,81 @@ router.delete(
       return;
     }
     res.status(204).end();
+  },
+);
+
+// Task #69 — Preview the CSV the next scheduled run would attach.
+// Accepts an in-flight form payload (no DB row required) so admins can
+// inspect their config before clicking Save. Goes through buildScheduleCsv
+// so the bytes returned here are byte-identical to the bytes the
+// scheduler would email for the same cadence + filters at this moment.
+const previewSchema = z.object({
+  cadence: z.enum(EXPORT_CADENCES),
+  filterStatus: z.enum(EXPORT_FILTER_STATUSES).nullable().optional(),
+  filterSource: z.enum(EXPORT_FILTER_SOURCES).nullable().optional(),
+  includeLines: z.boolean().default(false),
+});
+
+router.post(
+  "/journal-entry-export-schedules/preview",
+  async (req, res): Promise<void> => {
+    const parsed = previewSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Invalid preview request",
+        details: parsed.error.flatten(),
+      });
+      return;
+    }
+    const data = parsed.data;
+    try {
+      // Anchor the preview to the *next scheduled fire time*, not "now".
+      // computeExportRange is relative to runAt — anchoring to "now" can
+      // produce a different date window than the next real run (e.g. a
+      // daily schedule previewed at 23:00 UTC would otherwise show
+      // yesterday's window, but the next run at tomorrow 02:00 UTC will
+      // export today's window). Using computeNextRunAt makes the preview
+      // bytes match what the scheduler will actually email next.
+      const cadence = data.cadence as ExportCadence;
+      const nextRunAt = computeNextRunAt(cadence, new Date());
+      const built = await buildScheduleCsv(
+        {
+          cadence: data.cadence,
+          filterStatus: data.filterStatus ?? null,
+          filterSource: data.filterSource ?? null,
+          includeLines: data.includeLines,
+        },
+        nextRunAt,
+      );
+      if (!built.ok) {
+        if (built.reason === "too_large") {
+          res.status(413).json({
+            error: `Preview would exceed ${built.max} entries. Narrow the filters and try again.`,
+            code: "EXPORT_TOO_LARGE",
+            max: built.max,
+          });
+          return;
+        }
+        res.status(400).json({ error: "Invalid cadence" });
+        return;
+      }
+      // Surface the same metadata the scheduler logs so the UI can
+      // show row count / range without re-parsing the CSV.
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${built.filename}"`,
+      );
+      res.setHeader("X-Preview-Row-Count", String(built.rowCount));
+      res.setHeader("X-Preview-Range-From", built.range.from);
+      res.setHeader("X-Preview-Range-To", built.range.to);
+      res.send(built.csv);
+    } catch (err) {
+      logger.error({ err }, "Schedule CSV preview failed");
+      res
+        .status(500)
+        .json({ error: err instanceof Error ? err.message : String(err) });
+    }
   },
 );
 
