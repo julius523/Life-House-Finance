@@ -676,8 +676,11 @@ export default function BillDetail() {
                   leg === "accrual"
                     ? "Accrual (Dr Expense / Cr A/P)"
                     : "Payment (Dr A/P / Cr Cash)";
+                // Task #63 — admins *and* approvers may retry / mark a leg
+                // not applicable; this matches the operator surface gating
+                // used elsewhere in the bill detail page (canDecide).
                 const canAct =
-                  isAdmin && status !== "posted" && status !== "not_applicable";
+                  canDecide && status !== "posted" && status !== "not_applicable";
                 return (
                   <div key={leg} className="space-y-2">
                     <div className="flex items-center justify-between">

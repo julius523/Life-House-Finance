@@ -21,7 +21,10 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth, canAccess, type Section } from "@/lib/auth";
 import { NotificationBell } from "@/components/notification-bell";
-import { useGetBlockedExpensesCount } from "@workspace/api-client-react";
+import {
+  useGetBlockedExpensesCount,
+  useGetBlockedBillsCount,
+} from "@workspace/api-client-react";
 import { Badge } from "@/components/ui/badge";
 
 const NAV_ITEMS: Array<{
@@ -65,7 +68,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
       refetchInterval: 60_000,
     },
   });
-  const blockedTotal = blockedCount?.total ?? 0;
+  // Task #63 — nav badge aggregates blocked expenses + blocked bill legs
+  // (accrual + payment) so finance sees the total bridge backlog at a
+  // glance rather than only the expense slice.
+  const { data: blockedBillsCount } = useGetBlockedBillsCount({
+    query: {
+      enabled: canSeeBlocked,
+      refetchInterval: 60_000,
+    },
+  });
+  const blockedTotal =
+    (blockedCount?.total ?? 0) + (blockedBillsCount?.total ?? 0);
 
   const SidebarContent = () => (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">

@@ -447,9 +447,9 @@ router.post("/transactions/:id/convert-to-bill", async (req, res): Promise<void>
   // payment-leg generator. (No accrual leg fires because the bill never
   // went through approval; finance can manually generate one if needed.)
   // We plumb the originating transaction id so the activity log records
-  // which bank transaction triggered the payment leg; future work will
-  // map tx.bankAccountId to a per-bank cash CoA and pass it as
-  // cashAccountIdOverride.
+  // which bank transaction triggered the payment leg, and the
+  // transaction's CoA cash account (when set) so the credit lands on
+  // the bank-specific account instead of the global default.
   if (req.authUser) {
     const display =
       `${req.authUser.firstName} ${req.authUser.lastName}`.trim() ||
@@ -457,7 +457,10 @@ router.post("/transactions/:id/convert-to-bill", async (req, res): Promise<void>
     await generatePaymentDraftFromBill(
       bill.id,
       { id: req.authUser.id, display },
-      { transactionId: tx.id },
+      {
+        transactionId: tx.id,
+        cashAccountIdOverride: tx.coaAccountId ?? undefined,
+      },
     );
   }
 
@@ -593,7 +596,10 @@ router.post("/transactions/:id/link-bill", async (req, res): Promise<void> => {
     await generatePaymentDraftFromBill(
       billForBridge.id,
       { id: req.authUser.id, display },
-      { transactionId: tx.id },
+      {
+        transactionId: tx.id,
+        cashAccountIdOverride: tx.coaAccountId ?? undefined,
+      },
     );
   }
   res.json(await formatTransaction(updated!));

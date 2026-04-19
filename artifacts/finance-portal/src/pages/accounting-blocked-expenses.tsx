@@ -738,18 +738,29 @@ function BlockedBillsTab() {
   }
 
   async function handleNotApplicable(r: BlockedBillRow) {
-    if (
-      !confirm(
-        `Mark bill #${r.billId} ${r.eventType} as not applicable? It will be excluded from the queue.`,
-      )
-    )
+    // Task #63 — backend requires a justification note (3–500 chars) on
+    // mark-not-applicable so the audit trail records *why* a leg was
+    // suppressed. Collect it here before firing the request.
+    const note = window.prompt(
+      `Mark bill #${r.billId} ${r.eventType} as not applicable.\n\nProvide a justification (3–500 characters) — this is recorded in the audit log.`,
+      "",
+    );
+    if (note === null) return;
+    const trimmed = note.trim();
+    if (trimmed.length < 3 || trimmed.length > 500) {
+      toast({
+        title: "Note required",
+        description: "Justification must be between 3 and 500 characters.",
+        variant: "destructive",
+      });
       return;
+    }
     const key = billRowKey(r);
     setNaBusy(key);
     try {
       await apiJson(`/bills/${r.billId}/mark-accounting-not-applicable`, {
         method: "POST",
-        body: { eventType: r.eventType },
+        body: { eventType: r.eventType, note: trimmed },
       });
       toast({ title: "Marked not applicable" });
     } catch (err) {
