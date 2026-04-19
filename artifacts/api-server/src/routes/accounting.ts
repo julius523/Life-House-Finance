@@ -1889,20 +1889,56 @@ router.get(
       res.status(403).json({ error: "Admins or approvers only" });
       return;
     }
-    const status = typeof req.query["status"] === "string"
-      ? (req.query["status"] as string)
+    const q = req.query;
+    const status = typeof q["status"] === "string" ? (q["status"] as string) : null;
+    const source = typeof q["source"] === "string" ? (q["source"] as string) : null;
+    const from = typeof q["from"] === "string" && /^\d{4}-\d{2}-\d{2}$/.test(q["from"] as string)
+      ? (q["from"] as string)
       : null;
+    const to = typeof q["to"] === "string" && /^\d{4}-\d{2}-\d{2}$/.test(q["to"] as string)
+      ? (q["to"] as string)
+      : null;
+    const limitRaw = Number(q["limit"]);
+    const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 500 ? limitRaw : 100;
+    const offsetRaw = Number(q["offset"]);
+    const offset = Number.isInteger(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+
     const conds = [];
     if (status === "posted" || status === "reversed") {
       conds.push(eq(journalEntriesTable.status, status));
     }
-    const rows = await db
-      .select()
-      .from(journalEntriesTable)
-      .where(conds.length ? and(...conds) : undefined)
-      .orderBy(desc(journalEntriesTable.postedAt))
-      .limit(200);
-    res.json({ entries: rows.map((r) => serializeJournalEntry(r)) });
+    if (source === "copilot") {
+      conds.push(sql`${journalEntriesTable.agentActionId} IS NOT NULL`);
+    } else if (source === "manual") {
+      conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
+    }
+    if (from) {
+      conds.push(sql`${journalEntriesTable.entryDate} >= ${from}`);
+    }
+    if (to) {
+      conds.push(sql`${journalEntriesTable.entryDate} <= ${to}`);
+    }
+    const whereExpr = conds.length ? and(...conds) : undefined;
+
+    const [rows, totalRow] = await Promise.all([
+      db
+        .select()
+        .from(journalEntriesTable)
+        .where(whereExpr)
+        .orderBy(desc(journalEntriesTable.postedAt))
+        .limit(limit)
+        .offset(offset),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(journalEntriesTable)
+        .where(whereExpr),
+    ]);
+    res.json({
+      entries: rows.map((r) => serializeJournalEntry(r)),
+      total: totalRow[0]?.count ?? 0,
+      limit,
+      offset,
+    });
   },
 );
 

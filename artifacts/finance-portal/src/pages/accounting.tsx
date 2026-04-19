@@ -353,12 +353,20 @@ export default function AccountingPage() {
           </p>
         </div>
         {(user?.role === "admin" || user?.role === "approver") && (
-          <Button asChild variant="outline">
-            <Link href="/accounting/journal-entries/new">
-              <BookOpen className="h-4 w-4 mr-1" />
-              New journal entry
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild variant="outline">
+              <Link href="/accounting/journal-entries">
+                <BookOpen className="h-4 w-4 mr-1" />
+                Journal entries
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/accounting/journal-entries/new">
+                <BookOpen className="h-4 w-4 mr-1" />
+                New journal entry
+              </Link>
+            </Button>
+          </div>
         )}
       </div>
 
