@@ -1,0 +1,77 @@
+Here’s the map, all in one place.
+
+Current state
+
+Accounting controls are now real and mostly wired:
+
+Manual JE workflow:
+
+Draft → submit → approve → reject → post is in place server-side and UI-side.
+No-self-approval is enforced server-side.
+Posting reuses the hardened idempotent path.
+Approval history is visible on posted journal entries.
+Optimistic locking on drafts is in place.
+
+Expense → accounting bridge:
+
+Task #51 is done: expense categories and category → CoA mapping foundation exist.
+Task #52 is done: approving an expense auto-creates exactly one accounting draft, not a posted JE.
+It uses the shared accounting_source_links bridge, stable accounting status values, stable block reasons, and deterministic idempotency (expense-draft-<expenseId>).
+
+Traceability:
+
+Task #53 is done: you can pivot between expense, draft, and posted JE.
+JE list has source awareness.
+Expense detail shows accounting status/linking.
+Draft and JE detail show originating expense context.
+
+What is not fully finished yet
+
+The blocked accounting review layer is the remaining open slice in this expense-to-ledger bridge:
+
+Blocked queue page
+Retry flow
+Mark not applicable flow
+Metrics strip
+Nav badge
+Audit trail for retry / not-applicable actions
+
+That’s the Task #54 work currently in progress.
+
+So the clean milestone map is:
+
+Done
+
+#51 Mapping foundation
+#52 Auto-create accounting draft from approved expense
+#53 Two-way traceability
+Manual JE workflow and controls
+
+In progress
+
+#54 Blocked accounting queue
+
+Not started after that
+
+Bills → accounting bridge
+Reporting tie-out and drilldowns
+Copilot reconciliation against the same source-of-truth ledger
+
+Plain-English answer to your earlier integration question
+
+Is accounting copilot and everything on the accounting side integrated with expenses and reporting?
+
+Answer:
+
+With expenses: mostly yes now. Expenses are now connected to accounting through generated JE drafts and traceability, but the blocked-review queue is the last missing operational safety surface.
+With reporting: only partially. Reporting can benefit from the accounting side more now, but full reporting cutover/tie-out/drilldown is still a later phase.
+With bills: no, not yet.
+
+Best next order
+
+Finish #54 completely.
+Then do bills → draft JE bridge using the same accounting_source_links pattern.
+Then tighten reporting so reports/drilldowns read the same posted JE truth.
+Then let copilot work over reconciled accounting + ops data instead of half-connected data.
+
+Blunt version: you are no longer in “accounting features exist but don’t touch operations” territory. You are now in “expenses really do hit the accounting workflow, with one cleanup/control page still missing.” That’s a big jump. The bridge is built; the blocked-lane signage just needs to be finished.
