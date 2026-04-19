@@ -1,6 +1,8 @@
 import {
   useListTransactions,
+  useUpdateTransaction,
   getListTransactionsQueryKey,
+  UpdateTransactionBodyStatus,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Landmark, CheckCircle2 } from "lucide-react";
 import { format } from "date-fns";
 import { useState } from "react";
-import { apiJson } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 type Props = {
@@ -30,6 +31,7 @@ export function LinkedTransactions({ expenseId, billId, enableReconcile }: Props
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [busyId, setBusyId] = useState<number | null>(null);
+  const updateTransaction = useUpdateTransaction();
 
   if (isLoading) return null;
 
@@ -38,9 +40,9 @@ export function LinkedTransactions({ expenseId, billId, enableReconcile }: Props
   const reconcile = async (txId: number) => {
     setBusyId(txId);
     try {
-      await apiJson(`/transactions/${txId}`, {
-        method: "PUT",
-        body: { status: "reconciled" },
+      await updateTransaction.mutateAsync({
+        id: txId,
+        data: { status: UpdateTransactionBodyStatus.reconciled },
       });
       toast({ title: "Transaction reconciled" });
       if (params)

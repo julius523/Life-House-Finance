@@ -883,6 +883,17 @@ export const UpdateVendorResponse = zod.object({
 });
 
 /**
+ * @summary Delete a vendor (admin only)
+ */
+export const DeleteVendorParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DeleteVendorResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
  * @summary List vendor bills
  */
 export const ListBillsQueryParams = zod.object({
@@ -1075,6 +1086,15 @@ export const UpdateBillResponse = zod.object({
   accountingPaymentGeneratedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
+
+/**
+ * @summary Delete a bill (admin only)
+ */
+export const DeleteBillParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DeleteBillResponse = zod.record(zod.string(), zod.unknown());
 
 /**
  * @summary Reject a bill
@@ -2084,6 +2104,17 @@ export const UpdateProgramResponse = zod.object({
   totalSpend: zod.number().optional(),
   percentUsed: zod.number().optional(),
   createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete a program (admin only)
+ */
+export const DeleteProgramParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DeleteProgramResponse = zod.object({
+  ok: zod.boolean(),
 });
 
 /**
@@ -3600,4 +3631,1292 @@ export const MarkNotificationReadResponse = zod.object({
  */
 export const MarkAllNotificationsReadResponse = zod.object({
   ok: zod.boolean(),
+});
+
+/**
+ * @summary Aggregate totals of credits grouped by status
+ */
+export const GetCreditSummaryResponse = zod.object({
+  realized: zod.number(),
+  potential: zod.number(),
+  writeOff: zod.number(),
+  byStatus: zod.array(
+    zod.object({
+      status: zod.enum([
+        "pipeline",
+        "received",
+        "delayed",
+        "write-off",
+        "opportunity",
+      ]),
+      amount: zod.number(),
+      count: zod.number(),
+    }),
+  ),
+});
+
+/**
+ * @summary List credits, optionally filtered by status
+ */
+export const ListCreditsQueryParams = zod.object({
+  status: zod
+    .enum(["pipeline", "received", "delayed", "write-off", "opportunity"])
+    .optional(),
+});
+
+export const ListCreditsResponse = zod.object({
+  credits: zod.array(
+    zod.object({
+      id: zod.number(),
+      source: zod.string(),
+      programId: zod.number().nullable(),
+      programName: zod.string().nullable(),
+      amount: zod.number(),
+      expectedDate: zod.string().nullable(),
+      receivedDate: zod.string().nullable(),
+      status: zod.enum([
+        "pipeline",
+        "received",
+        "delayed",
+        "write-off",
+        "opportunity",
+      ]),
+      notes: zod.string().nullable(),
+      submittedBy: zod.string().nullable(),
+      createdAt: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Create a new credit
+ */
+export const CreateCreditBody = zod.object({
+  source: zod.string(),
+  programId: zod.number().nullish(),
+  amount: zod.number(),
+  expectedDate: zod.string().nullish(),
+  receivedDate: zod.string().nullish(),
+  status: zod
+    .enum(["pipeline", "received", "delayed", "write-off", "opportunity"])
+    .optional(),
+  notes: zod.string().nullish(),
+  submittedBy: zod.string().nullish(),
+});
+
+/**
+ * @summary Update an existing credit
+ */
+export const UpdateCreditParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateCreditBody = zod.object({
+  source: zod.string(),
+  programId: zod.number().nullish(),
+  amount: zod.number(),
+  expectedDate: zod.string().nullish(),
+  receivedDate: zod.string().nullish(),
+  status: zod
+    .enum(["pipeline", "received", "delayed", "write-off", "opportunity"])
+    .optional(),
+  notes: zod.string().nullish(),
+  submittedBy: zod.string().nullish(),
+});
+
+export const UpdateCreditResponse = zod.object({
+  credit: zod.object({
+    id: zod.number(),
+    source: zod.string(),
+    programId: zod.number().nullable(),
+    programName: zod.string().nullable(),
+    amount: zod.number(),
+    expectedDate: zod.string().nullable(),
+    receivedDate: zod.string().nullable(),
+    status: zod.enum([
+      "pipeline",
+      "received",
+      "delayed",
+      "write-off",
+      "opportunity",
+    ]),
+    notes: zod.string().nullable(),
+    submittedBy: zod.string().nullable(),
+    createdAt: zod.string(),
+  }),
+});
+
+/**
+ * @summary Delete a credit
+ */
+export const DeleteCreditParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DeleteCreditResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary List contacts for a vendor
+ */
+export const ListVendorContactsParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ListVendorContactsResponse = zod.object({
+  contacts: zod.array(
+    zod.object({
+      id: zod.number(),
+      vendorId: zod.number().optional(),
+      programId: zod.number().optional(),
+      name: zod.string(),
+      role: zod.string().optional(),
+      email: zod.string().optional(),
+      phone: zod.string().optional(),
+      isPrimary: zod.boolean(),
+      createdAt: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Create a vendor contact
+ */
+export const CreateVendorContactParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const CreateVendorContactBody = zod.object({
+  name: zod.string(),
+  role: zod.string().nullish(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  isPrimary: zod.boolean().optional(),
+});
+
+/**
+ * @summary Update a vendor contact
+ */
+export const UpdateVendorContactParams = zod.object({
+  contactId: zod.coerce.number(),
+});
+
+export const UpdateVendorContactBody = zod.object({
+  name: zod.string(),
+  role: zod.string().nullish(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  isPrimary: zod.boolean().optional(),
+});
+
+export const UpdateVendorContactResponse = zod.object({
+  contact: zod.object({
+    id: zod.number(),
+    vendorId: zod.number().optional(),
+    programId: zod.number().optional(),
+    name: zod.string(),
+    role: zod.string().optional(),
+    email: zod.string().optional(),
+    phone: zod.string().optional(),
+    isPrimary: zod.boolean(),
+    createdAt: zod.string(),
+  }),
+});
+
+/**
+ * @summary Delete a vendor contact
+ */
+export const DeleteVendorContactParams = zod.object({
+  contactId: zod.coerce.number(),
+});
+
+export const DeleteVendorContactResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary List contacts for a program
+ */
+export const ListProgramContactsParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ListProgramContactsResponse = zod.object({
+  contacts: zod.array(
+    zod.object({
+      id: zod.number(),
+      vendorId: zod.number().optional(),
+      programId: zod.number().optional(),
+      name: zod.string(),
+      role: zod.string().optional(),
+      email: zod.string().optional(),
+      phone: zod.string().optional(),
+      isPrimary: zod.boolean(),
+      createdAt: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Create a program contact
+ */
+export const CreateProgramContactParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const CreateProgramContactBody = zod.object({
+  name: zod.string(),
+  role: zod.string().nullish(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  isPrimary: zod.boolean().optional(),
+});
+
+/**
+ * @summary Update a program contact
+ */
+export const UpdateProgramContactParams = zod.object({
+  contactId: zod.coerce.number(),
+});
+
+export const UpdateProgramContactBody = zod.object({
+  name: zod.string(),
+  role: zod.string().nullish(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  isPrimary: zod.boolean().optional(),
+});
+
+export const UpdateProgramContactResponse = zod.object({
+  contact: zod.object({
+    id: zod.number(),
+    vendorId: zod.number().optional(),
+    programId: zod.number().optional(),
+    name: zod.string(),
+    role: zod.string().optional(),
+    email: zod.string().optional(),
+    phone: zod.string().optional(),
+    isPrimary: zod.boolean(),
+    createdAt: zod.string(),
+  }),
+});
+
+/**
+ * @summary Delete a program contact
+ */
+export const DeleteProgramContactParams = zod.object({
+  contactId: zod.coerce.number(),
+});
+
+export const DeleteProgramContactResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary List all users (admin only)
+ */
+export const ListAdminUsersResponse = zod.object({
+  users: zod.array(
+    zod.object({
+      id: zod.number(),
+      email: zod.string(),
+      firstName: zod.string(),
+      lastName: zod.string(),
+      role: zod.enum(["admin", "approver", "submitter"]),
+    }),
+  ),
+});
+
+/**
+ * @summary List the current user's copilot threads
+ */
+export const ListCopilotThreadsResponse = zod.object({
+  threads: zod.array(
+    zod.object({
+      id: zod.number(),
+      title: zod.string().nullish(),
+      createdAt: zod.string(),
+      updatedAt: zod.string(),
+      archivedAt: zod.string().nullish(),
+      messageCount: zod.number().optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Create an empty copilot thread
+ */
+export const CreateCopilotThreadResponse = zod.object({
+  thread: zod.object({
+    id: zod.number(),
+    title: zod.string().nullish(),
+    createdAt: zod.string(),
+    updatedAt: zod.string(),
+    archivedAt: zod.string().nullish(),
+    messageCount: zod.number().optional(),
+  }),
+});
+
+/**
+ * @summary Get a copilot thread with all messages
+ */
+export const GetCopilotThreadParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetCopilotThreadResponse = zod.object({
+  thread: zod.object({
+    id: zod.number(),
+    title: zod.string().nullish(),
+    createdAt: zod.string(),
+    updatedAt: zod.string(),
+    archivedAt: zod.string().nullish(),
+    messageCount: zod.number().optional(),
+  }),
+  messages: zod.array(
+    zod.object({
+      id: zod.number(),
+      threadId: zod.number(),
+      role: zod.enum(["user", "assistant"]),
+      status: zod.string(),
+      userText: zod.string().nullish(),
+      answer: zod.string().nullish(),
+      why: zod.string().nullish(),
+      missingInformation: zod.string().nullish(),
+      riskFlags: zod.string().nullish(),
+      recommendedNextStep: zod.string().nullish(),
+      humanReviewNeeded: zod.boolean().nullish(),
+      confidence: zod.string().nullish(),
+      pageContext: zod.unknown().nullish(),
+      modelName: zod.string().nullish(),
+      latencyMs: zod.number().nullish(),
+      errorCode: zod.string().nullish(),
+      createdAt: zod.string(),
+      toolCalls: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+      sources: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+      agentActions: zod
+        .array(zod.record(zod.string(), zod.unknown()))
+        .optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Rename or archive a copilot thread
+ */
+export const UpdateCopilotThreadParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateCopilotThreadBody = zod.object({
+  title: zod.string().optional(),
+  archived: zod.boolean().optional(),
+});
+
+export const UpdateCopilotThreadResponse = zod.object({
+  thread: zod.object({
+    id: zod.number(),
+    title: zod.string().nullish(),
+    createdAt: zod.string(),
+    updatedAt: zod.string(),
+    archivedAt: zod.string().nullish(),
+    messageCount: zod.number().optional(),
+  }),
+});
+
+/**
+ * @summary Delete a copilot thread and its messages
+ */
+export const DeleteCopilotThreadParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+/**
+ * @summary List agent actions, optionally filtered by status / scope
+ */
+export const ListAgentActionsQueryParams = zod.object({
+  status: zod.coerce.string().optional(),
+  mine: zod.coerce.string().optional(),
+});
+
+export const ListAgentActionsResponse = zod.object({
+  actions: zod.array(
+    zod.object({
+      id: zod.number(),
+      userId: zod.number(),
+      threadId: zod.number(),
+      assistantMessageId: zod.number().nullish(),
+      actionType: zod.string(),
+      payload: zod.record(zod.string(), zod.unknown()).optional(),
+      evidence: zod.record(zod.string(), zod.unknown()).nullish(),
+      confidence: zod.string().nullish(),
+      riskFlags: zod.string().nullish(),
+      status: zod.string(),
+      createdAt: zod.string(),
+      reviewedBy: zod.number().nullish(),
+      reviewedAt: zod.string().nullish(),
+      reviewNotes: zod.string().nullish(),
+      submitter: zod.record(zod.string(), zod.unknown()).nullish(),
+      reviewer: zod.record(zod.string(), zod.unknown()).nullish(),
+      sources: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+    }),
+  ),
+  counts: zod.record(zod.string(), zod.unknown()).optional(),
+});
+
+/**
+ * @summary Approve an agent action
+ */
+export const ApproveAgentActionParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ApproveAgentActionBody = zod.object({
+  notes: zod.string().optional(),
+});
+
+export const ApproveAgentActionResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Reject an agent action
+ */
+export const RejectAgentActionParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const RejectAgentActionBody = zod.object({
+  notes: zod.string().optional(),
+});
+
+export const RejectAgentActionResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Cancel an agent action
+ */
+export const CancelAgentActionParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const CancelAgentActionBody = zod.object({
+  notes: zod.string().optional(),
+});
+
+export const CancelAgentActionResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Post a manual journal entry (admin/approver only)
+ */
+export const CreateJournalEntryHeader = zod.object({
+  "Idempotency-Key": zod.string(),
+});
+
+export const createJournalEntryBodyMemoMax = 2000;
+
+export const createJournalEntryBodyLinesMin = 2;
+export const createJournalEntryBodyLinesMax = 100;
+
+export const CreateJournalEntryBody = zod.object({
+  entryDate: zod.string().describe("YYYY-MM-DD"),
+  memo: zod.string().min(1).max(createJournalEntryBodyMemoMax),
+  lines: zod
+    .array(
+      zod.object({
+        type: zod.enum(["debit", "credit"]),
+        amount: zod.number(),
+        account_code: zod.string(),
+        program: zod.string().nullish(),
+        fund: zod.string().nullish(),
+        memo: zod.string().nullish(),
+      }),
+    )
+    .min(createJournalEntryBodyLinesMin)
+    .max(createJournalEntryBodyLinesMax),
+});
+
+export const CreateJournalEntryResponse = zod.object({
+  journalEntry: zod.object({
+    id: zod.number(),
+    entryNo: zod.string(),
+  }),
+});
+
+/**
+ * @summary List posted journal entries
+ */
+export const ListJournalEntriesQueryParams = zod.object({
+  status: zod.enum(["posted", "reversed"]).optional(),
+  source: zod.enum(["manual", "copilot", "expense"]).optional(),
+  from: zod.coerce.string().optional(),
+  to: zod.coerce.string().optional(),
+  limit: zod.coerce.number().optional(),
+  offset: zod.coerce.number().optional(),
+});
+
+export const ListJournalEntriesResponse = zod.object({
+  entries: zod.array(
+    zod.object({
+      id: zod.number(),
+      entryNo: zod.string(),
+      entryDate: zod.string(),
+      memo: zod.string().optional(),
+      status: zod.enum(["posted", "reversed"]),
+      totalsDebitsCents: zod.number().optional(),
+      totalsCreditsCents: zod.number().optional(),
+      postedAt: zod.string().optional(),
+      postedByUserId: zod.number().optional(),
+      postedBy: zod
+        .object({
+          id: zod.number(),
+          firstName: zod.string().nullish(),
+          lastName: zod.string().nullish(),
+          email: zod.string().nullish(),
+        })
+        .nullish(),
+      agentActionId: zod.number().nullish(),
+      threadId: zod.number().nullish(),
+      assistantMessageId: zod.number().nullish(),
+      approverUserId: zod.number().nullish(),
+      approver: zod
+        .object({
+          id: zod.number(),
+          firstName: zod.string().nullish(),
+          lastName: zod.string().nullish(),
+          email: zod.string().nullish(),
+        })
+        .nullish(),
+      evidenceSnapshot: zod.unknown().nullish(),
+      reversesJournalEntryId: zod.number().nullish(),
+      reversedByJournalEntryId: zod.number().nullish(),
+      reversalReason: zod.string().nullish(),
+      manualDraftId: zod.number().nullish(),
+      createdAt: zod.string().optional(),
+      lines: zod
+        .array(
+          zod.object({
+            id: zod.number(),
+            lineNo: zod.number(),
+            type: zod.enum(["debit", "credit"]),
+            amountCents: zod.number(),
+            account: zod.string(),
+            accountId: zod.number().nullish(),
+            program: zod.string().nullish(),
+            fund: zod.string().nullish(),
+            memo: zod.string().nullish(),
+          }),
+        )
+        .optional(),
+      source: zod.enum(["manual", "copilot", "expense"]).optional(),
+      originatingExpense: zod
+        .object({
+          id: zod.number(),
+          merchant: zod.string(),
+          amount: zod.number().optional(),
+          expenseDate: zod.string().optional(),
+          status: zod.string().optional(),
+          programId: zod.number().nullish(),
+          programName: zod.string().nullish(),
+          submitter: zod
+            .object({
+              name: zod.string().optional(),
+              email: zod.string().nullish(),
+            })
+            .nullish(),
+          approvedAt: zod.string().nullish(),
+        })
+        .nullish(),
+    }),
+  ),
+  total: zod.number(),
+  limit: zod.number().optional(),
+  offset: zod.number().optional(),
+});
+
+/**
+ * @summary Get a single journal entry with lines
+ */
+export const GetJournalEntryParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetJournalEntryResponse = zod.object({
+  journalEntry: zod.object({
+    id: zod.number(),
+    entryNo: zod.string(),
+    entryDate: zod.string(),
+    memo: zod.string().optional(),
+    status: zod.enum(["posted", "reversed"]),
+    totalsDebitsCents: zod.number().optional(),
+    totalsCreditsCents: zod.number().optional(),
+    postedAt: zod.string().optional(),
+    postedByUserId: zod.number().optional(),
+    postedBy: zod
+      .object({
+        id: zod.number(),
+        firstName: zod.string().nullish(),
+        lastName: zod.string().nullish(),
+        email: zod.string().nullish(),
+      })
+      .nullish(),
+    agentActionId: zod.number().nullish(),
+    threadId: zod.number().nullish(),
+    assistantMessageId: zod.number().nullish(),
+    approverUserId: zod.number().nullish(),
+    approver: zod
+      .object({
+        id: zod.number(),
+        firstName: zod.string().nullish(),
+        lastName: zod.string().nullish(),
+        email: zod.string().nullish(),
+      })
+      .nullish(),
+    evidenceSnapshot: zod.unknown().nullish(),
+    reversesJournalEntryId: zod.number().nullish(),
+    reversedByJournalEntryId: zod.number().nullish(),
+    reversalReason: zod.string().nullish(),
+    manualDraftId: zod.number().nullish(),
+    createdAt: zod.string().optional(),
+    lines: zod
+      .array(
+        zod.object({
+          id: zod.number(),
+          lineNo: zod.number(),
+          type: zod.enum(["debit", "credit"]),
+          amountCents: zod.number(),
+          account: zod.string(),
+          accountId: zod.number().nullish(),
+          program: zod.string().nullish(),
+          fund: zod.string().nullish(),
+          memo: zod.string().nullish(),
+        }),
+      )
+      .optional(),
+    source: zod.enum(["manual", "copilot", "expense"]).optional(),
+    originatingExpense: zod
+      .object({
+        id: zod.number(),
+        merchant: zod.string(),
+        amount: zod.number().optional(),
+        expenseDate: zod.string().optional(),
+        status: zod.string().optional(),
+        programId: zod.number().nullish(),
+        programName: zod.string().nullish(),
+        submitter: zod
+          .object({
+            name: zod.string().optional(),
+            email: zod.string().nullish(),
+          })
+          .nullish(),
+        approvedAt: zod.string().nullish(),
+      })
+      .nullish(),
+  }),
+});
+
+/**
+ * @summary Get the approval-chain history of a posted JE
+ */
+export const GetJournalEntryApprovalHistoryParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetJournalEntryApprovalHistoryResponse = zod.object({
+  manualDraftId: zod.number().nullish(),
+  events: zod.array(
+    zod.object({
+      id: zod.number(),
+      type: zod.string(),
+      description: zod.string().optional(),
+      actor: zod.string().nullish(),
+      actorUserId: zod.number().nullish(),
+      actorEmail: zod.string().nullish(),
+      actorFirstName: zod.string().nullish(),
+      actorLastName: zod.string().nullish(),
+      metadata: zod.unknown().nullish(),
+      createdAt: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary List manual journal-entry drafts
+ */
+export const ListJournalEntryDraftsQueryParams = zod.object({
+  scope: zod.enum(["mine", "all"]).optional(),
+  statuses: zod.coerce.string().optional(),
+  entryDateFrom: zod.coerce.string().optional(),
+  entryDateTo: zod.coerce.string().optional(),
+});
+
+export const ListJournalEntryDraftsResponse = zod.object({
+  drafts: zod.array(
+    zod
+      .object({
+        id: zod.number(),
+        createdByUserId: zod.number(),
+        entryDate: zod.string().nullish(),
+        memo: zod.string().nullish(),
+        payload: zod
+          .object({
+            entryDate: zod.string().optional(),
+            memo: zod.string().optional(),
+            lines: zod.array(
+              zod.object({
+                uid: zod.number().optional(),
+                type: zod.enum(["debit", "credit"]),
+                accountCode: zod.string().optional(),
+                amount: zod.string().optional(),
+                program: zod.string().optional(),
+                fund: zod.string().optional(),
+                memo: zod.string().optional(),
+              }),
+            ),
+          })
+          .optional(),
+        status: zod.enum([
+          "draft",
+          "submitted",
+          "approved",
+          "rejected",
+          "posted",
+        ]),
+        submittedByUserId: zod.number().nullish(),
+        submittedAt: zod.string().nullish(),
+        approvedByUserId: zod.number().nullish(),
+        approvedAt: zod.string().nullish(),
+        rejectedByUserId: zod.number().nullish(),
+        rejectedAt: zod.string().nullish(),
+        rejectionReason: zod.string().nullish(),
+        postedJournalEntryId: zod.number().nullish(),
+        version: zod.number(),
+        createdAt: zod.string().optional(),
+        updatedAt: zod.string().optional(),
+        originatingExpense: zod
+          .object({
+            id: zod.number(),
+            merchant: zod.string(),
+            amount: zod.number().optional(),
+            expenseDate: zod.string().optional(),
+            status: zod.string().optional(),
+            programId: zod.number().nullish(),
+            programName: zod.string().nullish(),
+            submitter: zod
+              .object({
+                name: zod.string().optional(),
+                email: zod.string().nullish(),
+              })
+              .nullish(),
+            approvedAt: zod.string().nullish(),
+          })
+          .nullish(),
+      })
+      .and(
+        zod.object({
+          createdBy: zod
+            .object({
+              id: zod.number().optional(),
+              email: zod.string().nullish(),
+              firstName: zod.string().nullish(),
+              lastName: zod.string().nullish(),
+            })
+            .optional(),
+        }),
+      ),
+  ),
+});
+
+/**
+ * @summary Create a new manual JE draft
+ */
+export const CreateJournalEntryDraftBody = zod.object({
+  payload: zod.object({
+    entryDate: zod.string().optional(),
+    memo: zod.string().optional(),
+    lines: zod.array(
+      zod.object({
+        uid: zod.number().optional(),
+        type: zod.enum(["debit", "credit"]),
+        accountCode: zod.string().optional(),
+        amount: zod.string().optional(),
+        program: zod.string().optional(),
+        fund: zod.string().optional(),
+        memo: zod.string().optional(),
+      }),
+    ),
+  }),
+});
+
+/**
+ * @summary Get a single manual JE draft
+ */
+export const GetJournalEntryDraftParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetJournalEntryDraftResponse = zod.object({
+  draft: zod.object({
+    id: zod.number(),
+    createdByUserId: zod.number(),
+    entryDate: zod.string().nullish(),
+    memo: zod.string().nullish(),
+    payload: zod
+      .object({
+        entryDate: zod.string().optional(),
+        memo: zod.string().optional(),
+        lines: zod.array(
+          zod.object({
+            uid: zod.number().optional(),
+            type: zod.enum(["debit", "credit"]),
+            accountCode: zod.string().optional(),
+            amount: zod.string().optional(),
+            program: zod.string().optional(),
+            fund: zod.string().optional(),
+            memo: zod.string().optional(),
+          }),
+        ),
+      })
+      .optional(),
+    status: zod.enum(["draft", "submitted", "approved", "rejected", "posted"]),
+    submittedByUserId: zod.number().nullish(),
+    submittedAt: zod.string().nullish(),
+    approvedByUserId: zod.number().nullish(),
+    approvedAt: zod.string().nullish(),
+    rejectedByUserId: zod.number().nullish(),
+    rejectedAt: zod.string().nullish(),
+    rejectionReason: zod.string().nullish(),
+    postedJournalEntryId: zod.number().nullish(),
+    version: zod.number(),
+    createdAt: zod.string().optional(),
+    updatedAt: zod.string().optional(),
+    originatingExpense: zod
+      .object({
+        id: zod.number(),
+        merchant: zod.string(),
+        amount: zod.number().optional(),
+        expenseDate: zod.string().optional(),
+        status: zod.string().optional(),
+        programId: zod.number().nullish(),
+        programName: zod.string().nullish(),
+        submitter: zod
+          .object({
+            name: zod.string().optional(),
+            email: zod.string().nullish(),
+          })
+          .nullish(),
+        approvedAt: zod.string().nullish(),
+      })
+      .nullish(),
+  }),
+});
+
+/**
+ * @summary Update a manual JE draft
+ */
+export const UpdateJournalEntryDraftParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateJournalEntryDraftBody = zod.object({
+  payload: zod.object({
+    entryDate: zod.string().optional(),
+    memo: zod.string().optional(),
+    lines: zod.array(
+      zod.object({
+        uid: zod.number().optional(),
+        type: zod.enum(["debit", "credit"]),
+        accountCode: zod.string().optional(),
+        amount: zod.string().optional(),
+        program: zod.string().optional(),
+        fund: zod.string().optional(),
+        memo: zod.string().optional(),
+      }),
+    ),
+  }),
+  expectedVersion: zod.number(),
+});
+
+export const UpdateJournalEntryDraftResponse = zod.object({
+  draft: zod.object({
+    id: zod.number(),
+    createdByUserId: zod.number(),
+    entryDate: zod.string().nullish(),
+    memo: zod.string().nullish(),
+    payload: zod
+      .object({
+        entryDate: zod.string().optional(),
+        memo: zod.string().optional(),
+        lines: zod.array(
+          zod.object({
+            uid: zod.number().optional(),
+            type: zod.enum(["debit", "credit"]),
+            accountCode: zod.string().optional(),
+            amount: zod.string().optional(),
+            program: zod.string().optional(),
+            fund: zod.string().optional(),
+            memo: zod.string().optional(),
+          }),
+        ),
+      })
+      .optional(),
+    status: zod.enum(["draft", "submitted", "approved", "rejected", "posted"]),
+    submittedByUserId: zod.number().nullish(),
+    submittedAt: zod.string().nullish(),
+    approvedByUserId: zod.number().nullish(),
+    approvedAt: zod.string().nullish(),
+    rejectedByUserId: zod.number().nullish(),
+    rejectedAt: zod.string().nullish(),
+    rejectionReason: zod.string().nullish(),
+    postedJournalEntryId: zod.number().nullish(),
+    version: zod.number(),
+    createdAt: zod.string().optional(),
+    updatedAt: zod.string().optional(),
+    originatingExpense: zod
+      .object({
+        id: zod.number(),
+        merchant: zod.string(),
+        amount: zod.number().optional(),
+        expenseDate: zod.string().optional(),
+        status: zod.string().optional(),
+        programId: zod.number().nullish(),
+        programName: zod.string().nullish(),
+        submitter: zod
+          .object({
+            name: zod.string().optional(),
+            email: zod.string().nullish(),
+          })
+          .nullish(),
+        approvedAt: zod.string().nullish(),
+      })
+      .nullish(),
+  }),
+});
+
+/**
+ * @summary Discard a manual JE draft (only when status=draft|rejected)
+ */
+export const DeleteJournalEntryDraftParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DeleteJournalEntryDraftQueryParams = zod.object({
+  expectedVersion: zod.coerce.number(),
+});
+
+/**
+ * @summary Submit a draft for approval
+ */
+export const SubmitJournalEntryDraftParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const SubmitJournalEntryDraftBody = zod.object({
+  expectedVersion: zod.number(),
+  reason: zod.string().optional(),
+});
+
+export const SubmitJournalEntryDraftResponse = zod.object({
+  draft: zod.object({
+    id: zod.number(),
+    createdByUserId: zod.number(),
+    entryDate: zod.string().nullish(),
+    memo: zod.string().nullish(),
+    payload: zod
+      .object({
+        entryDate: zod.string().optional(),
+        memo: zod.string().optional(),
+        lines: zod.array(
+          zod.object({
+            uid: zod.number().optional(),
+            type: zod.enum(["debit", "credit"]),
+            accountCode: zod.string().optional(),
+            amount: zod.string().optional(),
+            program: zod.string().optional(),
+            fund: zod.string().optional(),
+            memo: zod.string().optional(),
+          }),
+        ),
+      })
+      .optional(),
+    status: zod.enum(["draft", "submitted", "approved", "rejected", "posted"]),
+    submittedByUserId: zod.number().nullish(),
+    submittedAt: zod.string().nullish(),
+    approvedByUserId: zod.number().nullish(),
+    approvedAt: zod.string().nullish(),
+    rejectedByUserId: zod.number().nullish(),
+    rejectedAt: zod.string().nullish(),
+    rejectionReason: zod.string().nullish(),
+    postedJournalEntryId: zod.number().nullish(),
+    version: zod.number(),
+    createdAt: zod.string().optional(),
+    updatedAt: zod.string().optional(),
+    originatingExpense: zod
+      .object({
+        id: zod.number(),
+        merchant: zod.string(),
+        amount: zod.number().optional(),
+        expenseDate: zod.string().optional(),
+        status: zod.string().optional(),
+        programId: zod.number().nullish(),
+        programName: zod.string().nullish(),
+        submitter: zod
+          .object({
+            name: zod.string().optional(),
+            email: zod.string().nullish(),
+          })
+          .nullish(),
+        approvedAt: zod.string().nullish(),
+      })
+      .nullish(),
+  }),
+  journalEntry: zod
+    .object({
+      id: zod.number().optional(),
+      entryNo: zod.string().optional(),
+    })
+    .optional(),
+});
+
+/**
+ * @summary Approve a submitted draft
+ */
+export const ApproveJournalEntryDraftParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ApproveJournalEntryDraftBody = zod.object({
+  expectedVersion: zod.number(),
+  reason: zod.string().optional(),
+});
+
+export const ApproveJournalEntryDraftResponse = zod.object({
+  draft: zod.object({
+    id: zod.number(),
+    createdByUserId: zod.number(),
+    entryDate: zod.string().nullish(),
+    memo: zod.string().nullish(),
+    payload: zod
+      .object({
+        entryDate: zod.string().optional(),
+        memo: zod.string().optional(),
+        lines: zod.array(
+          zod.object({
+            uid: zod.number().optional(),
+            type: zod.enum(["debit", "credit"]),
+            accountCode: zod.string().optional(),
+            amount: zod.string().optional(),
+            program: zod.string().optional(),
+            fund: zod.string().optional(),
+            memo: zod.string().optional(),
+          }),
+        ),
+      })
+      .optional(),
+    status: zod.enum(["draft", "submitted", "approved", "rejected", "posted"]),
+    submittedByUserId: zod.number().nullish(),
+    submittedAt: zod.string().nullish(),
+    approvedByUserId: zod.number().nullish(),
+    approvedAt: zod.string().nullish(),
+    rejectedByUserId: zod.number().nullish(),
+    rejectedAt: zod.string().nullish(),
+    rejectionReason: zod.string().nullish(),
+    postedJournalEntryId: zod.number().nullish(),
+    version: zod.number(),
+    createdAt: zod.string().optional(),
+    updatedAt: zod.string().optional(),
+    originatingExpense: zod
+      .object({
+        id: zod.number(),
+        merchant: zod.string(),
+        amount: zod.number().optional(),
+        expenseDate: zod.string().optional(),
+        status: zod.string().optional(),
+        programId: zod.number().nullish(),
+        programName: zod.string().nullish(),
+        submitter: zod
+          .object({
+            name: zod.string().optional(),
+            email: zod.string().nullish(),
+          })
+          .nullish(),
+        approvedAt: zod.string().nullish(),
+      })
+      .nullish(),
+  }),
+  journalEntry: zod
+    .object({
+      id: zod.number().optional(),
+      entryNo: zod.string().optional(),
+    })
+    .optional(),
+});
+
+/**
+ * @summary Reject a submitted draft
+ */
+export const RejectJournalEntryDraftParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const RejectJournalEntryDraftBody = zod
+  .object({
+    expectedVersion: zod.number(),
+    reason: zod.string().optional(),
+  })
+  .and(
+    zod.object({
+      reason: zod.string().optional(),
+    }),
+  );
+
+export const RejectJournalEntryDraftResponse = zod.object({
+  draft: zod.object({
+    id: zod.number(),
+    createdByUserId: zod.number(),
+    entryDate: zod.string().nullish(),
+    memo: zod.string().nullish(),
+    payload: zod
+      .object({
+        entryDate: zod.string().optional(),
+        memo: zod.string().optional(),
+        lines: zod.array(
+          zod.object({
+            uid: zod.number().optional(),
+            type: zod.enum(["debit", "credit"]),
+            accountCode: zod.string().optional(),
+            amount: zod.string().optional(),
+            program: zod.string().optional(),
+            fund: zod.string().optional(),
+            memo: zod.string().optional(),
+          }),
+        ),
+      })
+      .optional(),
+    status: zod.enum(["draft", "submitted", "approved", "rejected", "posted"]),
+    submittedByUserId: zod.number().nullish(),
+    submittedAt: zod.string().nullish(),
+    approvedByUserId: zod.number().nullish(),
+    approvedAt: zod.string().nullish(),
+    rejectedByUserId: zod.number().nullish(),
+    rejectedAt: zod.string().nullish(),
+    rejectionReason: zod.string().nullish(),
+    postedJournalEntryId: zod.number().nullish(),
+    version: zod.number(),
+    createdAt: zod.string().optional(),
+    updatedAt: zod.string().optional(),
+    originatingExpense: zod
+      .object({
+        id: zod.number(),
+        merchant: zod.string(),
+        amount: zod.number().optional(),
+        expenseDate: zod.string().optional(),
+        status: zod.string().optional(),
+        programId: zod.number().nullish(),
+        programName: zod.string().nullish(),
+        submitter: zod
+          .object({
+            name: zod.string().optional(),
+            email: zod.string().nullish(),
+          })
+          .nullish(),
+        approvedAt: zod.string().nullish(),
+      })
+      .nullish(),
+  }),
+  journalEntry: zod
+    .object({
+      id: zod.number().optional(),
+      entryNo: zod.string().optional(),
+    })
+    .optional(),
+});
+
+/**
+ * @summary Post an approved draft to the ledger
+ */
+export const PostJournalEntryDraftParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const PostJournalEntryDraftBody = zod.object({
+  expectedVersion: zod.number(),
+  reason: zod.string().optional(),
+});
+
+export const PostJournalEntryDraftResponse = zod.object({
+  draft: zod.object({
+    id: zod.number(),
+    createdByUserId: zod.number(),
+    entryDate: zod.string().nullish(),
+    memo: zod.string().nullish(),
+    payload: zod
+      .object({
+        entryDate: zod.string().optional(),
+        memo: zod.string().optional(),
+        lines: zod.array(
+          zod.object({
+            uid: zod.number().optional(),
+            type: zod.enum(["debit", "credit"]),
+            accountCode: zod.string().optional(),
+            amount: zod.string().optional(),
+            program: zod.string().optional(),
+            fund: zod.string().optional(),
+            memo: zod.string().optional(),
+          }),
+        ),
+      })
+      .optional(),
+    status: zod.enum(["draft", "submitted", "approved", "rejected", "posted"]),
+    submittedByUserId: zod.number().nullish(),
+    submittedAt: zod.string().nullish(),
+    approvedByUserId: zod.number().nullish(),
+    approvedAt: zod.string().nullish(),
+    rejectedByUserId: zod.number().nullish(),
+    rejectedAt: zod.string().nullish(),
+    rejectionReason: zod.string().nullish(),
+    postedJournalEntryId: zod.number().nullish(),
+    version: zod.number(),
+    createdAt: zod.string().optional(),
+    updatedAt: zod.string().optional(),
+    originatingExpense: zod
+      .object({
+        id: zod.number(),
+        merchant: zod.string(),
+        amount: zod.number().optional(),
+        expenseDate: zod.string().optional(),
+        status: zod.string().optional(),
+        programId: zod.number().nullish(),
+        programName: zod.string().nullish(),
+        submitter: zod
+          .object({
+            name: zod.string().optional(),
+            email: zod.string().nullish(),
+          })
+          .nullish(),
+        approvedAt: zod.string().nullish(),
+      })
+      .nullish(),
+  }),
+  journalEntry: zod
+    .object({
+      id: zod.number().optional(),
+      entryNo: zod.string().optional(),
+    })
+    .optional(),
+});
+
+/**
+ * @summary Admin-only health check against the LLM provider
+ */
+export const PingAccountingDiagnosticsResponse = zod.object({
+  status: zod.string(),
+  detail: zod.string(),
 });

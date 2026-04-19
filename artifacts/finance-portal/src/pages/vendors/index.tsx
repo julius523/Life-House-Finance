@@ -3,6 +3,7 @@ import {
   useListVendors,
   useCreateVendor,
   useUpdateVendor,
+  useDeleteVendor,
   getListVendorsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -31,7 +32,6 @@ import { useToast } from "@/hooks/use-toast";
 import { Empty } from "@/components/ui/empty";
 import { Badge } from "@/components/ui/badge";
 import { ContactList } from "@/components/contact-list";
-import { apiJson } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 const formSchema = z.object({
@@ -83,6 +83,8 @@ export default function VendorsList() {
       paymentTerms: "Net 30",
     },
   });
+
+  const deleteVendor = useDeleteVendor();
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     try {
@@ -337,7 +339,7 @@ export default function VendorsList() {
                                 onClick={async () => {
                                   if (!confirm(`Delete vendor "${vendor.name}"?`)) return;
                                   try {
-                                    await apiJson(`/vendors/${vendor.id}`, { method: "DELETE" });
+                                    await deleteVendor.mutateAsync({ id: vendor.id });
                                     toast({ title: "Vendor deleted" });
                                     queryClient.invalidateQueries({ queryKey: getListVendorsQueryKey() });
                                   } catch (e) {

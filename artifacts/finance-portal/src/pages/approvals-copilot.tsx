@@ -1,12 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { apiJson } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import {
+  useListAgentActions,
+  useApproveAgentAction,
+  useRejectAgentAction,
+  useCancelAgentAction,
+  type AgentActionDecisionBody,
+} from "@workspace/api-client-react";
 import { format } from "date-fns";
 
 type AgentAction = {
@@ -162,34 +168,23 @@ export default function CopilotApprovalsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [status, setStatus] = useState<StatusFilter>("pending_review");
-  const [actions, setActions] = useState<AgentAction[] | null>(null);
-  const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [rejectNotes, setRejectNotes] = useState<Record<number, string>>({});
 
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await apiJson<{ actions: AgentAction[] }>(
-        `/accounting/agent-actions?status=${status}`,
-      );
-      setActions(data.actions ?? []);
-    } catch (e) {
-      toast({
-        title: "Could not load drafts",
-        description: e instanceof Error ? e.message : "Unknown error",
-        variant: "destructive",
-      });
-      setActions([]);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const {
+    data: actionsData,
+    isLoading: loading,
+    refetch,
+    isError,
+  } = useListAgentActions({ status });
+  const actions = isError
+    ? []
+    : (((actionsData as { actions?: AgentAction[] } | undefined)?.actions ??
+        null) as AgentAction[] | null);
 
-  useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+  const approveMut = useApproveAgentAction();
+  const rejectMut = useRejectAgentAction();
+  const cancelMut = useCancelAgentAction();
 
   async function decide(
     id: number,
@@ -198,12 +193,16 @@ export default function CopilotApprovalsPage() {
   ) {
     setBusyId(id);
     try {
-      await apiJson(`/accounting/agent-actions/${id}/${decision}`, {
-        method: "POST",
-        body: notes ? { notes } : {},
-      });
+      const data: AgentActionDecisionBody = notes ? { notes } : {};
+      if (decision === "approve") {
+        await approveMut.mutateAsync({ id, data });
+      } else if (decision === "reject") {
+        await rejectMut.mutateAsync({ id, data });
+      } else {
+        await cancelMut.mutateAsync({ id, data });
+      }
       toast({ title: `Draft ${decision}d` });
-      await load();
+      await refetch();
     } catch (e) {
       toast({
         title: `Could not ${decision} draft`,

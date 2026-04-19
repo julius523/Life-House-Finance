@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   useGetDashboardSummary,
   useGetSpendingByProgram,
@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { apiJson } from "@/lib/api";
+import { useGetCreditSummary } from "@workspace/api-client-react";
 import { CREDIT_STATUSES, STATUS_LABEL, STATUS_COLOR, type CreditStatus } from "@/pages/credits";
 import { TrendingUp } from "lucide-react";
 import {
@@ -342,13 +342,6 @@ function FullDashboard() {
   );
 }
 
-type CreditSummary = {
-  realized: number;
-  potential: number;
-  writeOff: number;
-  byStatus: { status: CreditStatus; amount: number; count: number }[];
-};
-
 function AccountingStatusCard() {
   const { data: status, isLoading: loading, error } =
     useGetAccountingDashboardStatus();
@@ -455,26 +448,8 @@ function AccountingStatusCard() {
 }
 
 function CreditsDonut() {
-  const [data, setData] = useState<CreditSummary | null>(null);
   const [filter, setFilter] = useState<CreditStatus | "all">("all");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const summary = await apiJson<CreditSummary>(`/credit-summary`);
-        if (!cancelled) setData(summary);
-      } catch {
-        // ignore — user may not have access
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data, isLoading: loading } = useGetCreditSummary();
 
   if (loading) return <Skeleton className="h-64 w-full" />;
   if (!data) return null;

@@ -29,10 +29,16 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { apiJson } from "@/lib/api";
 import {
+  createJournalEntry,
+  createJournalEntryDraft,
+  deleteJournalEntryDraft,
+  getJournalEntryDraft,
+  updateJournalEntryDraft,
   useListChartOfAccounts,
   type ChartOfAccount,
+  type JournalEntryDraftPayload,
+  type ManualJournalEntryBody,
 } from "@workspace/api-client-react";
 import { ArrowLeft, BookOpen, Plus, Save, Trash2 } from "lucide-react";
 
@@ -74,11 +80,7 @@ function parseAmountToCents(input: string): number | null {
   return Math.round(num * 100);
 }
 
-type DraftPayload = {
-  entryDate: string;
-  memo: string;
-  lines: Array<Omit<LineDraft, "uid"> & { uid?: number }>;
-};
+type DraftPayload = JournalEntryDraftPayload;
 
 type DraftRecord = {
   id: number;
@@ -191,18 +193,20 @@ export default function JournalEntriesNewPage() {
     let cancelled = false;
     setDraftLoading(true);
     setDraftLoadError(null);
-    apiJson<{ draft: DraftRecord }>(
-      `/accounting/journal-entry-drafts/${draftIdParam}`,
-    )
+    getJournalEntryDraft(draftIdParam)
       .then(({ draft }) => {
         if (cancelled) return;
         setDraftId(draft.id);
         setDraftVersion(draft.version);
-        setLastSavedAt(draft.updatedAt);
+        setLastSavedAt(draft.updatedAt ?? null);
         // Reset baseline so the auto-save effect doesn't immediately
         // re-PATCH the freshly-loaded draft.
         lastSavedPayloadRef.current = null;
-        const p = draft.payload ?? { entryDate: "", memo: "", lines: [] };
+        const p: DraftPayload = draft.payload ?? {
+          entryDate: "",
+          memo: "",
+          lines: [],
+        };
         // Restore exactly what was saved — including blank values — so
         // a paused, partially-filled entry reopens identically.
         setEntryDate(p.entryDate ?? "");
@@ -339,28 +343,22 @@ export default function JournalEntriesNewPage() {
     try {
       const payload = buildDraftPayload();
       if (draftId !== null) {
-        const data = await apiJson<{ draft: DraftRecord }>(
-          `/accounting/journal-entry-drafts/${draftId}`,
-          {
-            method: "PATCH",
-            body: {
-              payload,
-              ...(draftVersion !== null
-                ? { expectedVersion: draftVersion }
-                : {}),
-            },
-          },
-        );
+        if (draftVersion === null) {
+          throw new Error("Missing draft version for update");
+        }
+        const data = await updateJournalEntryDraft(draftId, {
+          payload,
+          expectedVersion: draftVersion,
+        });
         setDraftVersion(data.draft.version);
-        setLastSavedAt(data.draft.updatedAt);
+        setLastSavedAt(data.draft.updatedAt ?? null);
       } else {
-        const data = await apiJson<{ draft: DraftRecord }>(
-          "/accounting/journal-entry-drafts",
-          { method: "POST", body: { payload } },
-        );
+        const data = await createJournalEntryDraft({
+          payload,
+        });
         setDraftId(data.draft.id);
         setDraftVersion(data.draft.version);
-        setLastSavedAt(data.draft.updatedAt);
+        setLastSavedAt(data.draft.updatedAt ?? null);
         // Reflect the new draft id in the URL so a refresh resumes correctly.
         setLocation(
           `/accounting/journal-entries/new?draft=${data.draft.id}`,
@@ -423,22 +421,15 @@ export default function JournalEntriesNewPage() {
       const payload = buildDraftPayload();
       const serialized = JSON.stringify(payload);
       if (draftId !== null) {
-        const data = await apiJson<{ draft: DraftRecord }>(
-          `/accounting/journal-entry-drafts/${draftId}`,
-          {
-            method: "PATCH",
-            body: {
-              payload,
-              // Task #44 — echo last-seen version so the server can reject
-              // a save that would clobber another reviewer's edit.
-              ...(draftVersion !== null
-                ? { expectedVersion: draftVersion }
-                : {}),
-            },
-          },
-        );
+        if (draftVersion === null) {
+          throw new Error("Missing draft version for save");
+        }
+        const data = await updateJournalEntryDraft(draftId, {
+          payload,
+          expectedVersion: draftVersion,
+        });
         setDraftVersion(data.draft.version);
-        setLastSavedAt(data.draft.updatedAt);
+        setLastSavedAt(data.draft.updatedAt ?? null);
         lastSavedPayloadRef.current = serialized;
         setAutoSaveError(null);
         toast({
@@ -446,13 +437,12 @@ export default function JournalEntriesNewPage() {
           description: "Your changes are stored.",
         });
       } else {
-        const data = await apiJson<{ draft: DraftRecord }>(
-          "/accounting/journal-entry-drafts",
-          { method: "POST", body: { payload } },
-        );
+        const data = await createJournalEntryDraft({
+          payload,
+        });
         setDraftId(data.draft.id);
         setDraftVersion(data.draft.version);
-        setLastSavedAt(data.draft.updatedAt);
+        setLastSavedAt(data.draft.updatedAt ?? null);
         lastSavedPayloadRef.current = serialized;
         setAutoSaveError(null);
         // Reflect the draft id in the URL so a refresh resumes correctly.
@@ -485,12 +475,12 @@ export default function JournalEntriesNewPage() {
     }
     setDiscardingDraft(true);
     try {
-      // Task #44 — version goes on the query string for DELETE.
-      const path =
-        draftVersion !== null
-          ? `/accounting/journal-entry-drafts/${draftId}?expectedVersion=${draftVersion}`
-          : `/accounting/journal-entry-drafts/${draftId}`;
-      await apiJson<null>(path, { method: "DELETE" });
+      if (draftVersion === null) {
+        throw new Error("Missing draft version for discard");
+      }
+      await deleteJournalEntryDraft(draftId, {
+        expectedVersion: draftVersion,
+      });
       toast({ title: "Draft discarded" });
       setLocation("/accounting/journal-entries");
     } catch (e) {
@@ -524,24 +514,24 @@ export default function JournalEntriesNewPage() {
           memo: l.memo.trim() || null,
         })),
       };
-      const data = await apiJson<{
-        journalEntry: { id: number; entryNo: string };
-      }>("/accounting/journal-entries", {
-        method: "POST",
-        body: payload,
-      });
+      const idempotencyKey =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+      const data = await createJournalEntry(
+        payload satisfies ManualJournalEntryBody,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      );
       // Clean up the draft (if any) now that the entry is posted.
       // Task #44 — pass the last-seen version so a concurrent edit on the
       // draft row is respected (server returns 409 instead of silently
       // wiping a newer revision). Failure here is non-fatal because the
       // ledger post itself already succeeded.
-      if (draftId !== null) {
+      if (draftId !== null && draftVersion !== null) {
         try {
-          const cleanupPath =
-            draftVersion !== null
-              ? `/accounting/journal-entry-drafts/${draftId}?expectedVersion=${draftVersion}`
-              : `/accounting/journal-entry-drafts/${draftId}`;
-          await apiJson<null>(cleanupPath, { method: "DELETE" });
+          await deleteJournalEntryDraft(draftId, {
+            expectedVersion: draftVersion,
+          });
         } catch {
           // Non-fatal: the post succeeded; a stale draft can be removed
           // from the drafts list.

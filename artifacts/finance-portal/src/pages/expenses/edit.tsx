@@ -8,8 +8,8 @@ import {
   getGetExpenseQueryKey,
   getListExpensesQueryKey,
 } from "@workspace/api-client-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiJson } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
+import { useListExpenseCategories } from "@workspace/api-client-react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
@@ -90,13 +90,7 @@ export default function ExpenseEdit() {
   });
   const { data: programs, isLoading: programsLoading } = useListPrograms();
   // Task #51 — load categories so submitters/admins can change classification.
-  const categoriesQuery = useQuery({
-    queryKey: ["expense-categories", { active: true }],
-    queryFn: () =>
-      apiJson<{ categories: ExpenseCategoryOption[] }>(
-        `/accounting/expense-categories`,
-      ),
-  });
+  const categoriesQuery = useListExpenseCategories();
   const categories = categoriesQuery.data?.categories ?? [];
   const updateExpense = useUpdateExpense();
   const deleteExpense = useDeleteExpense();

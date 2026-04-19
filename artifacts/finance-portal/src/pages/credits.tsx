@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,10 +21,18 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { TrendingUp, Plus, Pencil, Trash2 } from "lucide-react";
-import { apiJson } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Empty } from "@/components/ui/empty";
-import { useListPrograms } from "@workspace/api-client-react";
+import {
+  useListPrograms,
+  useListCredits,
+  useCreateCredit,
+  useUpdateCredit,
+  useDeleteCredit,
+  getListCreditsQueryKey,
+  type CreateCreditBody,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 
 export const CREDIT_STATUSES = [
   "pipeline",
@@ -65,12 +73,6 @@ export type Credit = {
   createdAt: string;
 };
 
-export async function listCredits(status?: CreditStatus | "all"): Promise<Credit[]> {
-  const qs = status && status !== "all" ? `?status=${status}` : "";
-  const data = await apiJson<{ credits: Credit[] }>(`/credits${qs}`);
-  return data.credits;
-}
-
 const fmtMoney = (n: number) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -81,36 +83,25 @@ const fmtMoney = (n: number) =>
 export default function CreditsPage() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const [credits, setCredits] = useState<Credit[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<CreditStatus | "all">("all");
   const [editing, setEditing] = useState<Credit | null>(null);
   const [creating, setCreating] = useState(false);
 
-  const refresh = async () => {
-    try {
-      setLoading(true);
-      setCredits(await listCredits(statusFilter));
-    } catch (e) {
-      toast({
-        title: "Could not load credits",
-        description: e instanceof Error ? e.message : undefined,
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  const params = statusFilter !== "all" ? { status: statusFilter } : undefined;
+  const { data: creditsData, isLoading: loading } = useListCredits(params);
+  const credits = (creditsData?.credits ?? []) as Credit[];
 
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
+  const deleteCreditMut = useDeleteCredit();
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: getListCreditsQueryKey(params) });
+  };
 
   const handleDelete = async (c: Credit) => {
     if (!confirm(`Delete credit "${c.source}"? This cannot be undone.`)) return;
     try {
-      await apiJson(`/credits/${c.id}`, { method: "DELETE" });
+      await deleteCreditMut.mutateAsync({ id: c.id });
       toast({ title: "Credit deleted" });
       refresh();
     } catch (e) {
@@ -284,6 +275,9 @@ function CreditDialog({
     ? programsList
     : ((programsList as any)?.items ?? [])) as Array<{ id: number; name: string }>;
 
+  const createCreditMut = useCreateCredit();
+  const updateCreditMut = useUpdateCredit();
+
   const [source, setSource] = useState(credit?.source ?? "");
   const [amount, setAmount] = useState<string>(credit ? String(credit.amount) : "");
   const [status, setStatus] = useState<CreditStatus>(credit?.status ?? "pipeline");
@@ -307,7 +301,7 @@ function CreditDialog({
     }
     setBusy(true);
     try {
-      const body = {
+      const body: CreateCreditBody = {
         source: source.trim(),
         amount: n,
         status,
@@ -315,13 +309,15 @@ function CreditDialog({
         expectedDate: expectedDate || null,
         receivedDate: receivedDate || null,
         notes: notes || null,
-        submittedBy: credit?.submittedBy ?? (`${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim() || null),
+        submittedBy:
+          credit?.submittedBy ??
+          (`${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim() || null),
       };
       if (credit) {
-        await apiJson(`/credits/${credit.id}`, { method: "PUT", body });
+        await updateCreditMut.mutateAsync({ id: credit.id, data: body });
         toast({ title: "Credit updated" });
       } else {
-        await apiJson(`/credits`, { method: "POST", body });
+        await createCreditMut.mutateAsync({ data: body });
         toast({ title: "Credit created" });
       }
       onSaved();

@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useSearch } from "wouter";
 import {
   Card,
@@ -37,10 +37,30 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { apiJson } from "@/lib/api";
 import {
   useListChartOfAccounts,
+  useListExpenseCategories,
+  useListExpenseCategoriesMissingMapping,
+  useGetExpenseCategory,
+  useCreateExpenseCategory,
+  useUpdateExpenseCategory,
+  useDeactivateExpenseCategory,
+  useCreateExpenseCategoryPaymentMethodRule,
+  useUpdateExpenseCategoryPaymentMethodRule,
+  useDeleteExpenseCategoryPaymentMethodRule,
+  getListExpenseCategoriesQueryKey,
+  getListExpenseCategoriesMissingMappingQueryKey,
+  getGetExpenseCategoryQueryKey,
   type ChartOfAccount,
+  type CreateExpenseCategoryBody,
+  type UpdateExpenseCategoryBody,
+  type CreateExpenseCategoryPaymentMethodRuleBody,
+  type UpdateExpenseCategoryPaymentMethodRuleBody,
+  type ExpenseCategory as ApiExpenseCategory,
+  type ExpenseCategoryPaymentMethodRule as ApiPaymentMethodRule,
+  type ListExpenseCategoriesIncludeInactive,
+  CreateExpenseCategoryBodyDefaultRulePaymentMethod,
+  CreateExpenseCategoryPaymentMethodRuleBodyPaymentMethod,
 } from "@workspace/api-client-react";
 import { Plus, Pencil, Archive, AlertTriangle } from "lucide-react";
 
@@ -54,31 +74,8 @@ const PAYMENT_METHODS = [
 ] as const;
 type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
-interface PaymentMethodRule {
-  id: number;
-  categoryId: number;
-  paymentMethod: PaymentMethod;
-  creditAccountId: number;
-  isDefault: boolean;
-  creditAccountCode: string | null;
-  creditAccountName: string | null;
-  creditAccountIsActive: boolean | null;
-  creditAccountAllowManualPosting: boolean | null;
-}
-
-interface ExpenseCategory {
-  id: number;
-  name: string;
-  debitAccountId: number;
-  isActive: boolean;
-  isSystem: boolean;
-  debitAccountCode: string | null;
-  debitAccountName: string | null;
-  debitAccountIsActive: boolean | null;
-  debitAccountAllowManualPosting: boolean | null;
-  rules: PaymentMethodRule[];
-  hasCompleteMapping: boolean;
-}
+type PaymentMethodRule = ApiPaymentMethodRule;
+type ExpenseCategory = ApiExpenseCategory;
 
 interface MissingMappingRow {
   id: number;
@@ -91,9 +88,6 @@ interface MissingMappingRow {
   archivedCreditRules: number;
   nonPostableCreditRules: number;
 }
-
-const CATEGORIES_QK = ["expense-categories"] as const;
-const MISSING_QK = ["expense-categories", "missing-mapping"] as const;
 
 function postable(a: ChartOfAccount): boolean {
   return a.isActive !== false && a.allowManualPosting !== false;
@@ -132,27 +126,21 @@ export default function AdminExpenseCategoriesPage() {
     [allAccounts],
   );
 
-  const categoriesQuery = useQuery({
-    queryKey: [...CATEGORIES_QK, { includeInactive }],
-    queryFn: async () => {
-      const qs = includeInactive ? "?includeInactive=true" : "";
-      return apiJson<{ categories: ExpenseCategory[] }>(
-        `/accounting/expense-categories${qs}`,
-      );
-    },
-  });
+  const categoriesQuery = useListExpenseCategories(
+    includeInactive
+      ? { includeInactive: "true" as ListExpenseCategoriesIncludeInactive }
+      : undefined,
+  );
 
-  const missingQuery = useQuery({
-    queryKey: MISSING_QK,
-    queryFn: () =>
-      apiJson<{ categories: MissingMappingRow[] }>(
-        `/accounting/expense-categories/missing-mapping`,
-      ),
-  });
+  const missingQuery = useListExpenseCategoriesMissingMapping();
+
+  const deactivateMut = useDeactivateExpenseCategory();
 
   const invalidate = () => {
-    qc.invalidateQueries({ queryKey: CATEGORIES_QK });
-    qc.invalidateQueries({ queryKey: MISSING_QK });
+    qc.invalidateQueries({ queryKey: getListExpenseCategoriesQueryKey() });
+    qc.invalidateQueries({
+      queryKey: getListExpenseCategoriesMissingMappingQueryKey(),
+    });
   };
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -290,10 +278,7 @@ export default function AdminExpenseCategoriesPage() {
                   onEdit={() => setEditing(cat)}
                   onEditRules={() => setRuleEditingFor(cat)}
                   onDeactivate={async () => {
-                    await apiJson(
-                      `/accounting/expense-categories/${cat.id}/deactivate`,
-                      { method: "POST" },
-                    );
+                    await deactivateMut.mutateAsync({ id: cat.id });
                     invalidate();
                     toast({ title: `Deactivated "${cat.name}"` });
                   }}
@@ -455,6 +440,9 @@ function CategoryEditor({
   const [defaultCreditId, setDefaultCreditId] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
 
+  const createMut = useCreateExpenseCategory();
+  const updateMut = useUpdateExpenseCategory();
+
   const submit = async () => {
     if (!name.trim()) {
       toast({ title: "Name is required", variant: "destructive" });
@@ -474,26 +462,28 @@ function CategoryEditor({
     }
     setSubmitting(true);
     try {
-      const body: Record<string, unknown> = {
-        name: name.trim(),
-        debitAccountId: Number(debitId),
-        isActive,
-      };
       if (mode === "create") {
-        body["defaultRule"] = {
-          paymentMethod: defaultPaymentMethod,
-          creditAccountId: Number(defaultCreditId),
+        const createBody: CreateExpenseCategoryBody = {
+          name: name.trim(),
+          debitAccountId: Number(debitId),
+          isActive,
+          defaultRule: {
+            paymentMethod:
+              CreateExpenseCategoryBodyDefaultRulePaymentMethod[
+                defaultPaymentMethod
+              ],
+            creditAccountId: Number(defaultCreditId),
+          },
         };
-        await apiJson(`/accounting/expense-categories`, {
-          method: "POST",
-          body: JSON.stringify(body),
-        });
+        await createMut.mutateAsync({ data: createBody });
         toast({ title: `Created "${name.trim()}"` });
       } else if (category) {
-        await apiJson(`/accounting/expense-categories/${category.id}`, {
-          method: "PATCH",
-          body: JSON.stringify(body),
-        });
+        const updateBody: UpdateExpenseCategoryBody = {
+          name: name.trim(),
+          debitAccountId: Number(debitId),
+          isActive,
+        };
+        await updateMut.mutateAsync({ id: category.id, data: updateBody });
         toast({ title: `Updated "${name.trim()}"` });
       }
       onSaved();
@@ -627,18 +617,12 @@ function RulesEditor({
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  const detailQuery = useQuery({
-    queryKey: ["expense-categories", category.id, "rules"],
-    queryFn: () =>
-      apiJson<{ category: ExpenseCategory }>(
-        `/accounting/expense-categories/${category.id}`,
-      ),
-  });
+  const detailQuery = useGetExpenseCategory(category.id);
   const current = detailQuery.data?.category ?? category;
 
   const refresh = () => {
     qc.invalidateQueries({
-      queryKey: ["expense-categories", category.id, "rules"],
+      queryKey: getGetExpenseCategoryQueryKey(category.id),
     });
     onChanged();
   };
@@ -647,34 +631,33 @@ function RulesEditor({
   const [creditId, setCreditId] = useState<string>("");
   const [isDefault, setIsDefault] = useState(false);
 
-  const create = useMutation({
-    mutationFn: async () => {
-      if (!creditId) throw new Error("Credit account is required");
-      return apiJson(
-        `/accounting/expense-categories/${category.id}/payment-method-rules`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            paymentMethod: pm,
-            creditAccountId: Number(creditId),
-            isDefault,
-          }),
-        },
-      );
-    },
-    onSuccess: () => {
+  const createRule = useCreateExpenseCategoryPaymentMethodRule();
+
+  const handleCreate = async () => {
+    if (!creditId) {
+      toast({ title: "Credit account is required", variant: "destructive" });
+      return;
+    }
+    try {
+      const body: CreateExpenseCategoryPaymentMethodRuleBody = {
+        paymentMethod:
+          CreateExpenseCategoryPaymentMethodRuleBodyPaymentMethod[pm],
+        creditAccountId: Number(creditId),
+        isDefault,
+      };
+      await createRule.mutateAsync({ id: category.id, data: body });
       toast({ title: "Rule added" });
       setCreditId("");
       setIsDefault(false);
       refresh();
-    },
-    onError: (e) =>
+    } catch (e) {
       toast({
         title: "Add failed",
         description: e instanceof Error ? e.message : String(e),
         variant: "destructive",
-      }),
-  });
+      });
+    }
+  };
 
   return (
     <Dialog open onOpenChange={(o) => (!o ? onClose() : undefined)}>
@@ -741,11 +724,11 @@ function RulesEditor({
                 Default
               </label>
               <Button
-                onClick={() => create.mutate()}
-                disabled={create.isPending}
+                onClick={() => void handleCreate()}
+                disabled={createRule.isPending}
                 data-testid="button-add-rule"
               >
-                {create.isPending ? "Adding…" : "Add"}
+                {createRule.isPending ? "Adding…" : "Add"}
               </Button>
             </div>
           </div>
@@ -776,15 +759,19 @@ function RuleRow({
   const [creditId, setCreditId] = useState(String(rule.creditAccountId));
   const [editing, setEditing] = useState(false);
 
+  const updateRuleMut = useUpdateExpenseCategoryPaymentMethodRule();
+  const deleteRuleMut = useDeleteExpenseCategoryPaymentMethodRule();
+
   const save = async () => {
     try {
-      await apiJson(
-        `/accounting/expense-categories/${categoryId}/payment-method-rules/${rule.id}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ creditAccountId: Number(creditId) }),
-        },
-      );
+      const body: UpdateExpenseCategoryPaymentMethodRuleBody = {
+        creditAccountId: Number(creditId),
+      };
+      await updateRuleMut.mutateAsync({
+        id: categoryId,
+        ruleId: rule.id,
+        data: body,
+      });
       setEditing(false);
       onChanged();
       toast({ title: "Updated" });
@@ -799,10 +786,14 @@ function RuleRow({
 
   const promote = async () => {
     try {
-      await apiJson(
-        `/accounting/expense-categories/${categoryId}/payment-method-rules/${rule.id}`,
-        { method: "PATCH", body: JSON.stringify({ isDefault: true }) },
-      );
+      const body: UpdateExpenseCategoryPaymentMethodRuleBody = {
+        isDefault: true,
+      };
+      await updateRuleMut.mutateAsync({
+        id: categoryId,
+        ruleId: rule.id,
+        data: body,
+      });
       onChanged();
       toast({ title: "Set as default" });
     } catch (e) {
@@ -816,10 +807,7 @@ function RuleRow({
 
   const remove = async () => {
     try {
-      await apiJson(
-        `/accounting/expense-categories/${categoryId}/payment-method-rules/${rule.id}`,
-        { method: "DELETE" },
-      );
+      await deleteRuleMut.mutateAsync({ id: categoryId, ruleId: rule.id });
       onChanged();
       toast({ title: "Deleted" });
     } catch (e) {

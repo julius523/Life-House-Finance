@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useCreateExpense, useListPrograms, useCreateReceipt } from "@workspace/api-client-react";
-import { useQuery } from "@tanstack/react-query";
-import { apiJson } from "@/lib/api";
+import { useCreateExpense, useListPrograms, useCreateReceipt, useListExpenseCategories } from "@workspace/api-client-react";
 import { ReceiptUploader, type PendingReceipt } from "@/components/receipt-uploader";
 import { useAuth } from "@/lib/auth";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -45,13 +43,7 @@ export default function ExpenseNew() {
   const { data: programs, isLoading: programsLoading } = useListPrograms();
   // Task #51 — load active expense categories so submitters can classify
   // each expense for the auto-draft mapping.
-  const categoriesQuery = useQuery({
-    queryKey: ["expense-categories", { active: true }],
-    queryFn: () =>
-      apiJson<{ categories: ExpenseCategoryOption[] }>(
-        `/accounting/expense-categories`,
-      ),
-  });
+  const categoriesQuery = useListExpenseCategories();
   const categories = categoriesQuery.data?.categories ?? [];
   const [receipts, setReceipts] = useState<PendingReceipt[]>([]);
   const { user } = useAuth();

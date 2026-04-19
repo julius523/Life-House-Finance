@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Link, useRoute } from "wouter";
 import {
   Card,
@@ -20,7 +20,10 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { apiJson } from "@/lib/api";
+import {
+  useGetJournalEntry,
+  useGetJournalEntryApprovalHistory,
+} from "@workspace/api-client-react";
 import { format } from "date-fns";
 import { ArrowLeft, BookOpen, Sparkles, User } from "lucide-react";
 
@@ -174,72 +177,54 @@ export default function JournalEntryDetailPage() {
 
   const canView = user?.role === "admin" || user?.role === "approver";
 
-  const [entry, setEntry] = useState<JournalEntry | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<ApprovalEvent[] | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
+  const numericId = id ? Number(id) : 0;
+  const {
+    data: entryData,
+    isLoading: loading,
+    error: entryError,
+  } = useGetJournalEntry(numericId, {
+    query: { enabled: canView && !!id },
+  });
+  const entry =
+    (entryData as { journalEntry?: JournalEntry } | undefined)?.journalEntry ??
+    null;
+  const error = entryError
+    ? entryError instanceof Error
+      ? entryError.message
+      : "Failed to load entry."
+    : null;
 
   useEffect(() => {
-    if (!canView || !id) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    apiJson<{ journalEntry: JournalEntry }>(
-      `/accounting/journal-entries/${id}`,
-    )
-      .then((data) => {
-        if (cancelled) return;
-        setEntry(data.journalEntry);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        const msg = e instanceof Error ? e.message : "Failed to load entry.";
-        setError(msg);
-        toast({
-          title: "Could not load entry",
-          description: msg,
-          variant: "destructive",
-        });
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+    if (entryError) {
+      toast({
+        title: "Could not load entry",
+        description:
+          entryError instanceof Error ? entryError.message : undefined,
+        variant: "destructive",
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, canView, toast]);
-
-  useEffect(() => {
-    if (!canView || !id || !entry || entry.manualDraftId === null) {
-      setHistory(null);
-      setHistoryError(null);
-      return;
     }
-    let cancelled = false;
-    setHistoryLoading(true);
-    setHistoryError(null);
-    apiJson<{ events: ApprovalEvent[] }>(
-      `/accounting/journal-entries/${id}/approval-history`,
-    )
-      .then((data) => {
-        if (cancelled) return;
-        setHistory(data.events);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setHistoryError(
-          e instanceof Error ? e.message : "Failed to load approval history.",
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setHistoryLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, canView, entry]);
+  }, [entryError, toast]);
+
+  const historyEnabled =
+    canView && !!id && !!entry && entry.manualDraftId !== null;
+  const {
+    data: historyData,
+    isLoading: historyLoadingRaw,
+    error: historyErrorRaw,
+  } = useGetJournalEntryApprovalHistory(numericId, {
+    query: { enabled: historyEnabled },
+  });
+  const history = historyEnabled
+    ? ((historyData as { events?: ApprovalEvent[] } | undefined)?.events ??
+      null)
+    : null;
+  const historyLoading = historyEnabled && historyLoadingRaw;
+  const historyError =
+    historyEnabled && historyErrorRaw
+      ? historyErrorRaw instanceof Error
+        ? historyErrorRaw.message
+        : "Failed to load approval history."
+      : null;
 
   if (!canView) {
     return (

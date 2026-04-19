@@ -7,10 +7,16 @@ import {
   useListReceipts,
   useCreateReceipt,
   useListTransactions,
+  useRejectBill,
+  useDeleteBill,
+  useDeleteReceipt,
+  useLinkTransactionToBill,
   getGetBillQueryKey,
   getListBillsQueryKey,
   getListReceiptsQueryKey,
   getListTransactionsQueryKey,
+  type RejectBillBody,
+  RejectBillBodyAction,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,7 +61,6 @@ import { ReceiptViewer, type ReceiptViewerFile } from "@/components/receipt-view
 import { LinkedTransactions } from "@/components/linked-transactions";
 import { ReceiptUploader, type PendingReceipt } from "@/components/receipt-uploader";
 import { useAuth } from "@/lib/auth";
-import { apiJson } from "@/lib/api";
 
 // Task #63 — accounting bridge dual-leg badges & block-reason copy.
 // Mirrors the expense bridge but covers two distinct lifecycle legs
@@ -205,16 +210,25 @@ export default function BillDetail() {
     }
   };
 
+  const rejectMut = useRejectBill();
+  const deleteBillMut = useDeleteBill();
+  const deleteReceiptMut = useDeleteReceipt();
+  const linkTxBillMut = useLinkTransactionToBill();
+
   const handleReject = async (data: {
     reason: string;
     action: "send_back" | "close";
   }) => {
     setRejectBusy(true);
     try {
-      await apiJson(`/bills/${id}/reject`, {
-        method: "POST",
-        body: data,
-      });
+      const body: RejectBillBody = {
+        reason: data.reason,
+        action:
+          data.action === "send_back"
+            ? RejectBillBodyAction.send_back
+            : RejectBillBodyAction.close,
+      };
+      await rejectMut.mutateAsync({ id, data: body });
       toast({
         title:
           data.action === "send_back"
@@ -237,7 +251,7 @@ export default function BillDetail() {
   const handleDelete = async () => {
     if (!confirm("Delete this bill? This cannot be undone.")) return;
     try {
-      await apiJson(`/bills/${id}`, { method: "DELETE" });
+      await deleteBillMut.mutateAsync({ id });
       toast({ title: "Bill deleted" });
       navigate("/bills");
     } catch (e) {
@@ -281,7 +295,7 @@ export default function BillDetail() {
   const handleDeleteReceipt = async (receiptId: number) => {
     if (!confirm("Remove this attachment?")) return;
     try {
-      await apiJson(`/receipts/${receiptId}`, { method: "DELETE" });
+      await deleteReceiptMut.mutateAsync({ id: receiptId });
       toast({ title: "Attachment removed" });
       refresh();
     } catch (e) {
@@ -355,9 +369,9 @@ export default function BillDetail() {
     if (!selectedTxId) return;
     setLinkBusy(true);
     try {
-      await apiJson(`/transactions/${selectedTxId}/link-bill`, {
-        method: "POST",
-        body: { billId: id },
+      await linkTxBillMut.mutateAsync({
+        id: selectedTxId,
+        data: { billId: id },
       });
       toast({ title: "Transaction linked to bill" });
       setSelectedTxId(null);

@@ -1426,6 +1426,406 @@ export interface UpdateExpenseCategoryPaymentMethodRuleBody {
   isDefault?: boolean;
 }
 
+export type CreditStatus = (typeof CreditStatus)[keyof typeof CreditStatus];
+
+export const CreditStatus = {
+  pipeline: "pipeline",
+  received: "received",
+  delayed: "delayed",
+  "write-off": "write-off",
+  opportunity: "opportunity",
+} as const;
+
+export interface Credit {
+  id: number;
+  source: string;
+  programId: number | null;
+  programName: string | null;
+  amount: number;
+  expectedDate: string | null;
+  receivedDate: string | null;
+  status: CreditStatus;
+  notes: string | null;
+  submittedBy: string | null;
+  createdAt: string;
+}
+
+export type CreditSummaryByStatusItem = {
+  status: CreditStatus;
+  amount: number;
+  count: number;
+};
+
+export interface CreditSummary {
+  realized: number;
+  potential: number;
+  writeOff: number;
+  byStatus: CreditSummaryByStatusItem[];
+}
+
+export interface CreateCreditBody {
+  source: string;
+  programId?: number | null;
+  amount: number;
+  expectedDate?: string | null;
+  receivedDate?: string | null;
+  status?: CreditStatus;
+  notes?: string | null;
+  submittedBy?: string | null;
+}
+
+export interface Contact {
+  id: number;
+  vendorId?: number;
+  programId?: number;
+  name: string;
+  role?: string;
+  email?: string;
+  phone?: string;
+  isPrimary: boolean;
+  createdAt: string;
+}
+
+export interface ContactBody {
+  name: string;
+  role?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  isPrimary?: boolean;
+}
+
+export type AuthUserRole = (typeof AuthUserRole)[keyof typeof AuthUserRole];
+
+export const AuthUserRole = {
+  admin: "admin",
+  approver: "approver",
+  submitter: "submitter",
+} as const;
+
+export interface AuthUser {
+  id: number;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: AuthUserRole;
+}
+
+export interface CopilotThread {
+  id: number;
+  title?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+  messageCount?: number;
+}
+
+export type CopilotMessageRole =
+  (typeof CopilotMessageRole)[keyof typeof CopilotMessageRole];
+
+export const CopilotMessageRole = {
+  user: "user",
+  assistant: "assistant",
+} as const;
+
+export type CopilotMessageToolCallsItem = { [key: string]: unknown };
+
+export type CopilotMessageSourcesItem = { [key: string]: unknown };
+
+export type CopilotMessageAgentActionsItem = { [key: string]: unknown };
+
+export interface CopilotMessage {
+  id: number;
+  threadId: number;
+  role: CopilotMessageRole;
+  status: string;
+  userText?: string | null;
+  answer?: string | null;
+  why?: string | null;
+  missingInformation?: string | null;
+  riskFlags?: string | null;
+  recommendedNextStep?: string | null;
+  humanReviewNeeded?: boolean | null;
+  confidence?: string | null;
+  pageContext?: unknown | null;
+  modelName?: string | null;
+  latencyMs?: number | null;
+  errorCode?: string | null;
+  createdAt: string;
+  toolCalls?: CopilotMessageToolCallsItem[];
+  sources?: CopilotMessageSourcesItem[];
+  agentActions?: CopilotMessageAgentActionsItem[];
+  [key: string]: unknown;
+}
+
+export type AgentActionPayload = { [key: string]: unknown };
+
+export type AgentActionEvidence = { [key: string]: unknown } | null;
+
+export type AgentActionSubmitter = { [key: string]: unknown } | null;
+
+export type AgentActionReviewer = { [key: string]: unknown } | null;
+
+export type AgentActionSourcesItem = { [key: string]: unknown };
+
+export interface AgentAction {
+  id: number;
+  userId: number;
+  threadId: number;
+  assistantMessageId?: number | null;
+  actionType: string;
+  payload?: AgentActionPayload;
+  evidence?: AgentActionEvidence;
+  confidence?: string | null;
+  riskFlags?: string | null;
+  status: string;
+  createdAt: string;
+  reviewedBy?: number | null;
+  reviewedAt?: string | null;
+  reviewNotes?: string | null;
+  submitter?: AgentActionSubmitter;
+  reviewer?: AgentActionReviewer;
+  sources?: AgentActionSourcesItem[];
+  [key: string]: unknown;
+}
+
+export interface AgentActionDecisionBody {
+  notes?: string;
+}
+
+export interface JournalEntryActor {
+  id: number;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+}
+
+export type OriginatingExpenseSummarySubmitter = {
+  name?: string;
+  email?: string | null;
+} | null;
+
+export interface OriginatingExpenseSummary {
+  id: number;
+  merchant: string;
+  amount?: number;
+  expenseDate?: string;
+  status?: string;
+  programId?: number | null;
+  programName?: string | null;
+  submitter?: OriginatingExpenseSummarySubmitter;
+  approvedAt?: string | null;
+  [key: string]: unknown;
+}
+
+export type JournalEntryLineType =
+  (typeof JournalEntryLineType)[keyof typeof JournalEntryLineType];
+
+export const JournalEntryLineType = {
+  debit: "debit",
+  credit: "credit",
+} as const;
+
+export interface JournalEntryLine {
+  id: number;
+  lineNo: number;
+  type: JournalEntryLineType;
+  amountCents: number;
+  account: string;
+  accountId?: number | null;
+  program?: string | null;
+  fund?: string | null;
+  memo?: string | null;
+  [key: string]: unknown;
+}
+
+export type ManualJournalEntryBodyLinesItemType =
+  (typeof ManualJournalEntryBodyLinesItemType)[keyof typeof ManualJournalEntryBodyLinesItemType];
+
+export const ManualJournalEntryBodyLinesItemType = {
+  debit: "debit",
+  credit: "credit",
+} as const;
+
+export type ManualJournalEntryBodyLinesItem = {
+  type: ManualJournalEntryBodyLinesItemType;
+  amount: number;
+  account_code: string;
+  program?: string | null;
+  fund?: string | null;
+  memo?: string | null;
+};
+
+export interface ManualJournalEntryBody {
+  /** YYYY-MM-DD */
+  entryDate: string;
+  /**
+   * @minLength 1
+   * @maxLength 2000
+   */
+  memo: string;
+  /**
+   * @minItems 2
+   * @maxItems 100
+   */
+  lines: ManualJournalEntryBodyLinesItem[];
+}
+
+export type CreateJournalEntryResponseJournalEntry = {
+  id: number;
+  entryNo: string;
+  [key: string]: unknown;
+};
+
+export interface CreateJournalEntryResponse {
+  journalEntry: CreateJournalEntryResponseJournalEntry;
+}
+
+export type JournalEntryStatus =
+  (typeof JournalEntryStatus)[keyof typeof JournalEntryStatus];
+
+export const JournalEntryStatus = {
+  posted: "posted",
+  reversed: "reversed",
+} as const;
+
+export type JournalEntrySource =
+  (typeof JournalEntrySource)[keyof typeof JournalEntrySource];
+
+export const JournalEntrySource = {
+  manual: "manual",
+  copilot: "copilot",
+  expense: "expense",
+} as const;
+
+export interface JournalEntry {
+  id: number;
+  entryNo: string;
+  entryDate: string;
+  memo?: string;
+  status: JournalEntryStatus;
+  totalsDebitsCents?: number;
+  totalsCreditsCents?: number;
+  postedAt?: string;
+  postedByUserId?: number;
+  postedBy?: JournalEntryActor | null;
+  agentActionId?: number | null;
+  threadId?: number | null;
+  assistantMessageId?: number | null;
+  approverUserId?: number | null;
+  approver?: JournalEntryActor | null;
+  evidenceSnapshot?: unknown | null;
+  reversesJournalEntryId?: number | null;
+  reversedByJournalEntryId?: number | null;
+  reversalReason?: string | null;
+  manualDraftId?: number | null;
+  createdAt?: string;
+  lines?: JournalEntryLine[];
+  source?: JournalEntrySource;
+  originatingExpense?: OriginatingExpenseSummary | null;
+  [key: string]: unknown;
+}
+
+export interface ApprovalEvent {
+  id: number;
+  type: string;
+  description?: string;
+  actor?: string | null;
+  actorUserId?: number | null;
+  actorEmail?: string | null;
+  actorFirstName?: string | null;
+  actorLastName?: string | null;
+  metadata?: unknown | null;
+  createdAt: string;
+  [key: string]: unknown;
+}
+
+export type JournalEntryDraftLineType =
+  (typeof JournalEntryDraftLineType)[keyof typeof JournalEntryDraftLineType];
+
+export const JournalEntryDraftLineType = {
+  debit: "debit",
+  credit: "credit",
+} as const;
+
+export interface JournalEntryDraftLine {
+  uid?: number;
+  type: JournalEntryDraftLineType;
+  accountCode?: string;
+  amount?: string;
+  program?: string;
+  fund?: string;
+  memo?: string;
+  [key: string]: unknown;
+}
+
+export interface JournalEntryDraftPayload {
+  entryDate?: string;
+  memo?: string;
+  lines: JournalEntryDraftLine[];
+  [key: string]: unknown;
+}
+
+export type JournalEntryDraftStatus =
+  (typeof JournalEntryDraftStatus)[keyof typeof JournalEntryDraftStatus];
+
+export const JournalEntryDraftStatus = {
+  draft: "draft",
+  submitted: "submitted",
+  approved: "approved",
+  rejected: "rejected",
+  posted: "posted",
+} as const;
+
+export interface JournalEntryDraft {
+  id: number;
+  createdByUserId: number;
+  entryDate?: string | null;
+  memo?: string | null;
+  payload?: JournalEntryDraftPayload;
+  status: JournalEntryDraftStatus;
+  submittedByUserId?: number | null;
+  submittedAt?: string | null;
+  approvedByUserId?: number | null;
+  approvedAt?: string | null;
+  rejectedByUserId?: number | null;
+  rejectedAt?: string | null;
+  rejectionReason?: string | null;
+  postedJournalEntryId?: number | null;
+  version: number;
+  createdAt?: string;
+  updatedAt?: string;
+  originatingExpense?: OriginatingExpenseSummary | null;
+  [key: string]: unknown;
+}
+
+export type JournalEntryDraftSummaryCreatedBy = {
+  id?: number;
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+};
+
+export type JournalEntryDraftSummary = JournalEntryDraft & {
+  createdBy?: JournalEntryDraftSummaryCreatedBy;
+};
+
+export interface JournalEntryDraftActionBody {
+  expectedVersion: number;
+  reason?: string;
+}
+
+export type JournalEntryDraftActionResponseJournalEntry = {
+  id?: number;
+  entryNo?: string;
+  [key: string]: unknown;
+};
+
+export interface JournalEntryDraftActionResponse {
+  draft: JournalEntryDraft;
+  journalEntry?: JournalEntryDraftActionResponseJournalEntry;
+  [key: string]: unknown;
+}
+
 export type GetRecentActivityParams = {
   limit?: number;
 };
@@ -1458,6 +1858,10 @@ export type ListVendorsParams = {
   search?: string;
 };
 
+export type DeleteVendor200 = {
+  ok: boolean;
+};
+
 export type ListBillsParams = {
   status?: ListBillsStatus;
   vendorId?: number;
@@ -1478,6 +1882,8 @@ export const ListBillsStatus = {
   rejected: "rejected",
   needs_correction: "needs_correction",
 } as const;
+
+export type DeleteBill200 = { [key: string]: unknown };
 
 export type RejectBillBodyAction =
   (typeof RejectBillBodyAction)[keyof typeof RejectBillBodyAction];
@@ -1681,6 +2087,10 @@ export const ListProgramsType = {
   department: "department",
 } as const;
 
+export type DeleteProgram200 = {
+  ok: boolean;
+};
+
 export type GetProgramSpendingParams = {
   fiscalYear?: string;
 };
@@ -1815,4 +2225,195 @@ export type ListNotificationsParams = {
 
 export type MarkAllNotificationsRead200 = {
   ok: boolean;
+};
+
+export type ListCreditsParams = {
+  status?: CreditStatus;
+};
+
+export type ListCredits200 = {
+  credits: Credit[];
+};
+
+export type CreateCredit201 = {
+  credit: Credit;
+};
+
+export type UpdateCredit200 = {
+  credit: Credit;
+};
+
+export type DeleteCredit200 = {
+  ok: boolean;
+};
+
+export type ListVendorContacts200 = {
+  contacts: Contact[];
+};
+
+export type CreateVendorContact201 = {
+  contact: Contact;
+};
+
+export type UpdateVendorContact200 = {
+  contact: Contact;
+};
+
+export type DeleteVendorContact200 = {
+  ok: boolean;
+};
+
+export type ListProgramContacts200 = {
+  contacts: Contact[];
+};
+
+export type CreateProgramContact201 = {
+  contact: Contact;
+};
+
+export type UpdateProgramContact200 = {
+  contact: Contact;
+};
+
+export type DeleteProgramContact200 = {
+  ok: boolean;
+};
+
+export type ListAdminUsers200 = {
+  users: AuthUser[];
+};
+
+export type ListCopilotThreads200 = {
+  threads: CopilotThread[];
+};
+
+export type CreateCopilotThread200 = {
+  thread: CopilotThread;
+};
+
+export type GetCopilotThread200 = {
+  thread: CopilotThread;
+  messages: CopilotMessage[];
+};
+
+export type UpdateCopilotThreadBody = {
+  title?: string;
+  archived?: boolean;
+};
+
+export type UpdateCopilotThread200 = {
+  thread: CopilotThread;
+};
+
+export type ListAgentActionsParams = {
+  status?: string;
+  mine?: string;
+};
+
+export type ListAgentActions200Counts = { [key: string]: unknown };
+
+export type ListAgentActions200 = {
+  actions: AgentAction[];
+  counts?: ListAgentActions200Counts;
+};
+
+export type ApproveAgentAction200 = { [key: string]: unknown };
+
+export type RejectAgentAction200 = { [key: string]: unknown };
+
+export type CancelAgentAction200 = { [key: string]: unknown };
+
+export type ListJournalEntriesParams = {
+  status?: ListJournalEntriesStatus;
+  source?: ListJournalEntriesSource;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type ListJournalEntriesStatus =
+  (typeof ListJournalEntriesStatus)[keyof typeof ListJournalEntriesStatus];
+
+export const ListJournalEntriesStatus = {
+  posted: "posted",
+  reversed: "reversed",
+} as const;
+
+export type ListJournalEntriesSource =
+  (typeof ListJournalEntriesSource)[keyof typeof ListJournalEntriesSource];
+
+export const ListJournalEntriesSource = {
+  manual: "manual",
+  copilot: "copilot",
+  expense: "expense",
+} as const;
+
+export type ListJournalEntries200 = {
+  entries: JournalEntry[];
+  total: number;
+  limit?: number;
+  offset?: number;
+};
+
+export type GetJournalEntry200 = {
+  journalEntry: JournalEntry;
+};
+
+export type GetJournalEntryApprovalHistory200 = {
+  manualDraftId?: number | null;
+  events: ApprovalEvent[];
+};
+
+export type ListJournalEntryDraftsParams = {
+  scope?: ListJournalEntryDraftsScope;
+  statuses?: string;
+  entryDateFrom?: string;
+  entryDateTo?: string;
+};
+
+export type ListJournalEntryDraftsScope =
+  (typeof ListJournalEntryDraftsScope)[keyof typeof ListJournalEntryDraftsScope];
+
+export const ListJournalEntryDraftsScope = {
+  mine: "mine",
+  all: "all",
+} as const;
+
+export type ListJournalEntryDrafts200 = {
+  drafts: JournalEntryDraftSummary[];
+};
+
+export type CreateJournalEntryDraftBody = {
+  payload: JournalEntryDraftPayload;
+};
+
+export type CreateJournalEntryDraft201 = {
+  draft: JournalEntryDraft;
+};
+
+export type GetJournalEntryDraft200 = {
+  draft: JournalEntryDraft;
+};
+
+export type UpdateJournalEntryDraftBody = {
+  payload: JournalEntryDraftPayload;
+  expectedVersion: number;
+};
+
+export type UpdateJournalEntryDraft200 = {
+  draft: JournalEntryDraft;
+};
+
+export type DeleteJournalEntryDraftParams = {
+  expectedVersion: number;
+};
+
+export type RejectJournalEntryDraftBody = JournalEntryDraftActionBody & {
+  reason?: string;
+};
+
+export type PingAccountingDiagnostics200 = {
+  status: string;
+  detail: string;
 };

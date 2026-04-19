@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import {
   Card,
@@ -22,7 +22,20 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { apiJson, ApiError } from "@/lib/api";
+import {
+  useGetJournalEntryDraft,
+  useSubmitJournalEntryDraft,
+  useApproveJournalEntryDraft,
+  useRejectJournalEntryDraft,
+  usePostJournalEntryDraft,
+  useListAdminUsers,
+  ApiError,
+  type JournalEntryDraftActionBody,
+  type RejectJournalEntryDraftBody,
+  type JournalEntryDraftActionResponse,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { getGetJournalEntryDraftQueryKey } from "@workspace/api-client-react";
 import { format } from "date-fns";
 import {
   AlertCircle,
@@ -170,10 +183,8 @@ export default function JournalEntryDraftDetailPage() {
 
   const canView = user?.role === "admin" || user?.role === "approver";
 
-  const [draft, setDraft] = useState<DraftRecord | null>(null);
-  const [users, setUsers] = useState<Record<number, UserSummary>>({});
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const numericId = id ? Number(id) : 0;
   const [actionError, setActionError] = useState<{
     title: string;
     message: string;
@@ -183,50 +194,43 @@ export default function JournalEntryDraftDetailPage() {
     "submit" | "approve" | "reject" | "post" | null
   >(null);
   const [rejectReason, setRejectReason] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
 
-  // Fetch draft
-  useEffect(() => {
-    if (!canView || !id) return;
-    let cancelled = false;
-    setLoading(true);
-    setLoadError(null);
-    apiJson<{ draft: DraftRecord }>(`/accounting/journal-entry-drafts/${id}`)
-      .then((data) => {
-        if (!cancelled) setDraft(data.draft);
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setLoadError(e instanceof Error ? e.message : "Failed to load draft.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [canView, id, refreshKey]);
+  const {
+    data: draftData,
+    isLoading: loading,
+    error: loadErrorRaw,
+  } = useGetJournalEntryDraft(numericId, {
+    query: { enabled: canView && !!id },
+  });
+  const draft =
+    (draftData as { draft?: DraftRecord } | undefined)?.draft ?? null;
+  const loadError = loadErrorRaw
+    ? loadErrorRaw instanceof Error
+      ? loadErrorRaw.message
+      : "Failed to load draft."
+    : null;
 
-  // Fetch users to display submitter/approver/rejector names. Admin-only
-  // endpoint; for approvers we fall back to "User #N" which is fine.
-  useEffect(() => {
-    if (user?.role !== "admin") return;
-    let cancelled = false;
-    apiJson<{ users: UserSummary[] }>("/admin/users")
-      .then((data) => {
-        if (cancelled) return;
-        const map: Record<number, UserSummary> = {};
-        for (const u of data.users) map[u.id] = u;
-        setUsers(map);
-      })
-      .catch(() => {
-        /* non-fatal — just show user IDs */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.role]);
+  const { data: usersData } = useListAdminUsers({
+    query: { enabled: user?.role === "admin" },
+  });
+  const users = useMemo(() => {
+    const list =
+      (usersData as { users?: UserSummary[] } | undefined)?.users ?? [];
+    const map: Record<number, UserSummary> = {};
+    for (const u of list) map[u.id] = u;
+    return map;
+  }, [usersData]);
+
+  const submitMut = useSubmitJournalEntryDraft();
+  const approveMut = useApproveJournalEntryDraft();
+  const rejectMut = useRejectJournalEntryDraft();
+  const postMut = usePostJournalEntryDraft();
+
+  const refetchDraft = () => {
+    queryClient.invalidateQueries({
+      queryKey: getGetJournalEntryDraftQueryKey(numericId),
+    });
+  };
 
   const totals = useMemo(() => {
     let debits = 0;
@@ -300,23 +304,38 @@ export default function JournalEntryDraftDetailPage() {
     setBusy(action);
     setActionError(null);
     try {
-      const path = `/accounting/journal-entry-drafts/${draft.id}/${action}`;
       // Task #44 — every workflow transition carries the last-seen draft
       // version so the server can reject a stale action with 409
       // DRAFT_VERSION_CONFLICT instead of silently overwriting.
-      const body: Record<string, unknown> = { expectedVersion: draft.version };
-      if (action === "reject") {
-        body["reason"] = rejectReason.trim();
-      }
-      const init: { method: string; body?: unknown } = {
-        method: "POST",
-        body,
+      const baseBody: JournalEntryDraftActionBody = {
+        expectedVersion: draft.version,
       };
-      const data = await apiJson<{
-        draft: DraftRecord;
-        journalEntry?: { id: number; entryNo: string };
-      }>(path, init);
-      setDraft(data.draft);
+      let data: JournalEntryDraftActionResponse;
+      if (action === "submit") {
+        data = await submitMut.mutateAsync({
+          id: draft.id,
+          data: baseBody,
+        });
+      } else if (action === "approve") {
+        data = await approveMut.mutateAsync({
+          id: draft.id,
+          data: baseBody,
+        });
+      } else if (action === "reject") {
+        const rejectBody: RejectJournalEntryDraftBody = {
+          ...baseBody,
+          reason: rejectReason.trim(),
+        };
+        data = await rejectMut.mutateAsync({
+          id: draft.id,
+          data: rejectBody,
+        });
+      } else {
+        data = await postMut.mutateAsync({
+          id: draft.id,
+          data: baseBody,
+        });
+      }
       setRejectReason("");
       const verbPast = {
         submit: "submitted",
@@ -331,9 +350,12 @@ export default function JournalEntryDraftDetailPage() {
             ? `Posted as ${data.journalEntry.entryNo}.`
             : undefined,
       });
-      setRefreshKey((k) => k + 1);
+      refetchDraft();
     } catch (e) {
-      const code = e instanceof ApiError ? e.code : null;
+      const code =
+        e instanceof ApiError
+          ? ((e.data as { code?: string } | undefined)?.code ?? null)
+          : null;
       const message =
         e instanceof Error ? e.message : "Action failed unexpectedly.";
       const titleByCode: Record<string, string> = {
@@ -369,7 +391,7 @@ export default function JournalEntryDraftDetailPage() {
         // refetch so the next attempt uses the new version.
         code === "DRAFT_VERSION_CONFLICT"
       ) {
-        setRefreshKey((k) => k + 1);
+        refetchDraft();
       }
     } finally {
       setBusy(null);

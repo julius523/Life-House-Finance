@@ -5,7 +5,12 @@ import {
   useApproveExpense, 
   useRejectExpense, 
   useApproveBill,
-  getListApprovalsQueryKey
+  useRejectBill,
+  useDeleteBill,
+  useDeleteExpense,
+  getListApprovalsQueryKey,
+  type RejectBillBody,
+  RejectBillBodyAction,
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,7 +22,6 @@ import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { Empty } from "@/components/ui/empty";
 import { useLocation } from "wouter";
-import { apiJson } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 export default function Approvals() {
@@ -30,6 +34,9 @@ export default function Approvals() {
   const approveExpense = useApproveExpense();
   const rejectExpense = useRejectExpense();
   const approveBill = useApproveBill();
+  const rejectBill = useRejectBill();
+  const deleteBill = useDeleteBill();
+  const deleteExpense = useDeleteExpense();
 
   const [rejectTarget, setRejectTarget] = useState<{
     type: "expense" | "bill";
@@ -74,9 +81,16 @@ export default function Approvals() {
           },
         });
       } else {
-        await apiJson(`/bills/${rejectTarget.referenceId}/reject`, {
-          method: "POST",
-          body: data,
+        const billBody: RejectBillBody = {
+          reason: data.reason,
+          action:
+            data.action === "send_back"
+              ? RejectBillBodyAction.send_back
+              : RejectBillBodyAction.close,
+        };
+        await rejectBill.mutateAsync({
+          id: rejectTarget.referenceId,
+          data: billBody,
         });
       }
       toast({
@@ -179,10 +193,11 @@ export default function Approvals() {
                         onClick={async () => {
                           if (!confirm(`Delete this ${item.type}? This cannot be undone.`)) return;
                           try {
-                            const path = item.type === "expense"
-                              ? `/expenses/${item.referenceId}`
-                              : `/bills/${item.referenceId}`;
-                            await apiJson(path, { method: "DELETE" });
+                            if (item.type === "expense") {
+                              await deleteExpense.mutateAsync({ id: item.referenceId });
+                            } else {
+                              await deleteBill.mutateAsync({ id: item.referenceId });
+                            }
                             toast({ title: "Item deleted" });
                             queryClient.invalidateQueries({ queryKey: getListApprovalsQueryKey() });
                           } catch (e) {

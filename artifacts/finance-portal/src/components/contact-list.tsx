@@ -1,5 +1,18 @@
-import { useEffect, useState } from "react";
-import { apiJson } from "@/lib/api";
+import { useState } from "react";
+import {
+  useListVendorContacts,
+  useListProgramContacts,
+  useCreateVendorContact,
+  useCreateProgramContact,
+  useUpdateVendorContact,
+  useUpdateProgramContact,
+  useDeleteVendorContact,
+  useDeleteProgramContact,
+  getListVendorContactsQueryKey,
+  getListProgramContactsQueryKey,
+  type ContactBody,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,37 +48,44 @@ type Props = {
 
 export function ContactList({ parentId, kind }: Props) {
   const { toast } = useToast();
-  const [contacts, setContacts] = useState<Contact[] | null>(null);
+  const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Contact | null>(null);
   const [creating, setCreating] = useState(false);
 
-  const listUrl = kind === "vendor" ? `/vendors/${parentId}/contacts` : `/programs/${parentId}/contacts`;
-  const createUrl = listUrl;
-  const itemUrl = (id: number) =>
-    kind === "vendor" ? `/vendor-contacts/${id}` : `/program-contacts/${id}`;
+  const vendorQuery = useListVendorContacts(parentId, {
+    query: { enabled: kind === "vendor" },
+  });
+  const programQuery = useListProgramContacts(parentId, {
+    query: { enabled: kind === "program" },
+  });
+  const active = kind === "vendor" ? vendorQuery : programQuery;
+  const contacts = active.data
+    ? ((active.data as { contacts: Contact[] }).contacts ?? null)
+    : null;
 
-  const refresh = async () => {
-    try {
-      const data = await apiJson<{ contacts: Contact[] }>(listUrl);
-      setContacts(data.contacts);
-    } catch (e) {
-      toast({
-        title: "Could not load contacts",
-        description: e instanceof Error ? e.message : undefined,
-        variant: "destructive",
+  const deleteVendorContact = useDeleteVendorContact();
+  const deleteProgramContact = useDeleteProgramContact();
+
+  const refresh = () => {
+    if (kind === "vendor") {
+      queryClient.invalidateQueries({
+        queryKey: getListVendorContactsQueryKey(parentId),
+      });
+    } else {
+      queryClient.invalidateQueries({
+        queryKey: getListProgramContactsQueryKey(parentId),
       });
     }
   };
 
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parentId, kind]);
-
   const handleDelete = async (c: Contact) => {
     if (!confirm(`Remove contact "${c.name}"?`)) return;
     try {
-      await apiJson(itemUrl(c.id), { method: "DELETE" });
+      if (kind === "vendor") {
+        await deleteVendorContact.mutateAsync({ contactId: c.id });
+      } else {
+        await deleteProgramContact.mutateAsync({ contactId: c.id });
+      }
       toast({ title: "Contact removed" });
       refresh();
     } catch (e) {
@@ -137,7 +157,8 @@ export function ContactList({ parentId, kind }: Props) {
       )}
       {creating && (
         <ContactDialog
-          createUrl={createUrl}
+          kind={kind}
+          parentId={parentId}
           onClose={() => setCreating(false)}
           onSaved={() => {
             setCreating(false);
@@ -147,8 +168,9 @@ export function ContactList({ parentId, kind }: Props) {
       )}
       {editing && (
         <ContactDialog
+          kind={kind}
+          parentId={parentId}
           contact={editing}
-          itemUrl={itemUrl(editing.id)}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -162,18 +184,23 @@ export function ContactList({ parentId, kind }: Props) {
 
 function ContactDialog({
   contact,
-  createUrl,
-  itemUrl,
+  kind,
+  parentId,
   onClose,
   onSaved,
 }: {
   contact?: Contact;
-  createUrl?: string;
-  itemUrl?: string;
+  kind: "vendor" | "program";
+  parentId: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const createVendorContact = useCreateVendorContact();
+  const createProgramContact = useCreateProgramContact();
+  const updateVendorContact = useUpdateVendorContact();
+  const updateProgramContact = useUpdateProgramContact();
+
   const [name, setName] = useState(contact?.name ?? "");
   const [role, setRole] = useState(contact?.role ?? "");
   const [email, setEmail] = useState(contact?.email ?? "");
@@ -188,12 +215,38 @@ function ContactDialog({
     }
     setBusy(true);
     try {
-      const body = { name: name.trim(), role, email, phone, isPrimary };
-      if (contact && itemUrl) {
-        await apiJson(itemUrl, { method: "PUT", body });
+      const body: ContactBody = {
+        name: name.trim(),
+        role,
+        email,
+        phone,
+        isPrimary,
+      };
+      if (contact) {
+        if (kind === "vendor") {
+          await updateVendorContact.mutateAsync({
+            contactId: contact.id,
+            data: body,
+          });
+        } else {
+          await updateProgramContact.mutateAsync({
+            contactId: contact.id,
+            data: body,
+          });
+        }
         toast({ title: "Contact updated" });
-      } else if (createUrl) {
-        await apiJson(createUrl, { method: "POST", body });
+      } else {
+        if (kind === "vendor") {
+          await createVendorContact.mutateAsync({
+            id: parentId,
+            data: body,
+          });
+        } else {
+          await createProgramContact.mutateAsync({
+            id: parentId,
+            data: body,
+          });
+        }
         toast({ title: "Contact added" });
       }
       onSaved();

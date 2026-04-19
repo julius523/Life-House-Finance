@@ -1,15 +1,10 @@
-import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { AlertTriangle } from "lucide-react";
-import { apiJson } from "@/lib/api";
+import {
+  useListJournalEntryDrafts,
+  ListJournalEntryDraftsScope,
+} from "@workspace/api-client-react";
 import { useAuth } from "@/lib/auth";
-
-type DraftRow = {
-  id: number;
-  entryDate: string | null;
-  memo: string | null;
-  status: "draft" | "submitted" | "approved" | "rejected" | "posted";
-};
 
 const OPEN_STATUSES = ["draft", "submitted", "approved"] as const;
 
@@ -25,39 +20,22 @@ export function PeriodDraftsBanner({
   const { user } = useAuth();
   const role = user?.role;
   const canSeeDrafts = role === "admin" || role === "approver";
-  const [drafts, setDrafts] = useState<DraftRow[] | null>(null);
+  const validRange =
+    /^\d{4}-\d{2}-\d{2}$/.test(fromDate) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(toDate);
 
-  useEffect(() => {
-    if (!canSeeDrafts) {
-      setDrafts(null);
-      return;
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate)) {
-      setDrafts(null);
-      return;
-    }
-    let cancelled = false;
-    const params = new URLSearchParams({
-      scope: "all",
+  const { data } = useListJournalEntryDrafts(
+    {
+      scope: ListJournalEntryDraftsScope.all,
       entryDateFrom: fromDate,
       entryDateTo: toDate,
       statuses: OPEN_STATUSES.join(","),
-    });
-    apiJson<{ drafts: DraftRow[] }>(
-      `/accounting/journal-entry-drafts?${params.toString()}`,
-    )
-      .then((data) => {
-        if (!cancelled) setDrafts(data.drafts);
-      })
-      .catch(() => {
-        if (!cancelled) setDrafts(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [canSeeDrafts, fromDate, toDate]);
+    },
+    { query: { enabled: canSeeDrafts && validRange } },
+  );
 
-  if (!canSeeDrafts || !drafts || drafts.length === 0) return null;
+  const drafts = data?.drafts ?? [];
+  if (!canSeeDrafts || !validRange || drafts.length === 0) return null;
 
   const count = drafts.length;
   return (

@@ -18,7 +18,17 @@ import {
 } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { apiJson } from "@/lib/api";
+import {
+  useListCopilotThreads,
+  useGetCopilotThread,
+  useCreateCopilotThread,
+  useUpdateCopilotThread,
+  useDeleteCopilotThread,
+  usePingAccountingDiagnostics,
+  getListCopilotThreadsQueryKey,
+  type UpdateCopilotThreadBody,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Calculator,
   Send,
@@ -147,43 +157,75 @@ export default function AccountingPage() {
   );
 
   // ---- Load thread list ---------------------------------------------------
-  const loadThreads = async () => {
-    try {
-      const data = await apiJson<{ threads: ThreadSummary[] }>(
-        "/accounting/threads",
-      );
-      setThreads(data.threads);
-      if (data.threads.length > 0 && activeThreadId === null) {
-        setActiveThreadId(data.threads[0]!.id);
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed to load conversations";
-      toast({ title: "Could not load conversations", description: msg, variant: "destructive" });
+  const queryClient = useQueryClient();
+  const createThreadMut = useCreateCopilotThread();
+  const updateThreadMut = useUpdateCopilotThread();
+  const deleteThreadMut = useDeleteCopilotThread();
+  const pingDiagnosticsMut = usePingAccountingDiagnostics();
+
+  const { data: threadsData, error: threadsError } = useListCopilotThreads();
+  useEffect(() => {
+    if (threadsError) {
+      const msg =
+        threadsError instanceof Error
+          ? threadsError.message
+          : "Failed to load conversations";
+      toast({
+        title: "Could not load conversations",
+        description: msg,
+        variant: "destructive",
+      });
     }
+  }, [threadsError, toast]);
+  useEffect(() => {
+    if (!threadsData) return;
+    const list = (threadsData as { threads?: ThreadSummary[] }).threads ?? [];
+    setThreads(list);
+    if (list.length > 0 && activeThreadId === null) {
+      setActiveThreadId(list[0]!.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadsData]);
+
+  const loadThreads = () => {
+    queryClient.invalidateQueries({ queryKey: getListCopilotThreadsQueryKey() });
   };
 
-  useEffect(() => {
-    void loadThreads();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // ---- Load messages for active thread -----------------------------------
+  const {
+    data: activeThreadData,
+    isFetching: loadingActiveThread,
+    error: activeThreadError,
+  } = useGetCopilotThread(activeThreadId ?? 0, {
+    query: { enabled: activeThreadId !== null },
+  });
+  useEffect(() => {
+    setLoadingThread(loadingActiveThread);
+  }, [loadingActiveThread]);
   useEffect(() => {
     if (activeThreadId === null) {
       setMessages([]);
       return;
     }
-    setLoadingThread(true);
-    apiJson<{ thread: ThreadSummary; messages: CopilotMessage[] }>(
-      `/accounting/threads/${activeThreadId}`,
-    )
-      .then((data) => setMessages(data.messages))
-      .catch((e) => {
-        const msg = e instanceof Error ? e.message : "Failed to load thread";
-        toast({ title: "Could not load conversation", description: msg, variant: "destructive" });
-      })
-      .finally(() => setLoadingThread(false));
-  }, [activeThreadId, toast]);
+    if (activeThreadData) {
+      const ms =
+        (activeThreadData as { messages?: CopilotMessage[] }).messages ?? [];
+      setMessages(ms);
+    }
+  }, [activeThreadData, activeThreadId]);
+  useEffect(() => {
+    if (activeThreadError) {
+      const msg =
+        activeThreadError instanceof Error
+          ? activeThreadError.message
+          : "Failed to load thread";
+      toast({
+        title: "Could not load conversation",
+        description: msg,
+        variant: "destructive",
+      });
+    }
+  }, [activeThreadError, toast]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -203,16 +245,12 @@ export default function AccountingPage() {
     try {
       let threadId = activeThreadId;
       if (threadId === null) {
-        const created = await apiJson<{ thread: ThreadSummary }>(
-          "/accounting/threads",
-          { method: "POST", body: {} },
-        );
+        const created = (await createThreadMut.mutateAsync()) as {
+          thread: ThreadSummary;
+        };
         threadId = created.thread.id;
         setActiveThreadId(threadId);
-        setThreads((t) => [
-          { ...created.thread, messageCount: 0 },
-          ...t,
-        ]);
+        setThreads((t) => [{ ...created.thread, messageCount: 0 }, ...t]);
       }
 
       // Optimistic user bubble
@@ -283,7 +321,7 @@ export default function AccountingPage() {
   const deleteThread = async (id: number) => {
     if (!confirm("Delete this conversation? This cannot be undone.")) return;
     try {
-      await apiJson(`/accounting/threads/${id}`, { method: "DELETE" });
+      await deleteThreadMut.mutateAsync({ id });
       setThreads((t) => t.filter((x) => x.id !== id));
       if (activeThreadId === id) {
         setActiveThreadId(null);
@@ -307,10 +345,8 @@ export default function AccountingPage() {
       return;
     }
     try {
-      await apiJson(`/accounting/threads/${id}`, {
-        method: "PATCH",
-        body: { title },
-      });
+      const threadBody: UpdateCopilotThreadBody = { title };
+      await updateThreadMut.mutateAsync({ id, data: threadBody });
       setThreads((t) => t.map((x) => (x.id === id ? { ...x, title } : x)));
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to rename";
@@ -324,10 +360,10 @@ export default function AccountingPage() {
   const runDiagnostics = async () => {
     setPingingDiagnostics(true);
     try {
-      const data = await apiJson<{ status: string; detail: string }>(
-        "/accounting/diagnostics/ping",
-        { method: "POST", body: {} },
-      );
+      const data = (await pingDiagnosticsMut.mutateAsync()) as {
+        status: string;
+        detail: string;
+      };
       setDiagnostics(data);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to ping";

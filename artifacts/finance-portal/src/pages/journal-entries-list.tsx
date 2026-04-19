@@ -30,7 +30,17 @@ import {
 import { Empty } from "@/components/ui/empty";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { apiJson } from "@/lib/api";
+import {
+  useListJournalEntries,
+  useListJournalEntryDrafts,
+  useDeleteJournalEntryDraft,
+  getListJournalEntryDraftsQueryKey,
+  ListJournalEntriesStatus,
+  ListJournalEntriesSource,
+  type ListJournalEntriesParams,
+  type ListJournalEntryDraftsParams,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -170,47 +180,28 @@ export default function JournalEntriesListPage() {
   const [to, setTo] = useState<string>("");
   const [page, setPage] = useState(0);
 
-  const [entries, setEntries] = useState<JournalEntry[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const deleteDraftMut = useDeleteJournalEntryDraft();
 
   const [includeLines, setIncludeLines] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const [drafts, setDrafts] = useState<DraftSummary[]>([]);
-  const [draftsLoading, setDraftsLoading] = useState(true);
   const [draftScope, setDraftScope] = useState<DraftScope>("mine");
   const [draftStatusFilter, setDraftStatusFilter] =
     useState<DraftStatusFilter>("all");
-  const [draftRefreshKey, setDraftRefreshKey] = useState(0);
 
-  useEffect(() => {
-    if (!canView) return;
-    let cancelled = false;
-    setDraftsLoading(true);
-    apiJson<{ drafts: DraftSummary[] }>(
-      `/accounting/journal-entry-drafts?scope=${draftScope}`,
-    )
-      .then((data) => {
-        if (!cancelled) {
-          const filtered =
-            draftStatusFilter === "all"
-              ? data.drafts
-              : data.drafts.filter((d) => d.status === draftStatusFilter);
-          setDrafts(filtered);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setDrafts([]);
-      })
-      .finally(() => {
-        if (!cancelled) setDraftsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [canView, draftScope, draftStatusFilter, draftRefreshKey]);
+  const draftsParams: ListJournalEntryDraftsParams = { scope: draftScope };
+  const { data: draftsData, isLoading: draftsLoading } =
+    useListJournalEntryDrafts(draftsParams, {
+      query: { enabled: canView },
+    });
+  const drafts = useMemo(() => {
+    const all = (draftsData as { drafts?: DraftSummary[] } | undefined)
+      ?.drafts ?? [];
+    return draftStatusFilter === "all"
+      ? all
+      : all.filter((d) => d.status === draftStatusFilter);
+  }, [draftsData, draftStatusFilter]);
 
   const discardDraft = async (id: number, version: number) => {
     if (
@@ -222,12 +213,14 @@ export default function JournalEntriesListPage() {
     try {
       // Task #44 — send last-seen version so we don't blow away a draft
       // that someone else just edited.
-      await apiJson<null>(
-        `/accounting/journal-entry-drafts/${id}?expectedVersion=${version}`,
-        { method: "DELETE" },
-      );
+      await deleteDraftMut.mutateAsync({
+        id,
+        params: { expectedVersion: version },
+      });
       toast({ title: "Draft discarded" });
-      setDraftRefreshKey((k) => k + 1);
+      queryClient.invalidateQueries({
+        queryKey: getListJournalEntryDraftsQueryKey(draftsParams),
+      });
     } catch (e) {
       toast({
         title: "Could not discard draft",
@@ -242,47 +235,51 @@ export default function JournalEntriesListPage() {
     setPage(0);
   }, [status, source, from, to]);
 
-  const queryString = useMemo(() => {
-    const p = new URLSearchParams();
-    if (status !== "all") p.set("status", status);
-    if (source !== "all") p.set("source", source);
-    if (from) p.set("from", from);
-    if (to) p.set("to", to);
-    p.set("limit", String(PAGE_SIZE));
-    p.set("offset", String(page * PAGE_SIZE));
-    return p.toString();
+  const entriesParams = useMemo<ListJournalEntriesParams>(() => {
+    const p: ListJournalEntriesParams = {
+      limit: PAGE_SIZE,
+      offset: page * PAGE_SIZE,
+    };
+    if (status !== "all") {
+      p.status = status as (typeof ListJournalEntriesStatus)[
+        keyof typeof ListJournalEntriesStatus
+      ];
+    }
+    if (source !== "all") {
+      p.source = source as (typeof ListJournalEntriesSource)[
+        keyof typeof ListJournalEntriesSource
+      ];
+    }
+    if (from) p.from = from;
+    if (to) p.to = to;
+    return p;
   }, [status, source, from, to, page]);
 
+  const {
+    data: entriesData,
+    isLoading: loading,
+    error: entriesError,
+  } = useListJournalEntries(entriesParams, {
+    query: { enabled: canView },
+  });
+  const entries = ((entriesData as { entries?: JournalEntry[] } | undefined)
+    ?.entries ?? []) as JournalEntry[];
+  const total = (entriesData as { total?: number } | undefined)?.total ?? 0;
+  const error = entriesError
+    ? entriesError instanceof Error
+      ? entriesError.message
+      : "Failed to load journal entries."
+    : null;
   useEffect(() => {
-    if (!canView) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    apiJson<{ entries: JournalEntry[]; total: number }>(
-      `/accounting/journal-entries?${queryString}`,
-    )
-      .then((data) => {
-        if (cancelled) return;
-        setEntries(data.entries);
-        setTotal(data.total);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        const msg = e instanceof Error ? e.message : "Failed to load journal entries.";
-        setError(msg);
-        toast({
-          title: "Could not load journal entries",
-          description: msg,
-          variant: "destructive",
-        });
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+    if (entriesError) {
+      toast({
+        title: "Could not load journal entries",
+        description:
+          entriesError instanceof Error ? entriesError.message : undefined,
+        variant: "destructive",
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [queryString, canView, toast]);
+    }
+  }, [entriesError, toast]);
 
   if (!canView) {
     return (

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useListPrograms, useCreateProgram, useUpdateProgram, getListProgramsQueryKey } from "@workspace/api-client-react";
+import { useListPrograms, useCreateProgram, useUpdateProgram, useDeleteProgram, getListProgramsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -17,7 +17,6 @@ import { useToast } from "@/hooks/use-toast";
 import { Empty } from "@/components/ui/empty";
 import { Badge } from "@/components/ui/badge";
 import { ContactList } from "@/components/contact-list";
-import { apiJson } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 const formSchema = z.object({
@@ -50,6 +49,7 @@ export default function ProgramsList() {
   );
 
   const createProgram = useCreateProgram();
+  const deleteProgram = useDeleteProgram();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -295,7 +295,7 @@ export default function ProgramsList() {
                           onClick={async () => {
                             if (!confirm(`Delete program "${program.name}"?`)) return;
                             try {
-                              await apiJson(`/programs/${program.id}`, { method: "DELETE" });
+                              await deleteProgram.mutateAsync({ id: program.id });
                               toast({ title: "Program deleted" });
                               queryClient.invalidateQueries({ queryKey: getListProgramsQueryKey() });
                             } catch (e) {

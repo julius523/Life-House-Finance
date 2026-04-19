@@ -397,6 +397,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Vendor"
+    delete:
+      operationId: deleteVendor
+      tags: [vendors]
+      summary: Delete a vendor (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
 
   /bills:
     get:
@@ -493,6 +514,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Bill"
+    delete:
+      operationId: deleteBill
+      tags: [bills]
+      summary: Delete a bill (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
 
   /bills/{id}/reject:
     post:
@@ -1212,6 +1251,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Program"
+    delete:
+      operationId: deleteProgram
+      tags: [programs]
+      summary: Delete a program (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
 
   /programs/{id}/spending:
     get:
@@ -2030,6 +2090,958 @@ paths:
                   ok:
                     type: boolean
                 required: [ok]
+
+  /credit-summary:
+    get:
+      operationId: getCreditSummary
+      tags: [credits]
+      summary: Aggregate totals of credits grouped by status
+      responses:
+        "200":
+          description: Credit summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditSummary"
+
+  /credits:
+    get:
+      operationId: listCredits
+      tags: [credits]
+      summary: List credits, optionally filtered by status
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/CreditStatus"
+      responses:
+        "200":
+          description: Credits list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credits:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Credit"
+                required: [credits]
+    post:
+      operationId: createCredit
+      tags: [credits]
+      summary: Create a new credit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCreditBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credit:
+                    $ref: "#/components/schemas/Credit"
+                required: [credit]
+
+  /credits/{id}:
+    put:
+      operationId: updateCredit
+      tags: [credits]
+      summary: Update an existing credit
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCreditBody"
+      responses:
+        "200":
+          description: Updated credit
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credit:
+                    $ref: "#/components/schemas/Credit"
+                required: [credit]
+    delete:
+      operationId: deleteCredit
+      tags: [credits]
+      summary: Delete a credit
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+
+  /vendors/{id}/contacts:
+    get:
+      operationId: listVendorContacts
+      tags: [vendors]
+      summary: List contacts for a vendor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Contacts list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contacts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Contact"
+                required: [contacts]
+    post:
+      operationId: createVendorContact
+      tags: [vendors]
+      summary: Create a vendor contact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contact:
+                    $ref: "#/components/schemas/Contact"
+                required: [contact]
+
+  /vendor-contacts/{contactId}:
+    put:
+      operationId: updateVendorContact
+      tags: [vendors]
+      summary: Update a vendor contact
+      parameters:
+        - name: contactId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactBody"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contact:
+                    $ref: "#/components/schemas/Contact"
+                required: [contact]
+    delete:
+      operationId: deleteVendorContact
+      tags: [vendors]
+      summary: Delete a vendor contact
+      parameters:
+        - name: contactId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+
+  /programs/{id}/contacts:
+    get:
+      operationId: listProgramContacts
+      tags: [programs]
+      summary: List contacts for a program
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Contacts list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contacts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Contact"
+                required: [contacts]
+    post:
+      operationId: createProgramContact
+      tags: [programs]
+      summary: Create a program contact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contact:
+                    $ref: "#/components/schemas/Contact"
+                required: [contact]
+
+  /program-contacts/{contactId}:
+    put:
+      operationId: updateProgramContact
+      tags: [programs]
+      summary: Update a program contact
+      parameters:
+        - name: contactId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactBody"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contact:
+                    $ref: "#/components/schemas/Contact"
+                required: [contact]
+    delete:
+      operationId: deleteProgramContact
+      tags: [programs]
+      summary: Delete a program contact
+      parameters:
+        - name: contactId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+
+  /admin/users:
+    get:
+      operationId: listAdminUsers
+      tags: [admin]
+      summary: List all users (admin only)
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuthUser"
+                required: [users]
+
+  /accounting/threads:
+    get:
+      operationId: listCopilotThreads
+      tags: [accounting]
+      summary: List the current user's copilot threads
+      responses:
+        "200":
+          description: Threads
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  threads:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CopilotThread"
+                required: [threads]
+    post:
+      operationId: createCopilotThread
+      tags: [accounting]
+      summary: Create an empty copilot thread
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  thread:
+                    $ref: "#/components/schemas/CopilotThread"
+                required: [thread]
+
+  /accounting/threads/{id}:
+    get:
+      operationId: getCopilotThread
+      tags: [accounting]
+      summary: Get a copilot thread with all messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Thread detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  thread:
+                    $ref: "#/components/schemas/CopilotThread"
+                  messages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CopilotMessage"
+                required: [thread, messages]
+    patch:
+      operationId: updateCopilotThread
+      tags: [accounting]
+      summary: Rename or archive a copilot thread
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                archived:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated thread
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  thread:
+                    $ref: "#/components/schemas/CopilotThread"
+                required: [thread]
+    delete:
+      operationId: deleteCopilotThread
+      tags: [accounting]
+      summary: Delete a copilot thread and its messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /accounting/agent-actions:
+    get:
+      operationId: listAgentActions
+      tags: [accounting]
+      summary: List agent actions, optionally filtered by status / scope
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: mine
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Actions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  actions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentAction"
+                  counts:
+                    type: object
+                    additionalProperties: true
+                required: [actions]
+
+  /accounting/agent-actions/{id}/approve:
+    post:
+      operationId: approveAgentAction
+      tags: [accounting]
+      summary: Approve an agent action
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentActionDecisionBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /accounting/agent-actions/{id}/reject:
+    post:
+      operationId: rejectAgentAction
+      tags: [accounting]
+      summary: Reject an agent action
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentActionDecisionBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /accounting/agent-actions/{id}/cancel:
+    post:
+      operationId: cancelAgentAction
+      tags: [accounting]
+      summary: Cancel an agent action
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentActionDecisionBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /accounting/journal-entries:
+    post:
+      operationId: createJournalEntry
+      tags: [accounting]
+      summary: Post a manual journal entry (admin/approver only)
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            description: UUID; duplicate retries with the same key replay the prior result.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualJournalEntryBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateJournalEntryResponse"
+        "200":
+          description: Idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateJournalEntryResponse"
+    get:
+      operationId: listJournalEntries
+      tags: [accounting]
+      summary: List posted journal entries
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [posted, reversed]
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [manual, copilot, expense]
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/JournalEntry"
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                required: [entries, total]
+
+  /accounting/journal-entries/{id}:
+    get:
+      operationId: getJournalEntry
+      tags: [accounting]
+      summary: Get a single journal entry with lines
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Entry detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  journalEntry:
+                    $ref: "#/components/schemas/JournalEntry"
+                required: [journalEntry]
+
+  /accounting/journal-entries/{id}/approval-history:
+    get:
+      operationId: getJournalEntryApprovalHistory
+      tags: [accounting]
+      summary: Get the approval-chain history of a posted JE
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: History
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  manualDraftId:
+                    type: integer
+                    nullable: true
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ApprovalEvent"
+                required: [events]
+
+  /accounting/journal-entry-drafts:
+    get:
+      operationId: listJournalEntryDrafts
+      tags: [accounting]
+      summary: List manual journal-entry drafts
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [mine, all]
+        - name: statuses
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: entryDateFrom
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: entryDateTo
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Drafts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drafts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/JournalEntryDraftSummary"
+                required: [drafts]
+    post:
+      operationId: createJournalEntryDraft
+      tags: [accounting]
+      summary: Create a new manual JE draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payload:
+                  $ref: "#/components/schemas/JournalEntryDraftPayload"
+              required: [payload]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  draft:
+                    $ref: "#/components/schemas/JournalEntryDraft"
+                required: [draft]
+
+  /accounting/journal-entry-drafts/{id}:
+    get:
+      operationId: getJournalEntryDraft
+      tags: [accounting]
+      summary: Get a single manual JE draft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Draft
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  draft:
+                    $ref: "#/components/schemas/JournalEntryDraft"
+                required: [draft]
+    patch:
+      operationId: updateJournalEntryDraft
+      tags: [accounting]
+      summary: Update a manual JE draft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payload:
+                  $ref: "#/components/schemas/JournalEntryDraftPayload"
+                expectedVersion:
+                  type: integer
+              required: [payload, expectedVersion]
+      responses:
+        "200":
+          description: Updated draft
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  draft:
+                    $ref: "#/components/schemas/JournalEntryDraft"
+                required: [draft]
+    delete:
+      operationId: deleteJournalEntryDraft
+      tags: [accounting]
+      summary: Discard a manual JE draft (only when status=draft|rejected)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: expectedVersion
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /accounting/journal-entry-drafts/{id}/submit:
+    post:
+      operationId: submitJournalEntryDraft
+      tags: [accounting]
+      summary: Submit a draft for approval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JournalEntryDraftActionBody"
+      responses:
+        "200":
+          description: Updated draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntryDraftActionResponse"
+
+  /accounting/journal-entry-drafts/{id}/approve:
+    post:
+      operationId: approveJournalEntryDraft
+      tags: [accounting]
+      summary: Approve a submitted draft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JournalEntryDraftActionBody"
+      responses:
+        "200":
+          description: Updated draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntryDraftActionResponse"
+
+  /accounting/journal-entry-drafts/{id}/reject:
+    post:
+      operationId: rejectJournalEntryDraft
+      tags: [accounting]
+      summary: Reject a submitted draft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/JournalEntryDraftActionBody"
+                - type: object
+                  properties:
+                    reason:
+                      type: string
+      responses:
+        "200":
+          description: Updated draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntryDraftActionResponse"
+
+  /accounting/journal-entry-drafts/{id}/post:
+    post:
+      operationId: postJournalEntryDraft
+      tags: [accounting]
+      summary: Post an approved draft to the ledger
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JournalEntryDraftActionBody"
+      responses:
+        "200":
+          description: Updated draft + posted JE summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntryDraftActionResponse"
+
+  /accounting/diagnostics/ping:
+    post:
+      operationId: pingAccountingDiagnostics
+      tags: [accounting]
+      summary: Admin-only health check against the LLM provider
+      responses:
+        "200":
+          description: Diagnostics result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  detail:
+                    type: string
+                required: [status, detail]
 
 components:
   schemas:
@@ -4318,3 +5330,717 @@ components:
           type: integer
         isDefault:
           type: boolean
+
+    CreditStatus:
+      type: string
+      enum: [pipeline, received, delayed, write-off, opportunity]
+
+    Credit:
+      type: object
+      properties:
+        id:
+          type: integer
+        source:
+          type: string
+        programId:
+          type: integer
+          nullable: true
+        programName:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        expectedDate:
+          type: string
+          nullable: true
+        receivedDate:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/CreditStatus"
+        notes:
+          type: string
+          nullable: true
+        submittedBy:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - source
+        - programId
+        - programName
+        - amount
+        - expectedDate
+        - receivedDate
+        - status
+        - notes
+        - submittedBy
+        - createdAt
+
+    CreditSummary:
+      type: object
+      properties:
+        realized:
+          type: number
+        potential:
+          type: number
+        writeOff:
+          type: number
+        byStatus:
+          type: array
+          items:
+            type: object
+            properties:
+              status:
+                $ref: "#/components/schemas/CreditStatus"
+              amount:
+                type: number
+              count:
+                type: integer
+            required: [status, amount, count]
+      required: [realized, potential, writeOff, byStatus]
+
+    CreateCreditBody:
+      type: object
+      properties:
+        source:
+          type: string
+        programId:
+          type: integer
+          nullable: true
+        amount:
+          type: number
+        expectedDate:
+          type: string
+          nullable: true
+        receivedDate:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/CreditStatus"
+        notes:
+          type: string
+          nullable: true
+        submittedBy:
+          type: string
+          nullable: true
+      required:
+        - source
+        - amount
+
+    Contact:
+      type: object
+      properties:
+        id:
+          type: integer
+        vendorId:
+          type: integer
+        programId:
+          type: integer
+        name:
+          type: string
+        role:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        isPrimary:
+          type: boolean
+        createdAt:
+          type: string
+      required:
+        - id
+        - name
+        - isPrimary
+        - createdAt
+
+    ContactBody:
+      type: object
+      properties:
+        name:
+          type: string
+        role:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        isPrimary:
+          type: boolean
+      required:
+        - name
+
+    AuthUser:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        role:
+          type: string
+          enum: [admin, approver, submitter]
+      required:
+        - id
+        - email
+        - firstName
+        - lastName
+        - role
+
+    CopilotThread:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        archivedAt:
+          type: string
+          nullable: true
+        messageCount:
+          type: integer
+      required:
+        - id
+        - createdAt
+        - updatedAt
+
+    CopilotMessage:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: integer
+        threadId:
+          type: integer
+        role:
+          type: string
+          enum: [user, assistant]
+        status:
+          type: string
+        userText:
+          type: string
+          nullable: true
+        answer:
+          type: string
+          nullable: true
+        why:
+          type: string
+          nullable: true
+        missingInformation:
+          type: string
+          nullable: true
+        riskFlags:
+          type: string
+          nullable: true
+        recommendedNextStep:
+          type: string
+          nullable: true
+        humanReviewNeeded:
+          type: boolean
+          nullable: true
+        confidence:
+          type: string
+          nullable: true
+        pageContext:
+          nullable: true
+        modelName:
+          type: string
+          nullable: true
+        latencyMs:
+          type: integer
+          nullable: true
+        errorCode:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        toolCalls:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        sources:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        agentActions:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required:
+        - id
+        - threadId
+        - role
+        - status
+        - createdAt
+
+    AgentAction:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        threadId:
+          type: integer
+        assistantMessageId:
+          type: integer
+          nullable: true
+        actionType:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+        evidence:
+          type: object
+          nullable: true
+          additionalProperties: true
+        confidence:
+          type: string
+          nullable: true
+        riskFlags:
+          type: string
+          nullable: true
+        status:
+          type: string
+        createdAt:
+          type: string
+        reviewedBy:
+          type: integer
+          nullable: true
+        reviewedAt:
+          type: string
+          nullable: true
+        reviewNotes:
+          type: string
+          nullable: true
+        submitter:
+          type: object
+          nullable: true
+          additionalProperties: true
+        reviewer:
+          type: object
+          nullable: true
+          additionalProperties: true
+        sources:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required:
+        - id
+        - userId
+        - threadId
+        - actionType
+        - status
+        - createdAt
+
+    AgentActionDecisionBody:
+      type: object
+      properties:
+        notes:
+          type: string
+
+    JournalEntryActor:
+      type: object
+      properties:
+        id:
+          type: integer
+        firstName:
+          type: string
+          nullable: true
+        lastName:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+      required:
+        - id
+
+    OriginatingExpenseSummary:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: integer
+        merchant:
+          type: string
+        amount:
+          type: number
+        expenseDate:
+          type: string
+        status:
+          type: string
+        programId:
+          type: integer
+          nullable: true
+        programName:
+          type: string
+          nullable: true
+        submitter:
+          type: object
+          nullable: true
+          properties:
+            name:
+              type: string
+            email:
+              type: string
+              nullable: true
+        approvedAt:
+          type: string
+          nullable: true
+      required:
+        - id
+        - merchant
+
+    JournalEntryLine:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: integer
+        lineNo:
+          type: integer
+        type:
+          type: string
+          enum: [debit, credit]
+        amountCents:
+          type: integer
+        account:
+          type: string
+        accountId:
+          type: integer
+          nullable: true
+        program:
+          type: string
+          nullable: true
+        fund:
+          type: string
+          nullable: true
+        memo:
+          type: string
+          nullable: true
+      required:
+        - id
+        - lineNo
+        - type
+        - amountCents
+        - account
+
+    ManualJournalEntryBody:
+      type: object
+      required: [entryDate, memo, lines]
+      properties:
+        entryDate:
+          type: string
+          description: YYYY-MM-DD
+        memo:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        lines:
+          type: array
+          minItems: 2
+          maxItems: 100
+          items:
+            type: object
+            required: [type, amount, account_code]
+            properties:
+              type:
+                type: string
+                enum: [debit, credit]
+              amount:
+                type: number
+              account_code:
+                type: string
+              program:
+                type: string
+                nullable: true
+              fund:
+                type: string
+                nullable: true
+              memo:
+                type: string
+                nullable: true
+
+    CreateJournalEntryResponse:
+      type: object
+      required: [journalEntry]
+      properties:
+        journalEntry:
+          type: object
+          required: [id, entryNo]
+          properties:
+            id:
+              type: integer
+            entryNo:
+              type: string
+          additionalProperties: true
+
+    JournalEntry:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: integer
+        entryNo:
+          type: string
+        entryDate:
+          type: string
+        memo:
+          type: string
+        status:
+          type: string
+          enum: [posted, reversed]
+        totalsDebitsCents:
+          type: integer
+        totalsCreditsCents:
+          type: integer
+        postedAt:
+          type: string
+        postedByUserId:
+          type: integer
+        postedBy:
+          $ref: "#/components/schemas/JournalEntryActor"
+          nullable: true
+        agentActionId:
+          type: integer
+          nullable: true
+        threadId:
+          type: integer
+          nullable: true
+        assistantMessageId:
+          type: integer
+          nullable: true
+        approverUserId:
+          type: integer
+          nullable: true
+        approver:
+          $ref: "#/components/schemas/JournalEntryActor"
+          nullable: true
+        evidenceSnapshot:
+          nullable: true
+        reversesJournalEntryId:
+          type: integer
+          nullable: true
+        reversedByJournalEntryId:
+          type: integer
+          nullable: true
+        reversalReason:
+          type: string
+          nullable: true
+        manualDraftId:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalEntryLine"
+        source:
+          type: string
+          enum: [manual, copilot, expense]
+        originatingExpense:
+          $ref: "#/components/schemas/OriginatingExpenseSummary"
+          nullable: true
+      required:
+        - id
+        - entryNo
+        - entryDate
+        - status
+
+    ApprovalEvent:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+        description:
+          type: string
+        actor:
+          type: string
+          nullable: true
+        actorUserId:
+          type: integer
+          nullable: true
+        actorEmail:
+          type: string
+          nullable: true
+        actorFirstName:
+          type: string
+          nullable: true
+        actorLastName:
+          type: string
+          nullable: true
+        metadata:
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - type
+        - createdAt
+
+    JournalEntryDraftLine:
+      type: object
+      additionalProperties: true
+      properties:
+        uid:
+          type: integer
+        type:
+          type: string
+          enum: [debit, credit]
+        accountCode:
+          type: string
+        amount:
+          type: string
+        program:
+          type: string
+        fund:
+          type: string
+        memo:
+          type: string
+      required:
+        - type
+
+    JournalEntryDraftPayload:
+      type: object
+      additionalProperties: true
+      properties:
+        entryDate:
+          type: string
+        memo:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalEntryDraftLine"
+      required:
+        - lines
+
+    JournalEntryDraft:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: integer
+        createdByUserId:
+          type: integer
+        entryDate:
+          type: string
+          nullable: true
+        memo:
+          type: string
+          nullable: true
+        payload:
+          $ref: "#/components/schemas/JournalEntryDraftPayload"
+        status:
+          type: string
+          enum: [draft, submitted, approved, rejected, posted]
+        submittedByUserId:
+          type: integer
+          nullable: true
+        submittedAt:
+          type: string
+          nullable: true
+        approvedByUserId:
+          type: integer
+          nullable: true
+        approvedAt:
+          type: string
+          nullable: true
+        rejectedByUserId:
+          type: integer
+          nullable: true
+        rejectedAt:
+          type: string
+          nullable: true
+        rejectionReason:
+          type: string
+          nullable: true
+        postedJournalEntryId:
+          type: integer
+          nullable: true
+        version:
+          type: integer
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        originatingExpense:
+          $ref: "#/components/schemas/OriginatingExpenseSummary"
+          nullable: true
+      required:
+        - id
+        - createdByUserId
+        - status
+        - version
+
+    JournalEntryDraftSummary:
+      allOf:
+        - $ref: "#/components/schemas/JournalEntryDraft"
+        - type: object
+          properties:
+            createdBy:
+              type: object
+              properties:
+                id:
+                  type: integer
+                email:
+                  type: string
+                  nullable: true
+                firstName:
+                  type: string
+                  nullable: true
+                lastName:
+                  type: string
+                  nullable: true
+
+    JournalEntryDraftActionBody:
+      type: object
+      properties:
+        expectedVersion:
+          type: integer
+        reason:
+          type: string
+      required:
+        - expectedVersion
+
+    JournalEntryDraftActionResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        draft:
+          $ref: "#/components/schemas/JournalEntryDraft"
+        journalEntry:
+          type: object
+          additionalProperties: true
+          properties:
+            id:
+              type: integer
+            entryNo:
+              type: string
+      required:
+        - draft
