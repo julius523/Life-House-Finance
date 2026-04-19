@@ -9,6 +9,7 @@ import {
 } from "@workspace/db";
 import { eq, and, desc, count, sql, ne, inArray } from "drizzle-orm";
 import { createNotification, findUserByEmail } from "../lib/notifications";
+import { generateDraftFromExpense } from "../lib/expenseDraftService";
 import {
   ListExpensesQueryParams,
   ListExpensesResponse,
@@ -79,6 +80,17 @@ function formatExpense(
     accountingEntryRef: e.accountingEntryRef ?? undefined,
     duplicateDismissed: e.duplicateDismissed,
     potentialDuplicateIds: e.duplicateDismissed ? [] : potentialDuplicateIds,
+    // Task #52 — accounting bridge state surfaced to clients so the
+    // expense list can flag blocked rows and the detail view can show
+    // mapping problems / link to the generated draft.
+    accountingStatus: e.accountingStatus as
+      | "pending"
+      | "draft_created"
+      | "posted"
+      | "blocked"
+      | "not_applicable",
+    accountingBlockReason: e.accountingBlockReason ?? undefined,
+    accountingGeneratedAt: e.accountingGeneratedAt?.toISOString(),
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString(),
   };
@@ -356,14 +368,101 @@ router.post("/expenses/:id/approve", requireRole("admin", "approver"), async (re
     type: "expense_approved",
     description: `Expense approved by ${bodyParsed.data.approvedBy}`,
     actor: bodyParsed.data.approvedBy,
+    actorUserId: req.authUser?.id ?? null,
     amount: String(expense.amount),
     referenceId: expense.id,
     referenceType: "expense",
   });
 
-  const programName = await getProgramName(expense.programId);
-  res.json(ApproveExpenseResponse.parse(formatExpense(expense, programName)));
+  // Task #52 — bridge into accounting. Approval succeeds even if draft
+  // generation blocks; we surface the result on the response so the UI
+  // can show success / blocked / mapping issues without a second call.
+  const accountingResult = await generateDraftFromExpense(expense.id, {
+    id: req.authUser?.id ?? null,
+    display: bodyParsed.data.approvedBy,
+  });
+
+  // Re-load the expense so the response reflects updated accountingStatus.
+  const [refreshed] = await db
+    .select()
+    .from(expensesTable)
+    .where(eq(expensesTable.id, expense.id));
+  const finalExpense = refreshed ?? expense;
+
+  const programName = await getProgramName(finalExpense.programId);
+  const [cat] = finalExpense.categoryId
+    ? await db
+        .select({ name: expenseCategoriesTable.name })
+        .from(expenseCategoriesTable)
+        .where(eq(expenseCategoriesTable.id, finalExpense.categoryId))
+    : [undefined];
+  const base = formatExpense(finalExpense, programName, [], cat?.name ?? null);
+  const accounting = accountingResult.ok
+    ? {
+        ok: true as const,
+        created: accountingResult.created,
+        manualJournalEntryDraftId: accountingResult.draftId,
+      }
+    : {
+        ok: false as const,
+        reason: accountingResult.reason,
+        message: accountingResult.message,
+      };
+  res.json({
+    ...ApproveExpenseResponse.parse(base),
+    accounting,
+  });
 });
+
+// Task #52 — manual retry. Same generator + same idempotency contract.
+// Admin/approver only because it can produce ledger-bound work.
+router.post(
+  "/expenses/:id/regenerate-accounting-draft",
+  requireRole("admin", "approver"),
+  async (req, res): Promise<void> => {
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [exp] = await db
+      .select()
+      .from(expensesTable)
+      .where(eq(expensesTable.id, id));
+    if (!exp) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    if (exp.status !== "approved") {
+      res.status(409).json({
+        error: "Expense must be approved before generating an accounting draft",
+        code: "EXPENSE_NOT_APPROVED",
+      });
+      return;
+    }
+    const actorDisplay = req.authUser
+      ? `${req.authUser.firstName} ${req.authUser.lastName}`.trim() ||
+        req.authUser.email
+      : "system";
+    const result = await generateDraftFromExpense(id, {
+      id: req.authUser?.id ?? null,
+      display: actorDisplay,
+    });
+    if (result.ok) {
+      res.json({
+        ok: true,
+        created: result.created,
+        manualJournalEntryDraftId: result.draftId,
+      });
+      return;
+    }
+    res.status(422).json({
+      ok: false,
+      reason: result.reason,
+      message: result.message,
+    });
+  },
+);
 
 router.post("/expenses/:id/reject", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const idParsed = RejectExpenseParams.safeParse({ id: Number(req.params["id"]) });

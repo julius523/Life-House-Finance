@@ -64,6 +64,34 @@ export interface PendingApprovalsCount {
   total: number;
 }
 
+export type AccountingDraftResultReason =
+  (typeof AccountingDraftResultReason)[keyof typeof AccountingDraftResultReason];
+
+export const AccountingDraftResultReason = {
+  missing_category: "missing_category",
+  missing_mapping: "missing_mapping",
+  archived_account: "archived_account",
+  non_postable_account: "non_postable_account",
+  invalid_payment_method_rule: "invalid_payment_method_rule",
+  other: "other",
+} as const;
+
+/**
+ * Task #52 — outcome of an attempt to bridge an expense (or future
+bill) into a manual journal entry draft. `ok=true` means a draft
+is now linked; `created` distinguishes a brand new draft from
+re-returning an existing one (idempotent retry). `ok=false`
+carries a stable machine-readable `reason` code.
+
+ */
+export interface AccountingDraftResult {
+  ok: boolean;
+  created?: boolean;
+  manualJournalEntryDraftId?: number;
+  reason?: AccountingDraftResultReason;
+  message?: string;
+}
+
 export type ExpensePaymentMethod =
   (typeof ExpensePaymentMethod)[keyof typeof ExpensePaymentMethod];
 
@@ -87,6 +115,33 @@ export const ExpenseStatus = {
   needs_correction: "needs_correction",
 } as const;
 
+/**
+ * Task
+ */
+export type ExpenseAccountingStatus =
+  (typeof ExpenseAccountingStatus)[keyof typeof ExpenseAccountingStatus];
+
+export const ExpenseAccountingStatus = {
+  pending: "pending",
+  draft_created: "draft_created",
+  posted: "posted",
+  blocked: "blocked",
+  not_applicable: "not_applicable",
+} as const;
+
+export type ExpenseAccountingBlockReason =
+  | (typeof ExpenseAccountingBlockReason)[keyof typeof ExpenseAccountingBlockReason]
+  | null;
+
+export const ExpenseAccountingBlockReason = {
+  missing_category: "missing_category",
+  missing_mapping: "missing_mapping",
+  archived_account: "archived_account",
+  non_postable_account: "non_postable_account",
+  invalid_payment_method_rule: "invalid_payment_method_rule",
+  other: "other",
+} as const;
+
 export interface Expense {
   id: number;
   submittedBy: string;
@@ -108,6 +163,10 @@ export interface Expense {
   reimbursedDate?: string;
   receiptIds?: number[];
   accountingEntryRef?: string;
+  /** Task */
+  accountingStatus?: ExpenseAccountingStatus;
+  accountingBlockReason?: ExpenseAccountingBlockReason;
+  accountingGeneratedAt?: string | null;
   /** True when the user has confirmed this is not a duplicate. */
   duplicateDismissed?: boolean;
   /** Other expense ids with matching date + amount. */
@@ -1174,6 +1233,10 @@ export const ListExpensesStatus = {
   reimbursed: "reimbursed",
   needs_correction: "needs_correction",
 } as const;
+
+export type ApproveExpense200 = Expense & {
+  accounting?: AccountingDraftResult;
+};
 
 export type ListVendorsParams = {
   search?: string;

@@ -18,10 +18,12 @@ import type {
 
 import type {
   AccountingDashboardStatus,
+  AccountingDraftResult,
   AccountingSettingsResponse,
   ActivityItem,
   ApprovalActionBody,
   ApprovalQueueItem,
+  ApproveExpense200,
   Bill,
   ChartOfAccountActivityResponse,
   ChartOfAccountDetailResponse,
@@ -961,8 +963,8 @@ export const approveExpense = async (
   id: number,
   approvalActionBody: ApprovalActionBody,
   options?: RequestInit,
-): Promise<Expense> => {
-  return customFetch<Expense>(getApproveExpenseUrl(id), {
+): Promise<ApproveExpense200> => {
+  return customFetch<ApproveExpense200>(getApproveExpenseUrl(id), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
@@ -1035,6 +1037,96 @@ export const useApproveExpense = <
   TContext
 > => {
   return useMutation(getApproveExpenseMutationOptions(options));
+};
+
+/**
+ * @summary Manually regenerate the accounting draft for an approved expense (Task
+ */
+export const getRegenerateAccountingDraftForExpenseUrl = (id: number) => {
+  return `/api/expenses/${id}/regenerate-accounting-draft`;
+};
+
+export const regenerateAccountingDraftForExpense = async (
+  id: number,
+  options?: RequestInit,
+): Promise<AccountingDraftResult> => {
+  return customFetch<AccountingDraftResult>(
+    getRegenerateAccountingDraftForExpenseUrl(id),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getRegenerateAccountingDraftForExpenseMutationOptions = <
+  TError = ErrorType<void | AccountingDraftResult>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof regenerateAccountingDraftForExpense>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof regenerateAccountingDraftForExpense>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["regenerateAccountingDraftForExpense"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof regenerateAccountingDraftForExpense>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return regenerateAccountingDraftForExpense(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RegenerateAccountingDraftForExpenseMutationResult = NonNullable<
+  Awaited<ReturnType<typeof regenerateAccountingDraftForExpense>>
+>;
+
+export type RegenerateAccountingDraftForExpenseMutationError =
+  ErrorType<void | AccountingDraftResult>;
+
+/**
+ * @summary Manually regenerate the accounting draft for an approved expense (Task
+ */
+export const useRegenerateAccountingDraftForExpense = <
+  TError = ErrorType<void | AccountingDraftResult>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof regenerateAccountingDraftForExpense>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof regenerateAccountingDraftForExpense>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(
+    getRegenerateAccountingDraftForExpenseMutationOptions(options),
+  );
 };
 
 /**

@@ -29,6 +29,17 @@ export const expensesTable = pgTable("expenses", {
     () => expenseCategoriesTable.id,
     { onDelete: "set null" },
   ),
+  // Task #52 — accounting bridge state. The operational expense status
+  // (`status`) tracks reimbursement workflow; these columns track whether
+  // an accounting draft has been generated for the expense.
+  //   pending        — newly created, never approved (no attempt yet)
+  //   draft_created  — draft generated and linked via accounting_source_links
+  //   posted         — generated draft has been posted to the ledger
+  //   blocked        — generation attempted and failed with a stable reason
+  //   not_applicable — legacy backfilled rows, never to be auto-generated
+  accountingStatus: text("accounting_status").notNull().default("pending"),
+  accountingBlockReason: text("accounting_block_reason"),
+  accountingGeneratedAt: timestamp("accounting_generated_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

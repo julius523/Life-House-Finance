@@ -145,6 +145,27 @@ export const ListExpensesResponse = zod.object({
       reimbursedDate: zod.coerce.date().optional(),
       receiptIds: zod.array(zod.number()).optional(),
       accountingEntryRef: zod.string().optional(),
+      accountingStatus: zod
+        .enum([
+          "pending",
+          "draft_created",
+          "posted",
+          "blocked",
+          "not_applicable",
+        ])
+        .optional()
+        .describe("Task"),
+      accountingBlockReason: zod
+        .enum([
+          "missing_category",
+          "missing_mapping",
+          "archived_account",
+          "non_postable_account",
+          "invalid_payment_method_rule",
+          "other",
+        ])
+        .nullish(),
+      accountingGeneratedAt: zod.coerce.date().nullish(),
       duplicateDismissed: zod
         .boolean()
         .optional()
@@ -235,6 +256,21 @@ export const GetExpenseResponse = zod.object({
   reimbursedDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   accountingEntryRef: zod.string().optional(),
+  accountingStatus: zod
+    .enum(["pending", "draft_created", "posted", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingBlockReason: zod
+    .enum([
+      "missing_category",
+      "missing_mapping",
+      "archived_account",
+      "non_postable_account",
+      "invalid_payment_method_rule",
+      "other",
+    ])
+    .nullish(),
+  accountingGeneratedAt: zod.coerce.date().nullish(),
   duplicateDismissed: zod
     .boolean()
     .optional()
@@ -323,6 +359,21 @@ export const UpdateExpenseResponse = zod.object({
   reimbursedDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   accountingEntryRef: zod.string().optional(),
+  accountingStatus: zod
+    .enum(["pending", "draft_created", "posted", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingBlockReason: zod
+    .enum([
+      "missing_category",
+      "missing_mapping",
+      "archived_account",
+      "non_postable_account",
+      "invalid_payment_method_rule",
+      "other",
+    ])
+    .nullish(),
+  accountingGeneratedAt: zod.coerce.date().nullish(),
   duplicateDismissed: zod
     .boolean()
     .optional()
@@ -354,56 +405,125 @@ export const ApproveExpenseBody = zod.object({
   notes: zod.string().optional(),
 });
 
-export const ApproveExpenseResponse = zod.object({
-  id: zod.number(),
-  submittedBy: zod.string(),
-  submittedByEmail: zod.string().optional(),
-  expenseDate: zod.coerce.date(),
-  merchant: zod.string(),
-  description: zod.string(),
-  amount: zod.number(),
-  paymentMethod: zod.enum([
-    "cash",
-    "check",
-    "credit_card",
-    "debit_card",
-    "bank_transfer",
-    "other",
-  ]),
-  programId: zod.number().optional(),
-  programName: zod.string().optional(),
-  categoryId: zod.number().nullish(),
-  categoryName: zod
-    .string()
-    .nullish()
-    .describe(
-      "Resolved category display name. Null when categoryId is null (legacy uncategorized expense).",
-    ),
-  status: zod.enum([
-    "draft",
-    "submitted",
-    "approved",
-    "rejected",
-    "reimbursed",
-    "needs_correction",
-  ]),
-  managerApprovedBy: zod.string().optional(),
-  financeApprovedBy: zod.string().optional(),
-  rejectionReason: zod.string().optional(),
-  reimbursedDate: zod.coerce.date().optional(),
-  receiptIds: zod.array(zod.number()).optional(),
-  accountingEntryRef: zod.string().optional(),
-  duplicateDismissed: zod
-    .boolean()
-    .optional()
-    .describe("True when the user has confirmed this is not a duplicate."),
-  potentialDuplicateIds: zod
-    .array(zod.number())
-    .optional()
-    .describe("Other expense ids with matching date + amount."),
-  createdAt: zod.coerce.date(),
-  updatedAt: zod.coerce.date().optional(),
+export const ApproveExpenseResponse = zod
+  .object({
+    id: zod.number(),
+    submittedBy: zod.string(),
+    submittedByEmail: zod.string().optional(),
+    expenseDate: zod.coerce.date(),
+    merchant: zod.string(),
+    description: zod.string(),
+    amount: zod.number(),
+    paymentMethod: zod.enum([
+      "cash",
+      "check",
+      "credit_card",
+      "debit_card",
+      "bank_transfer",
+      "other",
+    ]),
+    programId: zod.number().optional(),
+    programName: zod.string().optional(),
+    categoryId: zod.number().nullish(),
+    categoryName: zod
+      .string()
+      .nullish()
+      .describe(
+        "Resolved category display name. Null when categoryId is null (legacy uncategorized expense).",
+      ),
+    status: zod.enum([
+      "draft",
+      "submitted",
+      "approved",
+      "rejected",
+      "reimbursed",
+      "needs_correction",
+    ]),
+    managerApprovedBy: zod.string().optional(),
+    financeApprovedBy: zod.string().optional(),
+    rejectionReason: zod.string().optional(),
+    reimbursedDate: zod.coerce.date().optional(),
+    receiptIds: zod.array(zod.number()).optional(),
+    accountingEntryRef: zod.string().optional(),
+    accountingStatus: zod
+      .enum(["pending", "draft_created", "posted", "blocked", "not_applicable"])
+      .optional()
+      .describe("Task"),
+    accountingBlockReason: zod
+      .enum([
+        "missing_category",
+        "missing_mapping",
+        "archived_account",
+        "non_postable_account",
+        "invalid_payment_method_rule",
+        "other",
+      ])
+      .nullish(),
+    accountingGeneratedAt: zod.coerce.date().nullish(),
+    duplicateDismissed: zod
+      .boolean()
+      .optional()
+      .describe("True when the user has confirmed this is not a duplicate."),
+    potentialDuplicateIds: zod
+      .array(zod.number())
+      .optional()
+      .describe("Other expense ids with matching date + amount."),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date().optional(),
+  })
+  .and(
+    zod.object({
+      accounting: zod
+        .object({
+          ok: zod.boolean(),
+          created: zod.boolean().optional(),
+          manualJournalEntryDraftId: zod.number().optional(),
+          reason: zod
+            .enum([
+              "missing_category",
+              "missing_mapping",
+              "archived_account",
+              "non_postable_account",
+              "invalid_payment_method_rule",
+              "other",
+            ])
+            .optional(),
+          message: zod.string().optional(),
+        })
+        .optional()
+        .describe(
+          "Task #52 — outcome of an attempt to bridge an expense (or future\nbill) into a manual journal entry draft. `ok=true` means a draft\nis now linked; `created` distinguishes a brand new draft from\nre-returning an existing one (idempotent retry). `ok=false`\ncarries a stable machine-readable `reason` code.\n",
+        ),
+    }),
+  );
+
+/**
+ * @summary Manually regenerate the accounting draft for an approved expense (Task
+ */
+export const RegenerateAccountingDraftForExpenseParams = zod.object({
+  id: zod.coerce.number(),
 });
+
+export const RegenerateAccountingDraftForExpenseResponse = zod
+  .object({
+    ok: zod.boolean(),
+    created: zod.boolean().optional(),
+    manualJournalEntryDraftId: zod.number().optional(),
+    reason: zod
+      .enum([
+        "missing_category",
+        "missing_mapping",
+        "archived_account",
+        "non_postable_account",
+        "invalid_payment_method_rule",
+        "other",
+      ])
+      .optional(),
+    message: zod.string().optional(),
+  })
+  .describe(
+    "Task #52 — outcome of an attempt to bridge an expense (or future\nbill) into a manual journal entry draft. `ok=true` means a draft\nis now linked; `created` distinguishes a brand new draft from\nre-returning an existing one (idempotent retry). `ok=false`\ncarries a stable machine-readable `reason` code.\n",
+  );
 
 /**
  * @summary Mark an expense as not a duplicate
@@ -451,6 +571,21 @@ export const DismissExpenseDuplicateResponse = zod.object({
   reimbursedDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   accountingEntryRef: zod.string().optional(),
+  accountingStatus: zod
+    .enum(["pending", "draft_created", "posted", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingBlockReason: zod
+    .enum([
+      "missing_category",
+      "missing_mapping",
+      "archived_account",
+      "non_postable_account",
+      "invalid_payment_method_rule",
+      "other",
+    ])
+    .nullish(),
+  accountingGeneratedAt: zod.coerce.date().nullish(),
   duplicateDismissed: zod
     .boolean()
     .optional()
@@ -522,6 +657,21 @@ export const RejectExpenseResponse = zod.object({
   reimbursedDate: zod.coerce.date().optional(),
   receiptIds: zod.array(zod.number()).optional(),
   accountingEntryRef: zod.string().optional(),
+  accountingStatus: zod
+    .enum(["pending", "draft_created", "posted", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingBlockReason: zod
+    .enum([
+      "missing_category",
+      "missing_mapping",
+      "archived_account",
+      "non_postable_account",
+      "invalid_payment_method_rule",
+      "other",
+    ])
+    .nullish(),
+  accountingGeneratedAt: zod.coerce.date().nullish(),
   duplicateDismissed: zod
     .boolean()
     .optional()
@@ -1138,6 +1288,21 @@ export const ConvertTransactionToExpenseResponse = zod.object({
     reimbursedDate: zod.coerce.date().optional(),
     receiptIds: zod.array(zod.number()).optional(),
     accountingEntryRef: zod.string().optional(),
+    accountingStatus: zod
+      .enum(["pending", "draft_created", "posted", "blocked", "not_applicable"])
+      .optional()
+      .describe("Task"),
+    accountingBlockReason: zod
+      .enum([
+        "missing_category",
+        "missing_mapping",
+        "archived_account",
+        "non_postable_account",
+        "invalid_payment_method_rule",
+        "other",
+      ])
+      .nullish(),
+    accountingGeneratedAt: zod.coerce.date().nullish(),
     duplicateDismissed: zod
       .boolean()
       .optional()

@@ -237,11 +237,43 @@ paths:
               $ref: "#/components/schemas/ApprovalActionBody"
       responses:
         "200":
-          description: Updated expense
+          description: Updated expense (with accounting-bridge outcome)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Expense"
+                allOf:
+                  - $ref: "#/components/schemas/Expense"
+                  - type: object
+                    properties:
+                      accounting:
+                        $ref: "#/components/schemas/AccountingDraftResult"
+
+  /expenses/{id}/regenerate-accounting-draft:
+    post:
+      operationId: regenerateAccountingDraftForExpense
+      tags: [expenses]
+      summary: Manually regenerate the accounting draft for an approved expense (Task #52)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Existing or newly created draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountingDraftResult"
+        "409":
+          description: Expense is not in approved status
+        "422":
+          description: Generation blocked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountingDraftResult"
 
   /expenses/{id}/dismiss-duplicate:
     post:
@@ -1792,6 +1824,37 @@ components:
         - bills
         - total
 
+    AccountingDraftResult:
+      type: object
+      description: |
+        Task #52 — outcome of an attempt to bridge an expense (or future
+        bill) into a manual journal entry draft. `ok=true` means a draft
+        is now linked; `created` distinguishes a brand new draft from
+        re-returning an existing one (idempotent retry). `ok=false`
+        carries a stable machine-readable `reason` code.
+      properties:
+        ok:
+          type: boolean
+        created:
+          type: boolean
+        manualJournalEntryDraftId:
+          type: integer
+        reason:
+          type: string
+          enum:
+            [
+              missing_category,
+              missing_mapping,
+              archived_account,
+              non_postable_account,
+              invalid_payment_method_rule,
+              other,
+            ]
+        message:
+          type: string
+      required:
+        - ok
+
     Expense:
       type: object
       properties:
@@ -1842,6 +1905,26 @@ components:
             type: integer
         accountingEntryRef:
           type: string
+        accountingStatus:
+          type: string
+          enum: [pending, draft_created, posted, blocked, not_applicable]
+          description: Task #52 — accounting bridge state, separate from operational `status`.
+        accountingBlockReason:
+          type: string
+          nullable: true
+          enum:
+            [
+              missing_category,
+              missing_mapping,
+              archived_account,
+              non_postable_account,
+              invalid_payment_method_rule,
+              other,
+            ]
+        accountingGeneratedAt:
+          type: string
+          format: date-time
+          nullable: true
         duplicateDismissed:
           type: boolean
           description: True when the user has confirmed this is not a duplicate.

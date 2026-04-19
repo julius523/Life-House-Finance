@@ -5,6 +5,8 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { ExpenseAccountingBlockReason } from "./expenseAccountingBlockReason";
+import type { ExpenseAccountingStatus } from "./expenseAccountingStatus";
 import type { ExpensePaymentMethod } from "./expensePaymentMethod";
 import type { ExpenseStatus } from "./expenseStatus";
 
@@ -29,6 +31,10 @@ export interface Expense {
   reimbursedDate?: Date;
   receiptIds?: number[];
   accountingEntryRef?: string;
+  /** Task */
+  accountingStatus?: ExpenseAccountingStatus;
+  accountingBlockReason?: ExpenseAccountingBlockReason;
+  accountingGeneratedAt?: Date | null;
   /** True when the user has confirmed this is not a duplicate. */
   duplicateDismissed?: boolean;
   /** Other expense ids with matching date + amount. */

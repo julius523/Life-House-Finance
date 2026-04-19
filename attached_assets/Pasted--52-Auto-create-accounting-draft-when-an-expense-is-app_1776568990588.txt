@@ -1,0 +1,268 @@
+#52 - Auto-create accounting draft when an expense is approved
+
+What & Why
+
+Once an expense is approved, the system should automatically create a manual journal entry draft — not a posted ledger row — so the existing draft → submit → approve → reject → post workflow controls every ledger hit.
+
+This task is the first real bridge between the operational expense system and accounting. It must reuse the controls already built for manual journal entries:
+
+no-self-approval
+optimistic locking
+idempotent posting
+period locking
+hardened posting service
+
+The generated draft is a standard manual draft, not a parallel workflow type. There must be no silent posting, no auto-submit, and no second posting path.
+
+This task depends on Task #51’s category-to-CoA mapping foundation.
+
+Done looks like
+
+When an expense transitions to approved, the server attempts to generate exactly one manual_journal_entry_drafts row with status='draft'.
+
+The draft’s source linkage lives in a new shared table:
+
+accounting_source_links
+
+sourceType
+sourceId
+manualJournalEntryDraftId
+journalEntryId
+
+This is the canonical bridge so bills can plug into the same system later without refactoring.
+
+The generated draft contains:
+
+debit line to the expense category’s mapped debit account
+credit line to the resolved payment-method-rule credit account
+programId copied onto both lines
+deterministic memo:
+<merchant> — <description> (expense #<ref>)
+entryDate = expense.expenseDate
+
+Re-approving the same expense, retry storms, or parallel approval calls must converge on the same draft — never duplicates.
+
+The idempotency guarantee must be database-backed using:
+
+deterministic key: expense-draft-<expenseId>
+UNIQUE (sourceType, sourceId) on accounting_source_links
+
+If mapping resolution fails, the expense is marked:
+
+accountingStatus='blocked'
+accountingBlockReason set to one of the fixed enum values:
+missing_category
+missing_mapping
+archived_account
+non_postable_account
+invalid_payment_method_rule
+other
+
+When blocked:
+
+no draft is created
+the operational expense approval still succeeds
+the /approve response includes the accounting outcome so the UI can surface the block reason
+
+Generated drafts are:
+
+never auto-submitted
+never auto-posted
+left in status='draft' until a human reviews and submits them
+
+Legacy approved expenses are not backfilled in v1. Only new approvals trigger generation. Finance can use a manual retry endpoint later per expense.
+
+Activity log writes must include:
+
+accounting_draft_generated_from_expense on the draft/accounting side
+accounting_draft_created on the expense side
+accounting_draft_generation_blocked when generation fails
+Each must include proper actor/entity linkage.
+Out of scope
+Bills
+Auto-submit of generated drafts
+Auto-post of generated drafts
+Cash-basis on-payment posting trigger
+Backfilling legacy approved expenses
+Per-vendor or per-program overrides
+Auto-retry when mappings change
+Required architecture constraints
+
+Do not add sourceType/sourceId directly onto manual_journal_entry_drafts as the primary source bridge.
+
+Use a shared accounting_source_links table as the canonical source-to-accounting bridge.
+
+Do not create a second posting implementation. When a generated draft is eventually posted later, it must still flow through the existing hardened manual posting path.
+
+Do not weaken or bypass:
+
+separation of duties
+optimistic locking
+idempotency
+period locking
+manual approval controls
+Steps
+1) Schema
+
+Add a new table:
+
+accounting_source_links
+
+id
+sourceType text
+sourceId integer
+manualJournalEntryDraftId integer FK nullable
+journalEntryId integer FK nullable
+timestamps
+createdByUserId
+
+Add a unique constraint/index:
+
+UNIQUE (sourceType, sourceId)
+
+This is the database-level idempotency fence.
+
+Add expense accounting fields to expenses:
+
+accountingStatus text
+accountingBlockReason text nullable
+accountingGeneratedAt timestamp nullable
+
+Allowed accountingStatus values:
+
+pending
+draft_created
+posted
+blocked
+not_applicable
+
+Defaults:
+
+new expenses default to pending
+legacy rows backfill to not_applicable
+2) Generator service
+
+Create a new module:
+
+artifacts/api-server/src/lib/expenseDraftService.ts
+
+Export:
+
+generateDraftFromExpense(expenseId, actor)
+
+Inside a transaction, the service must:
+
+Load the approved expense
+Resolve the category
+Resolve the correct payment-method rule
+use exact payment method match first
+fall back to the category’s default rule
+Validate both accounts server-side:
+active
+manual-postable
+Build the deterministic draft payload
+Insert the manual JE draft
+Insert the accounting_source_links row
+if uniqueness conflicts, fetch and return the existing linked draft instead of creating another one
+Update the expense:
+accountingStatus='draft_created'
+accountingGeneratedAt=now
+clear prior block reason
+Write activity log rows
+
+On failure to resolve mapping or account validity:
+
+set accountingStatus='blocked'
+set accountingBlockReason to a stable enum code
+write accounting_draft_generation_blocked
+return structured result like:
+{ ok: false, reason: 'missing_mapping' }
+3) Expense approval hook
+
+At the end of the expense /approve handler, call generateDraftFromExpense(...).
+
+Important:
+
+expense approval still succeeds even if accounting generation blocks
+approval response must include accounting result payload so the UI can show success vs blocked state
+4) Manual retry endpoint
+
+Add:
+
+POST /expenses/:id/regenerate-accounting-draft
+
+Permissions:
+
+admin or approver only
+
+Behavior:
+
+rerun the same generator
+if a draft already exists for that source, return the existing draft
+do not create duplicates
+preserve the same idempotency behavior as approval-time generation
+5) Posting behavior
+
+This task does not post anything.
+
+When a generated draft is later posted through the existing manual JE workflow, the system should update the canonical bridge so:
+
+accounting_source_links.journalEntryId gets filled
+the expense can later show posted linkage in Task #53
+
+Do not implement a new posting route for this.
+
+API / response requirements
+
+The expense approval response should include an accounting result block, for example:
+
+success with created or existing draft id
+blocked with stable reason code
+
+The retry endpoint should return:
+
+created/existing draft on success
+blocked reason on failure
+
+Use stable machine-readable reason codes, not only human text.
+
+Relevant files
+lib/db/src/schema/expenses.ts
+lib/db/src/schema/manual_journal_entry_drafts.ts
+lib/db/src/schema/journal_entries.ts
+artifacts/api-server/src/routes/expenses.ts
+artifacts/api-server/src/routes/accounting.ts
+artifacts/api-server/src/lib/expenseDraftService.ts
+artifacts/api-server/src/lib/postingService.ts
+artifacts/api-server/src/lib/ensureSchema.ts
+artifacts/api-server/src/lib/activityLog.ts
+Acceptance criteria
+
+Do not mark complete unless all of the following are proven:
+
+Approving an expense with a valid mapping creates exactly one draft in status='draft'
+The generated draft has the correct debit account, credit account, amount, memo, entry date, and programId on both lines
+Re-approving the same expense does not create a duplicate draft
+Parallel retries do not create duplicates
+Missing category produces:
+approved expense
+accountingStatus='blocked'
+accountingBlockReason='missing_category'
+no draft
+Missing mapping produces missing_mapping
+Archived account produces archived_account
+Non-postable account produces non_postable_account
+Invalid payment method rule produces invalid_payment_method_rule
+Approval still succeeds even when accounting generation blocks
+Manual retry returns the same existing draft if already generated
+Activity log rows exist for:
+draft created from expense
+blocked generation
+No auto-submit occurs
+No auto-post occurs
+No second posting path is introduced
+Dependency
+
+Depends on:
+
+Task #51 — Expense category → CoA mapping foundation
