@@ -446,14 +446,19 @@ router.post("/transactions/:id/convert-to-bill", async (req, res): Promise<void>
   // Task #63 — convert-to-bill creates an already-paid bill, so fire the
   // payment-leg generator. (No accrual leg fires because the bill never
   // went through approval; finance can manually generate one if needed.)
+  // We plumb the originating transaction id so the activity log records
+  // which bank transaction triggered the payment leg; future work will
+  // map tx.bankAccountId to a per-bank cash CoA and pass it as
+  // cashAccountIdOverride.
   if (req.authUser) {
     const display =
       `${req.authUser.firstName} ${req.authUser.lastName}`.trim() ||
       req.authUser.email;
-    await generatePaymentDraftFromBill(bill.id, {
-      id: req.authUser.id,
-      display,
-    });
+    await generatePaymentDraftFromBill(
+      bill.id,
+      { id: req.authUser.id, display },
+      { transactionId: tx.id },
+    );
   }
 
   res.json({
@@ -585,10 +590,11 @@ router.post("/transactions/:id/link-bill", async (req, res): Promise<void> => {
     const display =
       `${req.authUser.firstName} ${req.authUser.lastName}`.trim() ||
       req.authUser.email;
-    await generatePaymentDraftFromBill(billForBridge.id, {
-      id: req.authUser.id,
-      display,
-    });
+    await generatePaymentDraftFromBill(
+      billForBridge.id,
+      { id: req.authUser.id, display },
+      { transactionId: tx.id },
+    );
   }
   res.json(await formatTransaction(updated!));
 });

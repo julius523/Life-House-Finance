@@ -427,10 +427,21 @@ export async function generateAccrualDraftFromBill(
 
 /**
  * Task #63 — payment leg. Dr <settings.defaultApAccount> / Cr <settings.defaultCashAccount>.
+ *
+ * `options.cashAccountIdOverride` lets the caller (typically transactions.ts
+ * when linking a bank txn whose bank account maps to a non-default cash CoA)
+ * substitute the credit account instead of falling back to the global
+ * default. The override must reference an active, manually postable account;
+ * otherwise the bridge blocks with the same `archived_account` /
+ * `non_postable_account` reasons used elsewhere.
+ *
+ * `options.transactionId` is recorded in the activity log so finance can
+ * trace which bank transaction triggered the payment leg.
  */
 export async function generatePaymentDraftFromBill(
   billId: number,
   actor: BillDraftActor,
+  options?: { cashAccountIdOverride?: number; transactionId?: number },
 ): Promise<GenerateBillDraftResult> {
   const idempotencyKey = billDraftIdempotencyKey("payment", billId);
 
@@ -461,7 +472,10 @@ export async function generatePaymentDraftFromBill(
         .from(accountingSettingsTable)
         .limit(1);
       const apAccountId = settings?.defaultApAccountId ?? null;
-      const cashAccountId = settings?.defaultCashAccountId ?? null;
+      // Prefer the per-transaction override when provided; otherwise fall
+      // back to the configured default cash account.
+      const cashAccountId =
+        options?.cashAccountIdOverride ?? settings?.defaultCashAccountId ?? null;
       if (!apAccountId) {
         throw new BlockInTxError(
           "missing_ap_account",
@@ -611,6 +625,12 @@ export async function generatePaymentDraftFromBill(
             eventType: "payment",
             debitAccountCode: debit.code,
             creditAccountCode: credit.code,
+            ...(options?.transactionId !== undefined
+              ? { transactionId: options.transactionId }
+              : {}),
+            ...(options?.cashAccountIdOverride !== undefined
+              ? { cashAccountIdOverride: options.cashAccountIdOverride }
+              : {}),
           },
         },
       ]);
@@ -656,8 +676,9 @@ export function generateBillDraft(
   eventType: BillEventType,
   billId: number,
   actor: BillDraftActor,
+  options?: { cashAccountIdOverride?: number; transactionId?: number },
 ): Promise<GenerateBillDraftResult> {
   return eventType === "accrual"
     ? generateAccrualDraftFromBill(billId, actor)
-    : generatePaymentDraftFromBill(billId, actor);
+    : generatePaymentDraftFromBill(billId, actor, options);
 }

@@ -2505,15 +2505,14 @@ router.get(
     if (source === "copilot") {
       conds.push(sql`${journalEntriesTable.agentActionId} IS NOT NULL`);
     } else if (source === "manual") {
-      // Task #53 — "manual" now excludes expense-sourced entries so the
-      // three source buckets ('manual'|'copilot'|'expense') don't overlap.
-      // Mirror serialization: an entry counts as expense-sourced if a
-      // bridge row exists either directly on the JE or through its
-      // manual_draft_id (the post-time fallback).
+      // Task #53/#63 — "manual" excludes both expense- and bill-sourced
+      // entries so the four source buckets ('manual'|'copilot'|'expense'|'bill')
+      // don't overlap. Mirror serialization: an entry counts as bridge-sourced
+      // if a row exists either directly on the JE or through its manual_draft_id.
       conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
       conds.push(sql`NOT EXISTS (
         SELECT 1 FROM ${accountingSourceLinksTable}
-        WHERE ${accountingSourceLinksTable.sourceType} = 'expense'
+        WHERE ${accountingSourceLinksTable.sourceType} IN ('expense','bill')
           AND (
             ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
             OR (
@@ -2532,6 +2531,23 @@ router.get(
       conds.push(sql`EXISTS (
         SELECT 1 FROM ${accountingSourceLinksTable}
         WHERE ${accountingSourceLinksTable.sourceType} = 'expense'
+          AND (
+            ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
+            OR (
+              ${journalEntriesTable.manualDraftId} IS NOT NULL
+              AND ${accountingSourceLinksTable.manualJournalEntryDraftId} = ${journalEntriesTable.manualDraftId}
+            )
+          )
+      )`);
+    } else if (source === "bill") {
+      // Task #63 — symmetric to the expense case. Bill-sourced JEs have
+      // a row in accounting_source_links with sourceType='bill' and
+      // eventType='accrual'|'payment' (eventType is irrelevant for the
+      // filter — both legs count as 'bill' for source purposes).
+      conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
+      conds.push(sql`EXISTS (
+        SELECT 1 FROM ${accountingSourceLinksTable}
+        WHERE ${accountingSourceLinksTable.sourceType} = 'bill'
           AND (
             ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
             OR (
@@ -2659,7 +2675,7 @@ router.get(
       conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
       conds.push(sql`NOT EXISTS (
         SELECT 1 FROM ${accountingSourceLinksTable}
-        WHERE ${accountingSourceLinksTable.sourceType} = 'expense'
+        WHERE ${accountingSourceLinksTable.sourceType} IN ('expense','bill')
           AND (
             ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
             OR (
@@ -2673,6 +2689,20 @@ router.get(
       conds.push(sql`EXISTS (
         SELECT 1 FROM ${accountingSourceLinksTable}
         WHERE ${accountingSourceLinksTable.sourceType} = 'expense'
+          AND (
+            ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
+            OR (
+              ${journalEntriesTable.manualDraftId} IS NOT NULL
+              AND ${accountingSourceLinksTable.manualJournalEntryDraftId} = ${journalEntriesTable.manualDraftId}
+            )
+          )
+      )`);
+    } else if (source === "bill") {
+      // Task #63 — CSV mirrors JSON list filter semantics for the bill bucket.
+      conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
+      conds.push(sql`EXISTS (
+        SELECT 1 FROM ${accountingSourceLinksTable}
+        WHERE ${accountingSourceLinksTable.sourceType} = 'bill'
           AND (
             ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
             OR (
@@ -3324,7 +3354,10 @@ router.get(
       res.status(403).json({ error: "Draft is owned by another user" });
       return;
     }
-    { const __ctx = await draftSourceContext(draft.id); res.json({ draft: serializeDraft(draft, __ctx.expense, __ctx.bill) }); }
+    {
+      const ctx = await draftSourceContext(draft.id);
+      res.json({ draft: serializeDraft(draft, ctx.expense, ctx.bill) });
+    }
   },
 );
 
@@ -3411,7 +3444,10 @@ router.patch(
       user,
       `${actorLabel(user)} edited manual JE draft #${updated!.id}`,
     );
-    { const __ctx = await draftSourceContext(updated!.id); res.json({ draft: serializeDraft(updated!, __ctx.expense, __ctx.bill) }); }
+    {
+      const ctx = await draftSourceContext(updated!.id);
+      res.json({ draft: serializeDraft(updated!, ctx.expense, ctx.bill) });
+    }
   },
 );
 
@@ -3670,7 +3706,10 @@ router.post(
       user,
       `${actorLabel(user)} submitted manual JE draft #${updated!.id} for approval`,
     );
-    { const __ctx = await draftSourceContext(updated!.id); res.json({ draft: serializeDraft(updated!, __ctx.expense, __ctx.bill) }); }
+    {
+      const ctx = await draftSourceContext(updated!.id);
+      res.json({ draft: serializeDraft(updated!, ctx.expense, ctx.bill) });
+    }
   },
 );
 
@@ -3753,7 +3792,10 @@ router.post(
       user,
       `${actorLabel(user)} approved manual JE draft #${updated!.id}`,
     );
-    { const __ctx = await draftSourceContext(updated!.id); res.json({ draft: serializeDraft(updated!, __ctx.expense, __ctx.bill) }); }
+    {
+      const ctx = await draftSourceContext(updated!.id);
+      res.json({ draft: serializeDraft(updated!, ctx.expense, ctx.bill) });
+    }
   },
 );
 
@@ -3837,7 +3879,10 @@ router.post(
       // free-text description.
       { reason: parsed.data.reason },
     );
-    { const __ctx = await draftSourceContext(updated!.id); res.json({ draft: serializeDraft(updated!, __ctx.expense, __ctx.bill) }); }
+    {
+      const ctx = await draftSourceContext(updated!.id);
+      res.json({ draft: serializeDraft(updated!, ctx.expense, ctx.bill) });
+    }
   },
 );
 

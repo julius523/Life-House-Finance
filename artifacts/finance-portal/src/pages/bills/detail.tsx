@@ -315,16 +315,30 @@ export default function BillDetail() {
   const handleMarkNotApplicable = async (
     eventType: "accrual" | "payment",
   ) => {
-    if (
-      !confirm(
-        `Mark the ${eventType} entry as not applicable? It will be excluded from the accounting bridge queue.`,
-      )
-    )
+    // Task #63 — the API requires a 3–500 char justification note. Use a
+    // simple prompt() so we don't need to bolt on a Dialog component on
+    // the bill detail page (the blocked-bills queue already has a richer
+    // textarea-based dialog for bulk operations).
+    const note = window.prompt(
+      `Mark the ${eventType} entry as not applicable?\n\n` +
+        `Add a short note (3–500 characters) explaining why. ` +
+        `It will be recorded in the audit log.`,
+      "",
+    );
+    if (note === null) return;
+    const trimmed = note.trim();
+    if (trimmed.length < 3 || trimmed.length > 500) {
+      toast({
+        title: "Note required",
+        description: "Please provide a 3–500 character explanation.",
+        variant: "destructive",
+      });
       return;
+    }
     try {
       await apiJson(`/bills/${id}/mark-accounting-not-applicable`, {
         method: "POST",
-        body: { eventType },
+        body: { eventType, note: trimmed },
       });
       toast({ title: "Marked as not applicable" });
       refresh();
@@ -687,6 +701,61 @@ export default function BillDetail() {
                         {format(new Date(generatedAt), "MMM d, yyyy")}
                       </div>
                     )}
+                    {/*
+                      Task #63 — surface linked draft / posted JE per leg
+                      so reviewers can deep-link without leaving the page.
+                      `accountingBridge` is a passthrough field appended
+                      by the bill detail endpoint and not declared in the
+                      generated openapi types — we read it via cast.
+                    */}
+                    {(() => {
+                      const bridge =
+                        (bill as { accountingBridge?: Record<string, {
+                          draftId: number | null;
+                          draftStatus: string | null;
+                          journalEntryId: number | null;
+                          journalEntryStatus: string | null;
+                        }> }).accountingBridge?.[leg];
+                      if (!bridge) return null;
+                      if (
+                        bridge.journalEntryId == null &&
+                        bridge.draftId == null
+                      ) {
+                        return null;
+                      }
+                      return (
+                        <div
+                          className="flex flex-wrap items-center gap-2 pt-1 text-xs"
+                          data-testid={`bridge-links-${leg}`}
+                        >
+                          {bridge.journalEntryId != null && (
+                            <Link
+                              href={`/accounting/journal-entries/${bridge.journalEntryId}`}
+                              className="rounded-md border bg-muted px-2 py-1 hover:underline"
+                              data-testid={`link-bridge-je-${leg}`}
+                            >
+                              JE #{bridge.journalEntryId}
+                              {bridge.journalEntryStatus
+                                ? ` · ${bridge.journalEntryStatus}`
+                                : ""}
+                            </Link>
+                          )}
+                          {bridge.draftId != null &&
+                            bridge.journalEntryId == null && (
+                              <Link
+                                href={`/accounting/journal-entry-drafts/${bridge.draftId}`}
+                                className="rounded-md border bg-muted px-2 py-1 hover:underline"
+                                data-testid={`link-bridge-draft-${leg}`}
+                              >
+                                Draft #{bridge.draftId}
+                                {bridge.draftStatus
+                                  ? ` · ${bridge.draftStatus}`
+                                  : ""}
+                              </Link>
+                            )}
+                        </div>
+                      );
+                    })()}
                     {canAct && (
                       <div className="flex flex-wrap gap-2 pt-1">
                         <Button
