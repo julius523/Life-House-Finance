@@ -19,6 +19,7 @@ import {
   journalEntryLinesTable,
   manualJournalEntryDraftsTable,
   accountingPeriodsTable,
+  accountingSettingsTable,
   chartOfAccountsTable,
   type ManualJournalEntryDraftRow,
   type CopilotMessageRow,
@@ -1634,6 +1635,7 @@ function serializeJournalEntry(
     reversesJournalEntryId: je.reversesJournalEntryId,
     reversedByJournalEntryId: je.reversedByJournalEntryId,
     reversalReason: je.reversalReason,
+    manualDraftId: je.manualDraftId,
     createdAt: je.createdAt,
     ...(lines ? { lines } : {}),
   };
@@ -2112,9 +2114,74 @@ function serializeDraft(d: ManualJournalEntryDraftRow) {
     entryDate: d.entryDate,
     memo: d.memo,
     payload: d.payload,
+    status: d.status,
+    submittedByUserId: d.submittedByUserId,
+    submittedAt: d.submittedAt,
+    approvedByUserId: d.approvedByUserId,
+    approvedAt: d.approvedAt,
+    rejectedByUserId: d.rejectedByUserId,
+    rejectedAt: d.rejectedAt,
+    rejectionReason: d.rejectionReason,
+    postedJournalEntryId: d.postedJournalEntryId,
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
   };
+}
+
+/**
+ * Task #29B — load the (single-row) accounting_settings to determine
+ * whether maker/checker separation is currently enforced. Defaults to
+ * TRUE (i.e. enforce) on any failure so a missing/corrupt settings row
+ * cannot silently downgrade the control.
+ */
+async function isSeparationOfDutiesEnforced(): Promise<boolean> {
+  try {
+    const [row] = await db
+      .select({ enforced: accountingSettingsTable.separationOfDuties })
+      .from(accountingSettingsTable)
+      .limit(1);
+    if (!row) return true;
+    return row.enforced !== false;
+  } catch {
+    return true;
+  }
+}
+
+function actorLabel(u: {
+  id: number;
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+}): string {
+  const name = `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim();
+  if (name.length > 0) return name;
+  return u.email ?? `user#${u.id}`;
+}
+
+async function logDraftActivity(
+  type:
+    | "manual_je_draft_created"
+    | "manual_je_draft_edited"
+    | "manual_je_draft_submitted"
+    | "manual_je_draft_approved"
+    | "manual_je_draft_rejected"
+    | "manual_je_draft_posted",
+  draftId: number,
+  actor: {
+    id: number;
+    email?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+  },
+  description: string,
+): Promise<void> {
+  await db.insert(activityLogTable).values({
+    type,
+    description,
+    actor: actorLabel(actor),
+    referenceId: draftId,
+    referenceType: "manual_journal_entry_draft",
+  });
 }
 
 function summarizeDraftHeader(payload: z.infer<typeof DraftPayloadSchema>): {
@@ -2208,8 +2275,15 @@ router.post(
         entryDate: summary.entryDate,
         memo: summary.memo,
         payload,
+        status: "draft",
       })
       .returning();
+    await logDraftActivity(
+      "manual_je_draft_created",
+      row!.id,
+      user,
+      `${actorLabel(user)} created manual JE draft #${row!.id}`,
+    );
     res.status(201).json({ draft: serializeDraft(row!) });
   },
 );
@@ -2283,6 +2357,18 @@ router.patch(
       res.status(403).json({ error: "Draft is owned by another user" });
       return;
     }
+    // Task #29B — once a draft has left the author's hands it is locked.
+    // Only 'draft' (never submitted) and 'rejected' (sent back for fixes)
+    // are editable. Submitted/approved/posted drafts must be acted on via
+    // the workflow endpoints, not silently mutated.
+    if (existing.status !== "draft" && existing.status !== "rejected") {
+      res.status(409).json({
+        error: `Draft is in '${existing.status}' state and cannot be edited.`,
+        code: "DRAFT_NOT_EDITABLE",
+        status: existing.status,
+      });
+      return;
+    }
     const summary = summarizeDraftHeader(payload);
     const [updated] = await db
       .update(manualJournalEntryDraftsTable)
@@ -2294,6 +2380,12 @@ router.patch(
       })
       .where(eq(manualJournalEntryDraftsTable.id, id))
       .returning();
+    await logDraftActivity(
+      "manual_je_draft_edited",
+      updated!.id,
+      user,
+      `${actorLabel(user)} edited manual JE draft #${updated!.id}`,
+    );
     res.json({ draft: serializeDraft(updated!) });
   },
 );
@@ -2323,10 +2415,445 @@ router.delete(
       res.status(403).json({ error: "Draft is owned by another user" });
       return;
     }
+    // Task #29B — keep approval-chain history. Once a draft has been
+    // submitted, approved, or posted it must NEVER be deleted; otherwise
+    // the activity_log rows pointing at draft#id would orphan and the
+    // audit trail would be incomplete.
+    if (existing.status !== "draft" && existing.status !== "rejected") {
+      res.status(409).json({
+        error: `Draft is in '${existing.status}' state and cannot be deleted.`,
+        code: "DRAFT_NOT_DELETABLE",
+        status: existing.status,
+      });
+      return;
+    }
     await db
       .delete(manualJournalEntryDraftsTable)
       .where(eq(manualJournalEntryDraftsTable.id, id));
     res.status(204).end();
+  },
+);
+
+// --- Task #29B — Manual JE approval workflow ------------------------------
+// State machine:
+//   draft     --submit-->  submitted
+//   rejected  --submit-->  submitted
+//   submitted --approve--> approved      (no self-approval when SoD on)
+//   submitted --reject-->  rejected      (with rejection_reason)
+//   approved  --post-->    posted        (calls postManualJournalEntry)
+//
+// Every transition writes a row to activity_log with a draft-scoped
+// type so the full chain is reconstructible. The /post endpoint reuses
+// the existing hardened postManualJournalEntry service via a
+// deterministic Idempotency-Key derived from the draft id, so a retried
+// post does NOT produce a second JE.
+
+router.post(
+  "/accounting/journal-entry-drafts/:id/submit",
+  async (req, res): Promise<void> => {
+    const user = req.authUser!;
+    if (user.role !== "admin" && user.role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [existing] = await db
+      .select()
+      .from(manualJournalEntryDraftsTable)
+      .where(eq(manualJournalEntryDraftsTable.id, id));
+    if (!existing) {
+      res.status(404).json({ error: "Draft not found" });
+      return;
+    }
+    if (!canAccessDraft(existing, user)) {
+      res.status(403).json({ error: "Draft is owned by another user" });
+      return;
+    }
+    if (existing.status !== "draft" && existing.status !== "rejected") {
+      res.status(409).json({
+        error: `Draft is in '${existing.status}' state and cannot be submitted for review.`,
+        code: "INVALID_STATE_TRANSITION",
+        status: existing.status,
+      });
+      return;
+    }
+    const [updated] = await db
+      .update(manualJournalEntryDraftsTable)
+      .set({
+        status: "submitted",
+        submittedByUserId: user.id,
+        submittedAt: new Date(),
+        // Resubmission after a rejection: clear the prior rejection
+        // metadata so the draft is fresh in the reviewer's queue but
+        // the activity_log retains the historical rejection row.
+        rejectedByUserId: null,
+        rejectedAt: null,
+        rejectionReason: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(manualJournalEntryDraftsTable.id, id))
+      .returning();
+    await logDraftActivity(
+      "manual_je_draft_submitted",
+      updated!.id,
+      user,
+      `${actorLabel(user)} submitted manual JE draft #${updated!.id} for approval`,
+    );
+    res.json({ draft: serializeDraft(updated!) });
+  },
+);
+
+router.post(
+  "/accounting/journal-entry-drafts/:id/approve",
+  async (req, res): Promise<void> => {
+    const user = req.authUser!;
+    if (user.role !== "admin" && user.role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [existing] = await db
+      .select()
+      .from(manualJournalEntryDraftsTable)
+      .where(eq(manualJournalEntryDraftsTable.id, id));
+    if (!existing) {
+      res.status(404).json({ error: "Draft not found" });
+      return;
+    }
+    if (existing.status !== "submitted") {
+      res.status(409).json({
+        error: `Draft is in '${existing.status}' state; only 'submitted' drafts can be approved.`,
+        code: "INVALID_STATE_TRANSITION",
+        status: existing.status,
+      });
+      return;
+    }
+    // Server-side maker/checker enforcement. Honors
+    // accounting_settings.separationOfDuties (default TRUE). Cannot be
+    // bypassed by the client because the check uses the *stored*
+    // submittedByUserId, not anything the client sends.
+    const sodOn = await isSeparationOfDutiesEnforced();
+    if (sodOn && existing.submittedByUserId === user.id) {
+      res.status(403).json({
+        error:
+          "You submitted this draft and cannot also approve it (separation of duties).",
+        code: "NO_SELF_APPROVAL",
+      });
+      return;
+    }
+    const [updated] = await db
+      .update(manualJournalEntryDraftsTable)
+      .set({
+        status: "approved",
+        approvedByUserId: user.id,
+        approvedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(manualJournalEntryDraftsTable.id, id))
+      .returning();
+    await logDraftActivity(
+      "manual_je_draft_approved",
+      updated!.id,
+      user,
+      `${actorLabel(user)} approved manual JE draft #${updated!.id}`,
+    );
+    res.json({ draft: serializeDraft(updated!) });
+  },
+);
+
+const RejectDraftBody = z.object({
+  reason: z.string().trim().min(5).max(500),
+});
+
+router.post(
+  "/accounting/journal-entry-drafts/:id/reject",
+  async (req, res): Promise<void> => {
+    const user = req.authUser!;
+    if (user.role !== "admin" && user.role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const parsed = RejectDraftBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error:
+          parsed.error.issues[0]?.message ??
+          "A rejection reason of at least 5 characters is required.",
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    const [existing] = await db
+      .select()
+      .from(manualJournalEntryDraftsTable)
+      .where(eq(manualJournalEntryDraftsTable.id, id));
+    if (!existing) {
+      res.status(404).json({ error: "Draft not found" });
+      return;
+    }
+    if (existing.status !== "submitted") {
+      res.status(409).json({
+        error: `Draft is in '${existing.status}' state; only 'submitted' drafts can be rejected.`,
+        code: "INVALID_STATE_TRANSITION",
+        status: existing.status,
+      });
+      return;
+    }
+    const [updated] = await db
+      .update(manualJournalEntryDraftsTable)
+      .set({
+        status: "rejected",
+        rejectedByUserId: user.id,
+        rejectedAt: new Date(),
+        rejectionReason: parsed.data.reason,
+        updatedAt: new Date(),
+      })
+      .where(eq(manualJournalEntryDraftsTable.id, id))
+      .returning();
+    await logDraftActivity(
+      "manual_je_draft_rejected",
+      updated!.id,
+      user,
+      `${actorLabel(user)} rejected manual JE draft #${updated!.id}: ${parsed.data.reason}`,
+    );
+    res.json({ draft: serializeDraft(updated!) });
+  },
+);
+
+router.post(
+  "/accounting/journal-entry-drafts/:id/post",
+  async (req, res): Promise<void> => {
+    const user = req.authUser!;
+    if (user.role !== "admin" && user.role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [existing] = await db
+      .select()
+      .from(manualJournalEntryDraftsTable)
+      .where(eq(manualJournalEntryDraftsTable.id, id));
+    if (!existing) {
+      res.status(404).json({ error: "Draft not found" });
+      return;
+    }
+    // Posted is terminal-and-idempotent: if a previous post already
+    // succeeded, return the linked JE rather than 409, so retries are
+    // safe at the route layer too (defence in depth on top of the
+    // service-level idempotency key).
+    if (existing.status === "posted" && existing.postedJournalEntryId) {
+      const [je] = await db
+        .select()
+        .from(journalEntriesTable)
+        .where(eq(journalEntriesTable.id, existing.postedJournalEntryId));
+      if (je) {
+        const lines = await db
+          .select()
+          .from(journalEntryLinesTable)
+          .where(eq(journalEntryLinesTable.journalEntryId, je.id))
+          .orderBy(asc(journalEntryLinesTable.lineNo));
+        res.status(200).json({
+          draft: serializeDraft(existing),
+          journalEntry: serializeJournalEntry(je, lines),
+          idempotent: true,
+        });
+        return;
+      }
+    }
+    if (existing.status !== "approved") {
+      res.status(409).json({
+        error: `Draft is in '${existing.status}' state; only 'approved' drafts can be posted to the ledger.`,
+        code: "INVALID_STATE_TRANSITION",
+        status: existing.status,
+      });
+      return;
+    }
+    // Belt-and-braces: even though the approve route already enforces
+    // SoD, re-check here so a future change that lets an admin self-
+    // approve cannot accidentally also let them post their own draft.
+    const sodOn = await isSeparationOfDutiesEnforced();
+    if (sodOn && existing.submittedByUserId === user.id) {
+      res.status(403).json({
+        error:
+          "You submitted this draft and cannot also post it (separation of duties).",
+        code: "NO_SELF_APPROVAL",
+      });
+      return;
+    }
+    // Validate and re-shape the stored payload for the posting service.
+    // Reuse the existing wire schema (ManualJournalEntryBody) so any
+    // validation drift between save-time and post-time is caught here,
+    // not silently posted.
+    const draftPayload = (existing.payload ?? {}) as Record<string, unknown>;
+    const toAmount = (v: unknown): number | unknown => {
+      if (typeof v === "number") return v;
+      if (typeof v === "string") {
+        const n = Number(v.trim());
+        return Number.isFinite(n) ? n : v;
+      }
+      return v;
+    };
+    const adapted = {
+      entryDate: draftPayload["entryDate"],
+      memo: draftPayload["memo"],
+      lines: Array.isArray(draftPayload["lines"])
+        ? (draftPayload["lines"] as Array<Record<string, unknown>>).map((ln) => ({
+            type: ln["type"],
+            amount: toAmount(ln["amount"]),
+            account_code: ln["accountCode"] ?? ln["account_code"],
+            program:
+              typeof ln["program"] === "string" && ln["program"].length > 0
+                ? ln["program"]
+                : null,
+            fund:
+              typeof ln["fund"] === "string" && ln["fund"].length > 0
+                ? ln["fund"]
+                : null,
+            memo:
+              typeof ln["memo"] === "string" && ln["memo"].length > 0
+                ? ln["memo"]
+                : null,
+          }))
+        : [],
+    };
+    const parsed = ManualJournalEntryBody.safeParse(adapted);
+    if (!parsed.success) {
+      res.status(422).json({
+        error: `Draft payload failed validation: ${parsed.error.issues[0]?.message ?? "invalid"}`,
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    const fingerprint = computeManualJeFingerprint({
+      entryDate: parsed.data.entryDate,
+      memo: parsed.data.memo,
+      lines: parsed.data.lines.map((ln) => ({
+        type: ln.type,
+        amount: ln.amount,
+        account_code: ln.account_code,
+        program: ln.program ?? null,
+        fund: ln.fund ?? null,
+        memo: ln.memo ?? null,
+      })),
+    });
+    // Deterministic per-draft idempotency key. A retried /post call for
+    // the same approved draft hits the Task 25A fast-path inside the
+    // service and returns the same JE id — never a duplicate row. The
+    // partial unique index on journal_entries.manual_draft_id is the
+    // database-level guarantee.
+    const idempotencyKey = `manual-draft-${existing.id}`;
+    const result = await postManualJournalEntry(
+      {
+        entryDate: parsed.data.entryDate,
+        memo: parsed.data.memo,
+        lines: parsed.data.lines,
+        idempotencyKey,
+        fingerprint,
+        manualDraftId: existing.id,
+      },
+      toPostingActor(req),
+    );
+    switch (result.kind) {
+      case "ok": {
+        // Mark the draft posted and link the JE. We do this AFTER the
+        // service call returns so a posting failure leaves the draft in
+        // 'approved' (retryable). On idempotent replay we still want
+        // status='posted' / postedJournalEntryId set in case the prior
+        // attempt died between insert and this update.
+        const [updatedDraft] = await db
+          .update(manualJournalEntryDraftsTable)
+          .set({
+            status: "posted",
+            postedJournalEntryId: result.journalEntry.id,
+            updatedAt: new Date(),
+          })
+          .where(eq(manualJournalEntryDraftsTable.id, existing.id))
+          .returning();
+        if (!result.idempotent) {
+          await logDraftActivity(
+            "manual_je_draft_posted",
+            existing.id,
+            user,
+            `${actorLabel(user)} posted manual JE draft #${existing.id} as ${result.journalEntry.entryNo}`,
+          );
+        }
+        res.status(result.idempotent ? 200 : 201).json({
+          draft: serializeDraft(updatedDraft!),
+          journalEntry: serializeJournalEntry(
+            result.journalEntry,
+            result.lines,
+          ),
+          idempotent: result.idempotent,
+        });
+        return;
+      }
+      case "idempotency_conflict":
+        // Should be unreachable for the per-draft key (same key always
+        // implies same draft → same payload), but surface clearly if it
+        // ever happens (e.g. someone manually edited the JE row).
+        res.status(409).json({
+          error:
+            "Posting key conflict: a previous post for this draft used a different payload. Investigate before retrying.",
+          code: "IDEMPOTENCY_CONFLICT",
+          existingJournalEntryId: result.existingJournalEntryId,
+        });
+        return;
+      case "forbidden":
+        res.status(403).json({ error: result.reason, code: "FORBIDDEN" });
+        return;
+      case "invalid_payload":
+        res.status(422).json({ error: result.reason, code: "INVALID_PAYLOAD" });
+        return;
+      case "unbalanced":
+        res.status(422).json({
+          error: `Posting refused: debits (${(result.debitsCents / 100).toFixed(2)}) do not equal credits (${(result.creditsCents / 100).toFixed(2)}).`,
+          code: "UNBALANCED",
+          debitsCents: result.debitsCents,
+          creditsCents: result.creditsCents,
+        });
+        return;
+      case "invalid_account": {
+        const reasonText =
+          result.reason === "unknown_account"
+            ? `account '${result.account}' is not in the chart of accounts`
+            : result.reason === "archived_account"
+              ? `account '${result.account}' is archived`
+              : `account '${result.account}' is not allowed for manual posting`;
+        res.status(400).json({
+          error: `Posting refused: line ${result.lineNo} — ${reasonText}.`,
+          code: "INVALID_ACCOUNT",
+          lineNo: result.lineNo,
+          account: result.account,
+          reason: result.reason,
+        });
+        return;
+      }
+      case "period_locked":
+        res.status(409).json({
+          error: `Posting refused: ${result.entryDate} falls in ${result.periodLabel ? `closed period '${result.periodLabel}'` : "no open accounting period"}.`,
+          code: "PERIOD_LOCKED",
+          entryDate: result.entryDate,
+          periodLabel: result.periodLabel,
+        });
+        return;
+    }
   },
 );
 

@@ -15,7 +15,6 @@ export * from "./accountingSettings";
 export * from "./accountingSettingsAccountingMethod";
 export * from "./accountingSettingsResponse";
 export * from "./activityItem";
-export * from "./activityItemType";
 export * from "./approvalActionBody";
 export * from "./approvalQueueItem";
 export * from "./approvalQueueItemType";

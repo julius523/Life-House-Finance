@@ -1,0 +1,175 @@
+{
+  "results": [
+    {
+      "id": "T1",
+      "desc": "Submitter creates draft → 201, status='draft', id present",
+      "pass": true,
+      "evidence": {
+        "status": 201,
+        "draftStatus": "draft",
+        "draftId": 13
+      }
+    },
+    {
+      "id": "T2",
+      "desc": "Submitter edits draft (PATCH) → 200, payload updated, still status='draft'",
+      "pass": true,
+      "evidence": {
+        "status": 200,
+        "draftStatus": "draft",
+        "memoMatches": true
+      }
+    },
+    {
+      "id": "T3",
+      "desc": "Submitter submits draft → 200, status='submitted', submittedByUserId set",
+      "pass": true,
+      "evidence": {
+        "status": 200,
+        "draftStatus": "submitted",
+        "submittedBy": 3,
+        "submittedAt": "2026-04-19T01:27:33.111Z"
+      }
+    },
+    {
+      "id": "T4",
+      "desc": "Submitted draft cannot be edited → 409 DRAFT_NOT_EDITABLE",
+      "pass": true,
+      "evidence": {
+        "status": 409,
+        "code": "DRAFT_NOT_EDITABLE"
+      }
+    },
+    {
+      "id": "T5",
+      "desc": "Submitter cannot approve their own draft → 403 NO_SELF_APPROVAL (server-side)",
+      "pass": true,
+      "evidence": {
+        "status": 403,
+        "code": "NO_SELF_APPROVAL"
+      }
+    },
+    {
+      "id": "T6",
+      "desc": "Different reviewer approves → 200, status='approved', approvedByUserId set and != submittedByUserId",
+      "pass": true,
+      "evidence": {
+        "status": 200,
+        "draftStatus": "approved",
+        "approvedBy": 2,
+        "submittedBy": 3
+      }
+    },
+    {
+      "id": "T7",
+      "desc": "Approver posts approved draft → 201, JE created via postManualJournalEntry, draft.status='posted', JE.manualDraftId === draftId",
+      "pass": true,
+      "evidence": {
+        "status": 201,
+        "idempotent": false,
+        "draftStatus": "posted",
+        "jeId": 54,
+        "jeManualDraftId": 13,
+        "draftPostedJeId": 54
+      }
+    },
+    {
+      "id": "T8",
+      "desc": "Replayed /post → 200 idempotent=true, same JE id, no duplicate row",
+      "pass": true,
+      "evidence": {
+        "status": 200,
+        "idempotent": true,
+        "jeId": 54
+      }
+    },
+    {
+      "id": "T8-no-dup",
+      "desc": "Ledger has exactly ONE posted JE for this draft (no duplicate row from replay)",
+      "pass": true,
+      "evidence": {
+        "matchCount": 1,
+        "matchedId": 54,
+        "jeId": 54
+      }
+    },
+    {
+      "id": "T9",
+      "desc": "Posted draft is locked: PATCH→409, DELETE→409, /submit→409",
+      "pass": true,
+      "evidence": {
+        "patch": 409,
+        "del": 409,
+        "submit": 409
+      }
+    },
+    {
+      "id": "T10",
+      "desc": "Reject flow: 400 without reason, 200 with reason → status='rejected', resubmit allowed → status='submitted'",
+      "pass": true,
+      "evidence": {
+        "noReason": 400,
+        "reject": {
+          "status": 200,
+          "draftStatus": "rejected",
+          "reason": "Wrong account on credit line. Please fix."
+        },
+        "resubmit": {
+          "status": 200,
+          "draftStatus": "submitted"
+        }
+      }
+    },
+    {
+      "id": "T11",
+      "desc": "Cannot approve a 'draft' (never submitted), cannot /post a non-approved draft → 409 INVALID_STATE_TRANSITION",
+      "pass": true,
+      "evidence": {
+        "approve": {
+          "status": 409,
+          "code": "INVALID_STATE_TRANSITION"
+        },
+        "post": {
+          "status": 409,
+          "code": "INVALID_STATE_TRANSITION"
+        }
+      }
+    },
+    {
+      "id": "T12",
+      "desc": "activity_log carries all 6 event types: created, edited, submitted, approved, rejected, posted (+ ledger journal_entry_posted)",
+      "pass": true,
+      "evidence": {
+        "draftEventTypes": [
+          "manual_je_draft_approved",
+          "manual_je_draft_created",
+          "manual_je_draft_edited",
+          "manual_je_draft_posted",
+          "manual_je_draft_submitted"
+        ],
+        "d2EventTypes": [
+          "manual_je_draft_created",
+          "manual_je_draft_rejected",
+          "manual_je_draft_submitted"
+        ],
+        "jePostedRowCount": 1,
+        "activityEndpointFound": true
+      }
+    },
+    {
+      "id": "T13",
+      "desc": "Posted JE row links back to draft: journalEntry.manualDraftId === draftId AND evidence_snapshot.idempotency.key === 'manual-draft-{id}'",
+      "pass": true,
+      "evidence": {
+        "manualDraftId": 13,
+        "idempotencyKey": "manual-draft-13",
+        "expectedKey": "manual-draft-13"
+      }
+    }
+  ],
+  "passes": 14,
+  "total": 14,
+  "draftId": 13,
+  "draft2Id": 14,
+  "jeId": 54
+}

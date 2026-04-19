@@ -124,6 +124,25 @@ export const journalEntriesTable = pgTable(
      */
     idempotencyKey: text("idempotency_key"),
 
+    /**
+     * Task #29B — when this JE was posted from an approved manual
+     * journal-entry draft, this column points back at that draft. NULL
+     * for direct manual posts (no approval workflow), agent-action
+     * posts, and reversals. Together with the matching column on
+     * `manual_journal_entry_drafts.posted_journal_entry_id`, a single
+     * SQL join recovers the full draft → submit → approve → post chain.
+     *
+     * Plain integer column with a SQL-level FK added in a follow-up
+     * push — drizzle does not let us point at the drafts table here
+     * without creating an import cycle, so the relational constraint
+     * is enforced by the partial unique index below + application-side
+     * checks in postManualJournalEntry. (Cycle could be broken with
+     * a `references((): AnyPgColumn => ...)` import-on-use, but that
+     * still requires importing the drafts schema, which itself imports
+     * this file.)
+     */
+    manualDraftId: integer("manual_draft_id"),
+
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [
@@ -136,6 +155,11 @@ export const journalEntriesTable = pgTable(
     uniqueIndex("journal_entries_idempotency_key_uniq")
       .on(table.idempotencyKey)
       .where(sqlNotNull(table.idempotencyKey)),
+    // Task #29B — at most one posted JE per manual draft (defence in
+    // depth on top of the deterministic idempotency key the route uses).
+    uniqueIndex("journal_entries_manual_draft_uniq")
+      .on(table.manualDraftId)
+      .where(sqlNotNull(table.manualDraftId)),
     index("journal_entries_status_idx").on(table.status, table.postedAt),
     index("journal_entries_entry_date_idx").on(table.entryDate),
     index("journal_entries_thread_idx").on(table.threadId),

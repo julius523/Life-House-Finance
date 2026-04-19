@@ -630,6 +630,12 @@ export type ManualJournalEntryInput = {
    * the service does not have to know the wire format.
    */
   fingerprint?: string | null;
+  /**
+   * Task #29B — when this manual post originated from an approved
+   * draft, set this to the draft id so the JE row carries a permanent
+   * link back to the approval chain. NULL for direct manual posts.
+   */
+  manualDraftId?: number | null;
 };
 
 export type PostManualJournalEntryResult =
@@ -812,6 +818,10 @@ export async function postManualJournalEntry(
         approverUserId: actor.id,
         evidenceSnapshot,
         idempotencyKey,
+        manualDraftId:
+          typeof input.manualDraftId === "number" && input.manualDraftId > 0
+            ? input.manualDraftId
+            : null,
       })
       .returning();
 

@@ -22,23 +22,10 @@ export interface DashboardSummary {
   monthlyBurnRate: number;
 }
 
-export type ActivityItemType =
-  (typeof ActivityItemType)[keyof typeof ActivityItemType];
-
-export const ActivityItemType = {
-  expense_submitted: "expense_submitted",
-  expense_approved: "expense_approved",
-  expense_rejected: "expense_rejected",
-  bill_created: "bill_created",
-  bill_paid: "bill_paid",
-  receipt_uploaded: "receipt_uploaded",
-  transaction_imported: "transaction_imported",
-  reconciliation_completed: "reconciliation_completed",
-} as const;
-
 export interface ActivityItem {
   id: number;
-  type: ActivityItemType;
+  /** Activity event type. Free-form to accommodate workflow events added by new modules without forcing client/spec churn. */
+  type: string;
   description: string;
   actor: string;
   amount?: number;

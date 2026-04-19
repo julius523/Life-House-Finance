@@ -41,16 +41,11 @@ export const GetRecentActivityQueryParams = zod.object({
 
 export const GetRecentActivityResponseItem = zod.object({
   id: zod.number(),
-  type: zod.enum([
-    "expense_submitted",
-    "expense_approved",
-    "expense_rejected",
-    "bill_created",
-    "bill_paid",
-    "receipt_uploaded",
-    "transaction_imported",
-    "reconciliation_completed",
-  ]),
+  type: zod
+    .string()
+    .describe(
+      "Activity event type. Free-form to accommodate workflow events added by new modules without forcing client\/spec churn.",
+    ),
   description: zod.string(),
   actor: zod.string(),
   amount: zod.number().optional(),

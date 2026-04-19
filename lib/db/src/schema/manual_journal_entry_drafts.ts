@@ -6,26 +6,64 @@ import {
   timestamp,
   jsonb,
   index,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { usersTable } from "./users";
+import { journalEntriesTable } from "./journal_entries";
 
 /**
- * Drafts of manual journal entries — work-in-progress saves from the
- * "New journal entry" page so accountants can step away and resume later.
+ * Manual journal entry drafts.
  *
- * These rows NEVER affect the ledger. The full editor state (header +
- * lines, including blank/invalid fields) is preserved verbatim in
- * `payload` so a draft can be resumed exactly as it was left, even if
- * it would not yet pass posting validation.
+ * History:
+ *   - Task #29A — added the table for save/resume of work-in-progress
+ *     manual journal entries. Persistence-only; no workflow.
+ *   - Task #29B — extended the same table with a controlled lifecycle:
+ *       draft → submitted → approved → rejected → posted
+ *     so manual JEs go through a real maker/checker review before they
+ *     touch the ledger.
+ *
+ * Lifecycle states:
+ *   - draft       — author is still editing. Editable + deletable by
+ *                   the author and admin/approver reviewers.
+ *   - submitted   — handed off for review. Locked; cannot be edited or
+ *                   deleted. Can only transition to approved or rejected.
+ *   - approved    — reviewer (different from submitter when
+ *                   accounting_settings.separationOfDuties is true) has
+ *                   accepted it. Ready to be posted to the ledger.
+ *   - rejected    — reviewer sent it back. Editable again so the author
+ *                   can fix and re-submit. `rejection_reason` carries
+ *                   the reviewer's explanation.
+ *   - posted      — has been posted to the ledger via the existing
+ *                   `postManualJournalEntry` service (Task 25A path).
+ *                   `posted_journal_entry_id` links to the resulting
+ *                   `journal_entries` row, and that row carries the
+ *                   reverse linkage `manual_draft_id`. Terminal state —
+ *                   the row is NEVER deleted, so the approval chain
+ *                   stays auditable.
  *
  * Visibility (enforced by the route layer):
- *   - The user who created the draft can always see, edit, and discard it.
- *   - Admins and approvers can see, edit, and discard any user's drafts.
+ *   - The user who created the draft can always see it.
+ *   - Admins and approvers can see, edit, and act on any draft within
+ *     the rules of the lifecycle.
  *
- * Posting a draft is a separate operation: the client posts the entry
- * via the existing `/accounting/journal-entries` endpoint and then
- * deletes the draft on success.
+ * Posting path (Task #29B):
+ *   The "post approved draft" endpoint must internally call the existing
+ *   `postManualJournalEntry` service with a deterministic Idempotency-Key
+ *   derived from the draft id. There is NO second posting implementation
+ *   and NO bypass route. Closed-period block, balanced-entry checks,
+ *   archived/non-manual account rejection, and Task 25A idempotency all
+ *   apply automatically.
  */
+export const MANUAL_JE_DRAFT_STATUSES = [
+  "draft",
+  "submitted",
+  "approved",
+  "rejected",
+  "posted",
+] as const;
+export type ManualJournalEntryDraftStatus =
+  (typeof MANUAL_JE_DRAFT_STATUSES)[number];
+
 export const manualJournalEntryDraftsTable = pgTable(
   "manual_journal_entry_drafts",
   {
@@ -45,6 +83,47 @@ export const manualJournalEntryDraftsTable = pgTable(
      * time so partial work is preserved.
      */
     payload: jsonb("payload").notNull(),
+
+    // --- Task #29B lifecycle -------------------------------------------------
+    /**
+     * Current workflow state. Defaults to 'draft' so historical Task #29A
+     * rows that pre-date this column are valid out of the box.
+     */
+    status: text("status").notNull().default("draft"),
+
+    submittedByUserId: integer("submitted_by_user_id").references(
+      () => usersTable.id,
+      { onDelete: "set null" },
+    ),
+    submittedAt: timestamp("submitted_at"),
+
+    approvedByUserId: integer("approved_by_user_id").references(
+      () => usersTable.id,
+      { onDelete: "set null" },
+    ),
+    approvedAt: timestamp("approved_at"),
+
+    rejectedByUserId: integer("rejected_by_user_id").references(
+      () => usersTable.id,
+      { onDelete: "set null" },
+    ),
+    rejectedAt: timestamp("rejected_at"),
+    rejectionReason: text("rejection_reason"),
+
+    /**
+     * Set when the draft has been posted. Mirrors the FK on the
+     * journal_entries side (`manual_draft_id`), so a SQL join from
+     * either direction recovers the full approval chain.
+     *
+     * Self-FK style declaration to break the schema cycle (drafts →
+     * journal_entries and journal_entries → drafts both want to point
+     * at each other).
+     */
+    postedJournalEntryId: integer("posted_journal_entry_id").references(
+      (): AnyPgColumn => journalEntriesTable.id,
+      { onDelete: "set null" },
+    ),
+
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -54,6 +133,7 @@ export const manualJournalEntryDraftsTable = pgTable(
       table.updatedAt,
     ),
     index("manual_je_drafts_updated_idx").on(table.updatedAt),
+    index("manual_je_drafts_status_idx").on(table.status, table.updatedAt),
   ],
 );
 

@@ -5,11 +5,11 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
-import type { ActivityItemType } from "./activityItemType";
 
 export interface ActivityItem {
   id: number;
-  type: ActivityItemType;
+  /** Activity event type. Free-form to accommodate workflow events added by new modules without forcing client/spec churn. */
+  type: string;
   description: string;
   actor: string;
   amount?: number;
