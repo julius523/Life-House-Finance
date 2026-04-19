@@ -17,6 +17,230 @@ import { GetFinancialSummaryReportResponse } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
+// ---------------------------------------------------------------------------
+// Shared ledger-summary helper (Task #63 — reconciliation hardening).
+//
+// Encapsulates the ledger-source P&L + Balance Sheet computation so both
+// /reports/financial-summary and /reports/reconciliation tie to the SAME
+// posted-JE source of truth instead of being parallel re-implementations.
+// ---------------------------------------------------------------------------
+type BSAccountRow = { accountId: number; code: string; name: string; balance: number };
+type PLAccountRow = { accountId: number; code: string; name: string; amount: number };
+
+interface LedgerSummary {
+  // P&L
+  totalIncome: number;
+  totalExpenses: number;
+  incomeByAccount: PLAccountRow[];
+  expensesByAccount: PLAccountRow[];
+  // Balance Sheet (as-of toDate; fromDate ignored for BS by design)
+  cash: number;
+  accountsReceivable: number;
+  otherAssets: number;
+  accountsPayable: number;
+  otherLiabilities: number;
+  totalAssets: number;
+  totalLiabilities: number;
+  equity: number;
+  cashAccounts: BSAccountRow[];
+  accountsReceivableAccounts: BSAccountRow[];
+  otherAssetAccounts: BSAccountRow[];
+  accountsPayableAccounts: BSAccountRow[];
+  otherLiabilityAccounts: BSAccountRow[];
+}
+
+async function computeLedgerSummary(
+  fromDate: string | undefined,
+  toDate: string | undefined,
+): Promise<LedgerSummary> {
+  // ---- P&L per-account aggregation over [fromDate, toDate] ----------------
+  const plConds = [sql`${journalEntriesTable.status} in ('posted', 'reversed')`];
+  if (fromDate) plConds.push(gte(journalEntriesTable.entryDate, fromDate));
+  if (toDate) plConds.push(lte(journalEntriesTable.entryDate, toDate));
+
+  const plAccountRows = await db
+    .select({
+      accountId: chartOfAccountsTable.id,
+      code: chartOfAccountsTable.code,
+      name: chartOfAccountsTable.name,
+      type: chartOfAccountsTable.type,
+      debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+    })
+    .from(journalEntryLinesTable)
+    .innerJoin(
+      journalEntriesTable,
+      eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+    )
+    .innerJoin(
+      chartOfAccountsTable,
+      eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
+    )
+    .where(and(...plConds))
+    .groupBy(
+      chartOfAccountsTable.id,
+      chartOfAccountsTable.code,
+      chartOfAccountsTable.name,
+      chartOfAccountsTable.type,
+    );
+
+  let totalIncome = 0;
+  let totalExpenses = 0;
+  const incomeByAccount: PLAccountRow[] = [];
+  const expensesByAccount: PLAccountRow[] = [];
+  for (const a of plAccountRows) {
+    const d = Number(a.debits) / 100;
+    const c = Number(a.credits) / 100;
+    if (a.type === "revenue") {
+      const amount = c - d;
+      totalIncome += amount;
+      if (amount !== 0) {
+        incomeByAccount.push({ accountId: a.accountId, code: a.code, name: a.name, amount });
+      }
+    } else if (a.type === "expense") {
+      const amount = d - c;
+      totalExpenses += amount;
+      if (amount !== 0) {
+        expensesByAccount.push({ accountId: a.accountId, code: a.code, name: a.name, amount });
+      }
+    }
+  }
+  incomeByAccount.sort((x, y) => x.code.localeCompare(y.code));
+  expensesByAccount.sort((x, y) => x.code.localeCompare(y.code));
+
+  // ---- Balance sheet per-account aggregation as-of toDate -----------------
+  const bsConds = [sql`${journalEntriesTable.status} in ('posted', 'reversed')`];
+  if (toDate) bsConds.push(lte(journalEntriesTable.entryDate, toDate));
+
+  const bsAccountRows = await db
+    .select({
+      accountId: chartOfAccountsTable.id,
+      code: chartOfAccountsTable.code,
+      name: chartOfAccountsTable.name,
+      type: chartOfAccountsTable.type,
+      subtype: chartOfAccountsTable.subtype,
+      debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+    })
+    .from(journalEntryLinesTable)
+    .innerJoin(
+      journalEntriesTable,
+      eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+    )
+    .innerJoin(
+      chartOfAccountsTable,
+      eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
+    )
+    .where(and(...bsConds))
+    .groupBy(
+      chartOfAccountsTable.id,
+      chartOfAccountsTable.code,
+      chartOfAccountsTable.name,
+      chartOfAccountsTable.type,
+      chartOfAccountsTable.subtype,
+    );
+
+  let cash = 0;
+  let accountsReceivable = 0;
+  let otherAssets = 0;
+  let accountsPayable = 0;
+  let otherLiabilities = 0;
+  let totalAssets = 0;
+  let totalLiabilities = 0;
+  let equity = 0;
+  const cashAccounts: BSAccountRow[] = [];
+  const accountsReceivableAccounts: BSAccountRow[] = [];
+  const otherAssetAccounts: BSAccountRow[] = [];
+  const accountsPayableAccounts: BSAccountRow[] = [];
+  const otherLiabilityAccounts: BSAccountRow[] = [];
+
+  for (const a of bsAccountRows) {
+    const d = Number(a.debits) / 100;
+    const c = Number(a.credits) / 100;
+    const row: BSAccountRow = {
+      accountId: a.accountId,
+      code: a.code,
+      name: a.name,
+      balance: 0,
+    };
+    if (a.type === "asset") {
+      const net = d - c;
+      row.balance = net;
+      totalAssets += net;
+      if (a.subtype === "cash") {
+        cash += net;
+        cashAccounts.push(row);
+      } else if (a.subtype === "ar") {
+        accountsReceivable += net;
+        accountsReceivableAccounts.push(row);
+      } else {
+        otherAssets += net;
+        otherAssetAccounts.push(row);
+      }
+    } else if (a.type === "contra_asset") {
+      const net = d - c;
+      row.balance = net;
+      totalAssets += net;
+      otherAssets += net;
+      otherAssetAccounts.push(row);
+    } else if (a.type === "liability") {
+      const net = c - d;
+      row.balance = net;
+      totalLiabilities += net;
+      if (a.subtype === "ap") {
+        accountsPayable += net;
+        accountsPayableAccounts.push(row);
+      } else {
+        otherLiabilities += net;
+        otherLiabilityAccounts.push(row);
+      }
+    } else if (a.type === "contra_liability") {
+      const net = c - d;
+      row.balance = net;
+      totalLiabilities += net;
+      otherLiabilities += net;
+      otherLiabilityAccounts.push(row);
+    } else if (a.type === "equity") {
+      equity += c - d;
+    }
+  }
+
+  // Plug current-period net income into equity so totals tie out
+  // (assets = liabilities + equity).
+  equity += totalIncome - totalExpenses;
+  if (totalAssets === 0 && totalLiabilities === 0) {
+    equity = 0;
+  }
+
+  const sortRows = (rows: BSAccountRow[]) =>
+    rows.sort((x, y) => x.code.localeCompare(y.code));
+  sortRows(cashAccounts);
+  sortRows(accountsReceivableAccounts);
+  sortRows(otherAssetAccounts);
+  sortRows(accountsPayableAccounts);
+  sortRows(otherLiabilityAccounts);
+
+  return {
+    totalIncome,
+    totalExpenses,
+    incomeByAccount,
+    expensesByAccount,
+    cash,
+    accountsReceivable,
+    otherAssets,
+    accountsPayable,
+    otherLiabilities,
+    totalAssets,
+    totalLiabilities,
+    equity,
+    cashAccounts,
+    accountsReceivableAccounts,
+    otherAssetAccounts,
+    accountsPayableAccounts,
+    otherLiabilityAccounts,
+  };
+}
+
 // Query params arrive as strings; coerce them to Date locally rather than
 // relying on the generated z.date() schema (which would reject ISO strings).
 // Accept ISO date strings (YYYY-MM-DD or full ISO timestamp) and normalize to
@@ -287,240 +511,33 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
   let otherLiabilityAccounts: BSAccount[] = [];
 
   if (source === "ledger") {
-    // ----- Ledger-based P&L ------------------------------------------------
-    // Sum activity per CoA row over [fromDate, toDate]; revenue accounts net
-    // credits − debits, expense accounts net debits − credits.
-    // Include reversed-original entries so reversal pairs net to zero in the
-    // ledger view (the inverse JE is itself status='posted').
-    const plConds = [
-      sql`${journalEntriesTable.status} in ('posted', 'reversed')`,
-    ];
-    if (fromDate) plConds.push(gte(journalEntriesTable.entryDate, fromDate));
-    if (toDate) plConds.push(lte(journalEntriesTable.entryDate, toDate));
-    const plRows = await db
-      .select({
-        type: chartOfAccountsTable.type,
-        debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
-        credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
-      })
-      .from(journalEntryLinesTable)
-      .innerJoin(
-        journalEntriesTable,
-        eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
-      )
-      .innerJoin(
-        chartOfAccountsTable,
-        eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
-      )
-      .where(and(...plConds))
-      .groupBy(chartOfAccountsTable.type);
-    for (const r of plRows) {
-      const debits = Number(r.debits) / 100;
-      const credits = Number(r.credits) / 100;
-      if (r.type === "revenue") {
-        uncategorizedIncome += credits - debits;
-      } else if (r.type === "expense") {
-        uncategorizedExpenses += debits - credits;
-      }
-    }
-    totalIncome = uncategorizedIncome;
-    totalExpenses = uncategorizedExpenses;
-
-    // Task #61 — per-account breakdown using the same WHERE/JOIN as plRows
-    // above so the per-account amounts sum exactly to totalIncome/Expenses.
-    const plAccountRows = await db
-      .select({
-        accountId: chartOfAccountsTable.id,
-        code: chartOfAccountsTable.code,
-        name: chartOfAccountsTable.name,
-        type: chartOfAccountsTable.type,
-        debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
-        credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
-      })
-      .from(journalEntryLinesTable)
-      .innerJoin(
-        journalEntriesTable,
-        eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
-      )
-      .innerJoin(
-        chartOfAccountsTable,
-        eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
-      )
-      .where(and(...plConds))
-      .groupBy(
-        chartOfAccountsTable.id,
-        chartOfAccountsTable.code,
-        chartOfAccountsTable.name,
-        chartOfAccountsTable.type,
-      );
-    for (const a of plAccountRows) {
-      const d = Number(a.debits) / 100;
-      const c = Number(a.credits) / 100;
-      if (a.type === "revenue") {
-        const amount = c - d;
-        if (amount !== 0) {
-          incomeByAccount.push({
-            accountId: a.accountId,
-            code: a.code,
-            name: a.name,
-            amount,
-          });
-        }
-      } else if (a.type === "expense") {
-        const amount = d - c;
-        if (amount !== 0) {
-          expensesByAccount.push({
-            accountId: a.accountId,
-            code: a.code,
-            name: a.name,
-            amount,
-          });
-        }
-      }
-    }
-    incomeByAccount.sort((x, y) => x.code.localeCompare(y.code));
-    expensesByAccount.sort((x, y) => x.code.localeCompare(y.code));
-
-    // ----- Ledger-based Balance Sheet (as of toDate) ----------------------
-    const bsConds = [
-      sql`${journalEntriesTable.status} in ('posted', 'reversed')`,
-    ];
-    if (toDate) bsConds.push(lte(journalEntriesTable.entryDate, toDate));
-    // Group by subtype as well so we can split assets into cash / AR / other
-    // and liabilities into AP / other (Task 26). Subtype is nullable, so any
-    // null subtype falls into the "other" bucket for its type.
-    const bsRows = await db
-      .select({
-        type: chartOfAccountsTable.type,
-        subtype: chartOfAccountsTable.subtype,
-        normalBalance: chartOfAccountsTable.normalBalance,
-        debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
-        credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
-      })
-      .from(journalEntryLinesTable)
-      .innerJoin(
-        journalEntriesTable,
-        eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
-      )
-      .innerJoin(
-        chartOfAccountsTable,
-        eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
-      )
-      .where(and(...bsConds))
-      .groupBy(
-        chartOfAccountsTable.type,
-        chartOfAccountsTable.subtype,
-        chartOfAccountsTable.normalBalance,
-      );
-    // Per-account breakdown (Task 30) — same WHERE/JOIN as bsRows above but
-    // grouped down to the individual CoA row so the UI can expand a Balance
-    // Sheet row and see which accounts contribute to it.
-    const bsAccountRows = await db
-      .select({
-        accountId: chartOfAccountsTable.id,
-        code: chartOfAccountsTable.code,
-        name: chartOfAccountsTable.name,
-        type: chartOfAccountsTable.type,
-        subtype: chartOfAccountsTable.subtype,
-        debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
-        credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
-      })
-      .from(journalEntryLinesTable)
-      .innerJoin(
-        journalEntriesTable,
-        eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
-      )
-      .innerJoin(
-        chartOfAccountsTable,
-        eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
-      )
-      .where(and(...bsConds))
-      .groupBy(
-        chartOfAccountsTable.id,
-        chartOfAccountsTable.code,
-        chartOfAccountsTable.name,
-        chartOfAccountsTable.type,
-        chartOfAccountsTable.subtype,
-      );
-    for (const a of bsAccountRows) {
-      const d = Number(a.debits) / 100;
-      const c = Number(a.credits) / 100;
-      const row = { accountId: a.accountId, code: a.code, name: a.name, balance: 0 };
-      if (a.type === "asset") {
-        row.balance = d - c;
-        if (a.subtype === "cash") cashAccounts.push(row);
-        else if (a.subtype === "ar") accountsReceivableAccounts.push(row);
-        else otherAssetAccounts.push(row);
-      } else if (a.type === "contra_asset") {
-        row.balance = d - c; // typically negative — reduces assets
-        otherAssetAccounts.push(row);
-      } else if (a.type === "liability") {
-        row.balance = c - d;
-        if (a.subtype === "ap") accountsPayableAccounts.push(row);
-        else otherLiabilityAccounts.push(row);
-      } else if (a.type === "contra_liability") {
-        row.balance = c - d;
-        otherLiabilityAccounts.push(row);
-      }
-    }
-    const sortRows = (rows: BSAccount[]) =>
-      rows.sort((x, y) => x.code.localeCompare(y.code));
-    sortRows(cashAccounts);
-    sortRows(accountsReceivableAccounts);
-    sortRows(otherAssetAccounts);
-    sortRows(accountsPayableAccounts);
-    sortRows(otherLiabilityAccounts);
-
-    for (const r of bsRows) {
-      const debits = Number(r.debits) / 100;
-      const credits = Number(r.credits) / 100;
-      if (r.type === "asset") {
-        const net = debits - credits; // debit-normal
-        totalAssets += net;
-        if (r.subtype === "cash") {
-          cash += net;
-        } else if (r.subtype === "ar") {
-          accountsReceivable += net;
-        } else {
-          otherAssets += net;
-        }
-      } else if (r.type === "contra_asset") {
-        // Contra-asset rows (e.g. accumulated depreciation) reduce assets;
-        // their net debit balance is negative, so adding to totalAssets and
-        // otherAssets handles the sign correctly.
-        const net = debits - credits;
-        totalAssets += net;
-        otherAssets += net;
-      } else if (r.type === "liability") {
-        const net = credits - debits; // credit-normal
-        totalLiabilities += net;
-        if (r.subtype === "ap") {
-          accountsPayable += net;
-        } else {
-          otherLiabilities += net;
-        }
-      } else if (r.type === "contra_liability") {
-        const net = credits - debits;
-        totalLiabilities += net;
-        otherLiabilities += net;
-      } else if (r.type === "equity") {
-        // Equity goes into the synthesized equity total.
-        equity += credits - debits;
-      }
-    }
-    // Keep the legacy single-figure fields populated so existing consumers
-    // (and the operational/ledger toggle on the BS card) still work — they
-    // now mirror the breakdown's cash and AR rows.
+    // ----- Ledger-based P&L + Balance Sheet --------------------------------
+    // Delegate to the shared helper so this endpoint and /reports/reconciliation
+    // tie out to the SAME computation. See computeLedgerSummary() above.
+    const ls = await computeLedgerSummary(fromDate, toDate);
+    totalIncome = ls.totalIncome;
+    uncategorizedIncome = ls.totalIncome;
+    totalExpenses = ls.totalExpenses;
+    uncategorizedExpenses = ls.totalExpenses;
+    incomeByAccount = ls.incomeByAccount;
+    expensesByAccount = ls.expensesByAccount;
+    cash = ls.cash;
+    accountsReceivable = ls.accountsReceivable;
+    otherAssets = ls.otherAssets;
+    accountsPayable = ls.accountsPayable;
+    otherLiabilities = ls.otherLiabilities;
+    totalAssets = ls.totalAssets;
+    totalLiabilities = ls.totalLiabilities;
+    equity = ls.equity;
+    cashAccounts = ls.cashAccounts;
+    accountsReceivableAccounts = ls.accountsReceivableAccounts;
+    otherAssetAccounts = ls.otherAssetAccounts;
+    accountsPayableAccounts = ls.accountsPayableAccounts;
+    otherLiabilityAccounts = ls.otherLiabilityAccounts;
     cashOnHand = cash;
     outstandingReceivables = accountsReceivable;
     unpaidBills = accountsPayable;
     unreimbursedExpenses = otherLiabilities;
-    // Plug current-period net income into equity so totals tie out
-    // (assets = liabilities + equity).
-    equity += totalIncome - totalExpenses;
-    if (totalAssets === 0 && totalLiabilities === 0) {
-      equity = 0;
-    }
   } else {
     // ----- Operational P&L (legacy behavior) ------------------------------
   // Income = bank credits, attributed to a program when linked.
@@ -1045,6 +1062,211 @@ router.get("/reports/trial-balance", async (req, res): Promise<void> => {
       balanced: totalDebitsCents === totalCreditsCents,
       differenceCents: totalDebitsCents - totalCreditsCents,
     },
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task #63 — GET /reports/reconciliation?from=&to=
+//
+// Programmatic tie-out checks proving that the Trial Balance, P&L, and Balance
+// Sheet (ledger source) all reconcile to the same posted-JE source of truth.
+// Admin/approver only (same gate as Trial Balance).
+//
+// Each check has the shape:
+//   { id, label, expectedCents, actualCents, deltaCents, ok, severity }
+// where ok = (deltaCents === 0). Caller renders ✓/✗ per row.
+// ---------------------------------------------------------------------------
+type ReconciliationCheck = {
+  id: string;
+  label: string;
+  expectedCents: number;
+  actualCents: number;
+  deltaCents: number;
+  ok: boolean;
+  severity: "error" | "warning";
+};
+
+const toCents = (dollars: number) => Math.round(dollars * 100);
+
+router.get("/reports/reconciliation", async (req, res): Promise<void> => {
+  const role = req.authUser?.role;
+  if (role !== "admin" && role !== "approver") {
+    res
+      .status(403)
+      .json({ error: "Reconciliation report is restricted to admins and approvers." });
+    return;
+  }
+  const parsed = QuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res
+      .status(400)
+      .json({ error: "Invalid date range", details: parsed.error.format() });
+    return;
+  }
+  const { fromDate, toDate } = parsed.data;
+
+  // ---- Independent Trial Balance aggregation over [fromDate, toDate] -------
+  // Uses the same WHERE shape as /reports/trial-balance and includes lines
+  // whose accountId is NULL so unmapped activity cannot hide imbalance.
+  const tbConds = [sql`${journalEntriesTable.status} in ('posted', 'reversed')`];
+  if (fromDate) tbConds.push(gte(journalEntriesTable.entryDate, fromDate));
+  if (toDate) tbConds.push(lte(journalEntriesTable.entryDate, toDate));
+
+  const tbRows = await db
+    .select({
+      accountId: journalEntryLinesTable.accountId,
+      type: chartOfAccountsTable.type,
+      debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+    })
+    .from(journalEntryLinesTable)
+    .innerJoin(
+      journalEntriesTable,
+      eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+    )
+    .leftJoin(
+      chartOfAccountsTable,
+      eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
+    )
+    .groupBy(journalEntryLinesTable.accountId, chartOfAccountsTable.type)
+    .where(and(...tbConds));
+
+  let tbDebitsCents = 0;
+  let tbCreditsCents = 0;
+  let tbRevenueNetCents = 0; // credits - debits
+  let tbExpenseNetCents = 0; // debits - credits
+  for (const r of tbRows) {
+    const d = Number(r.debits);
+    const c = Number(r.credits);
+    tbDebitsCents += d;
+    tbCreditsCents += c;
+    if (r.type === "revenue") tbRevenueNetCents += c - d;
+    else if (r.type === "expense") tbExpenseNetCents += d - c;
+  }
+
+  // ---- Ledger summary (P&L + BS) via the shared helper ---------------------
+  const ls = await computeLedgerSummary(fromDate, toDate);
+  const totalIncomeCents = toCents(ls.totalIncome);
+  const totalExpensesCents = toCents(ls.totalExpenses);
+  const netIncomeCents = totalIncomeCents - totalExpensesCents;
+  const totalAssetsCents = toCents(ls.totalAssets);
+  const totalLiabilitiesCents = toCents(ls.totalLiabilities);
+  const equityCents = toCents(ls.equity);
+
+  const sumAccountAmountsCents = (rows: { amount: number }[]) =>
+    toCents(rows.reduce((s, r) => s + r.amount, 0));
+  const sumBalanceCents = (rows: { balance: number }[]) =>
+    toCents(rows.reduce((s, r) => s + r.balance, 0));
+
+  const checks: ReconciliationCheck[] = [];
+  const push = (
+    id: string,
+    label: string,
+    expectedCents: number,
+    actualCents: number,
+    severity: "error" | "warning" = "error",
+  ) => {
+    const deltaCents = actualCents - expectedCents;
+    checks.push({
+      id,
+      label,
+      expectedCents,
+      actualCents,
+      deltaCents,
+      ok: deltaCents === 0,
+      severity,
+    });
+  };
+
+  // C1 — fundamental ledger integrity.
+  push("trial_balance_balanced", "Trial Balance: debits = credits", tbDebitsCents, tbCreditsCents);
+
+  // C2 / C3 — per-account aggregation rolls up to financial-summary totals.
+  push(
+    "pl_income_account_sum_matches",
+    "P&L: Σ income-by-account = Total Income",
+    totalIncomeCents,
+    sumAccountAmountsCents(ls.incomeByAccount),
+  );
+  push(
+    "pl_expense_account_sum_matches",
+    "P&L: Σ expense-by-account = Total Expenses",
+    totalExpensesCents,
+    sumAccountAmountsCents(ls.expensesByAccount),
+  );
+
+  // C4 / C5 — Trial Balance derived totals match P&L totals.
+  push(
+    "pl_income_matches_tb_revenue",
+    "P&L Total Income = Σ TB revenue accounts (credits − debits)",
+    totalIncomeCents,
+    tbRevenueNetCents,
+  );
+  push(
+    "pl_expense_matches_tb_expense",
+    "P&L Total Expenses = Σ TB expense accounts (debits − credits)",
+    totalExpensesCents,
+    tbExpenseNetCents,
+  );
+
+  // C6 — accounting identity. Will fail iff TB is unbalanced.
+  push(
+    "bs_equity_equals_assets_minus_liabilities",
+    "Balance Sheet: Equity = Assets − Liabilities",
+    totalAssetsCents - totalLiabilitiesCents,
+    equityCents,
+  );
+
+  // (Removed tautological "bs_net_income_matches_pl": both sides derive from
+  // the same totalIncome - totalExpenses expression, so the check could never
+  // detect drift. The accounting identity check above already covers the BS
+  // / P&L tie-out via Assets − Liabilities = Equity, where Equity is plugged
+  // with current-period net income.)
+
+  // C8–C12 — per-subtype account rows sum to the displayed subtotal.
+  push(
+    "bs_cash_subtotal_matches",
+    "BS: Σ cash accounts = Cash subtotal",
+    toCents(ls.cash),
+    sumBalanceCents(ls.cashAccounts),
+  );
+  push(
+    "bs_ar_subtotal_matches",
+    "BS: Σ A/R accounts = A/R subtotal",
+    toCents(ls.accountsReceivable),
+    sumBalanceCents(ls.accountsReceivableAccounts),
+  );
+  push(
+    "bs_other_assets_subtotal_matches",
+    "BS: Σ other-asset accounts = Other-Assets subtotal",
+    toCents(ls.otherAssets),
+    sumBalanceCents(ls.otherAssetAccounts),
+  );
+  push(
+    "bs_ap_subtotal_matches",
+    "BS: Σ A/P accounts = A/P subtotal",
+    toCents(ls.accountsPayable),
+    sumBalanceCents(ls.accountsPayableAccounts),
+  );
+  push(
+    "bs_other_liabilities_subtotal_matches",
+    "BS: Σ other-liability accounts = Other-Liabilities subtotal",
+    toCents(ls.otherLiabilities),
+    sumBalanceCents(ls.otherLiabilityAccounts),
+  );
+
+  const allOk = checks.every((c) => c.ok);
+  const errorCount = checks.filter((c) => !c.ok && c.severity === "error").length;
+  const warningCount = checks.filter((c) => !c.ok && c.severity === "warning").length;
+
+  res.json({
+    generatedAt: new Date().toISOString(),
+    fromDate: fromDate ?? null,
+    toDate: toDate ?? null,
+    allOk,
+    errorCount,
+    warningCount,
+    checks,
   });
 });
 

@@ -1271,6 +1271,34 @@ export interface TrialBalanceReport {
   totals: TrialBalanceTotals;
 }
 
+export type ReconciliationCheckSeverity =
+  (typeof ReconciliationCheckSeverity)[keyof typeof ReconciliationCheckSeverity];
+
+export const ReconciliationCheckSeverity = {
+  error: "error",
+  warning: "warning",
+} as const;
+
+export interface ReconciliationCheck {
+  id: string;
+  label: string;
+  expectedCents: number;
+  actualCents: number;
+  deltaCents: number;
+  ok: boolean;
+  severity: ReconciliationCheckSeverity;
+}
+
+export interface ReconciliationReport {
+  generatedAt: string;
+  fromDate: string | null;
+  toDate: string | null;
+  allOk: boolean;
+  errorCount: number;
+  warningCount: number;
+  checks: ReconciliationCheck[];
+}
+
 export interface AccountingDashboardOpenPeriod {
   id: number;
   label: string;
@@ -2363,6 +2391,19 @@ export type GetAccountActivityReportParams = {
 };
 
 export type GetTrialBalanceReportParams = {
+  fromDate?: string;
+  toDate?: string;
+  /**
+   * Alias for fromDate.
+   */
+  from?: string;
+  /**
+   * Alias for toDate.
+   */
+  to?: string;
+};
+
+export type GetReconciliationReportParams = {
   fromDate?: string;
   toDate?: string;
   /**

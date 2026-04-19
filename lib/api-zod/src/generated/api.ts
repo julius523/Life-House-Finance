@@ -2605,6 +2605,38 @@ export const GetTrialBalanceReportResponse = zod.object({
 });
 
 /**
+ * @summary Programmatic tie-out checks proving Trial Balance, P&L, and Balance Sheet
+all reconcile to the same posted-JE source of truth. Admin/approver only.
+
+ */
+export const GetReconciliationReportQueryParams = zod.object({
+  fromDate: zod.date().optional(),
+  toDate: zod.date().optional(),
+  from: zod.date().optional().describe("Alias for fromDate."),
+  to: zod.date().optional().describe("Alias for toDate."),
+});
+
+export const GetReconciliationReportResponse = zod.object({
+  generatedAt: zod.coerce.date(),
+  fromDate: zod.coerce.date().nullable(),
+  toDate: zod.coerce.date().nullable(),
+  allOk: zod.boolean(),
+  errorCount: zod.number(),
+  warningCount: zod.number(),
+  checks: zod.array(
+    zod.object({
+      id: zod.string(),
+      label: zod.string(),
+      expectedCents: zod.number(),
+      actualCents: zod.number(),
+      deltaCents: zod.number(),
+      ok: zod.boolean(),
+      severity: zod.enum(["error", "warning"]),
+    }),
+  ),
+});
+
+/**
  * @summary List Chart of Accounts
  */
 export const ListChartOfAccountsQueryParams = zod.object({

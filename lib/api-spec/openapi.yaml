@@ -1461,6 +1461,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/TrialBalanceReport"
 
+  /reports/reconciliation:
+    get:
+      operationId: getReconciliationReport
+      tags: [reports]
+      summary: |
+        Programmatic tie-out checks proving Trial Balance, P&L, and Balance Sheet
+        all reconcile to the same posted-JE source of truth. Admin/approver only.
+      parameters:
+        - name: fromDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: toDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: from
+          in: query
+          description: Alias for fromDate.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: Alias for toDate.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Reconciliation checks with overall status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationReport"
+
   /accounting/chart-of-accounts:
     get:
       operationId: listChartOfAccounts
@@ -5311,6 +5349,61 @@ components:
         totals:
           $ref: "#/components/schemas/TrialBalanceTotals"
       required: [fromDate, toDate, rows, totals]
+
+    ReconciliationCheck:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        expectedCents:
+          type: integer
+        actualCents:
+          type: integer
+        deltaCents:
+          type: integer
+        ok:
+          type: boolean
+        severity:
+          type: string
+          enum: [error, warning]
+      required: [id, label, expectedCents, actualCents, deltaCents, ok, severity]
+
+    ReconciliationReport:
+      type: object
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        fromDate:
+          type: string
+          format: date
+          nullable: true
+        toDate:
+          type: string
+          format: date
+          nullable: true
+        allOk:
+          type: boolean
+        errorCount:
+          type: integer
+        warningCount:
+          type: integer
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReconciliationCheck"
+      required:
+        [
+          generatedAt,
+          fromDate,
+          toDate,
+          allOk,
+          errorCount,
+          warningCount,
+          checks,
+        ]
 
     AccountingDashboardOpenPeriod:
       type: object

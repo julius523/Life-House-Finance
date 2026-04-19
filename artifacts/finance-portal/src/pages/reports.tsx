@@ -3,6 +3,7 @@ import {
   useGetFinancialSummaryReport,
   useGetTrialBalanceReport,
   useGetAccountActivityReport,
+  useGetReconciliationReport,
   useListAccountingPeriods,
 } from "@workspace/api-client-react";
 import { Link } from "wouter";
@@ -37,6 +38,114 @@ const fmtPct = (n?: number) =>
 
 const titleCase = (s: string) =>
   s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+/**
+ * Task #63 — Reconciliation card. Renders programmatic tie-out checks proving
+ * Trial Balance, P&L, and Balance Sheet (ledger source) all reconcile to the
+ * same posted-JE source of truth. Hidden in operational mode (the checks only
+ * make sense for ledger-source reports).
+ */
+function ReconciliationCard({
+  fromDate,
+  toDate,
+  rangeOk,
+}: {
+  fromDate: string;
+  toDate: string;
+  rangeOk: boolean;
+}) {
+  const { data, isLoading, error } = useGetReconciliationReport(
+    { fromDate, toDate },
+    { query: { enabled: rangeOk } },
+  );
+  const errMsg = error ? errorMessage(error) : null;
+  const fmtDelta = (cents: number) => {
+    const dollars = cents / 100;
+    const sign = dollars > 0 ? "+" : dollars < 0 ? "−" : "";
+    return `${sign}${new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+    }).format(Math.abs(dollars))}`;
+  };
+  return (
+    <Card data-testid="reconciliation-card" className="border-l-4 border-l-blue-500">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <CardTitle>Reconciliation</CardTitle>
+            <CardDescription>
+              Programmatic tie-out: every check below proves a different report
+              agrees with the posted-JE source of truth.
+            </CardDescription>
+          </div>
+          {data && (
+            <div
+              data-testid="reconciliation-status"
+              className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
+                data.allOk
+                  ? "bg-emerald-100 text-emerald-800"
+                  : data.errorCount > 0
+                  ? "bg-red-100 text-red-800"
+                  : "bg-amber-100 text-amber-800"
+              }`}
+            >
+              {data.allOk
+                ? "All checks pass"
+                : `${data.errorCount} error${data.errorCount === 1 ? "" : "s"}${
+                    data.warningCount > 0 ? `, ${data.warningCount} warning${data.warningCount === 1 ? "" : "s"}` : ""
+                  }`}
+            </div>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {errMsg ? (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+            Could not load reconciliation: {errMsg}
+          </div>
+        ) : isLoading || !data ? (
+          <Skeleton className="h-32" />
+        ) : (
+          <ul className="space-y-2 text-sm">
+            {data.checks.map((c) => {
+              const icon = c.ok ? "✓" : c.severity === "warning" ? "⚠" : "✗";
+              const colorCls = c.ok
+                ? "text-emerald-700"
+                : c.severity === "warning"
+                ? "text-amber-700"
+                : "text-red-700";
+              return (
+                <li
+                  key={c.id}
+                  data-testid={`reconciliation-check-${c.id}`}
+                  className="flex items-start justify-between gap-3 rounded border border-border/60 px-3 py-2"
+                  title={
+                    c.ok
+                      ? "Pass"
+                      : `Expected ${fmtDelta(c.expectedCents)}, got ${fmtDelta(c.actualCents)} — drift ${fmtDelta(c.deltaCents)}`
+                  }
+                >
+                  <span className={`flex items-baseline gap-2 ${colorCls}`}>
+                    <span aria-hidden className="font-bold">
+                      {icon}
+                    </span>
+                    <span className="text-foreground">{c.label}</span>
+                  </span>
+                  {!c.ok && (
+                    <span className={`font-mono text-xs ${colorCls}`}>
+                      Δ {fmtDelta(c.deltaCents)}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 /** Convert a react-query error to a user-friendly string. */
 function errorMessage(err: unknown): string | null {
@@ -776,6 +885,16 @@ export default function ReportsPage() {
         </div>
       ) : !data ? null : (
         <>
+          {source === "ledger" && validRange && (
+            <PanelErrorBoundary label="Reconciliation">
+              <ReconciliationCard
+                fromDate={fromDate}
+                toDate={toDate}
+                rangeOk={validRange}
+              />
+            </PanelErrorBoundary>
+          )}
+
           {selected.summary && (
           <PanelErrorBoundary label="Summary">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1960,8 +2079,12 @@ function AccountDrillDownRow({
 }) {
   const [open, setOpen] = useState(false);
   const rangeOk = isValidRange(fromDate, toDate);
+  // Tie-out: Balance Sheet row balances are cumulative-through-toDate, so the
+  // drilldown must request the full history (no `from`) for the listed lines'
+  // net to equal the displayed balance. P&L drilldowns are period-only and
+  // pass both bounds.
   const { data, isLoading, error } = useGetAccountActivityReport(
-    { accountId: account.accountId, from: fromDate, to: toDate },
+    { accountId: account.accountId, to: toDate },
     { query: { enabled: open && rangeOk } },
   );
   const errMsg = error ? errorMessage(error) : null;

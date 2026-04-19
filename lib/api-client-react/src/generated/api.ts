@@ -92,6 +92,7 @@ import type {
   GetJournalEntryExportScheduleLogParams,
   GetProgramSpendingParams,
   GetRecentActivityParams,
+  GetReconciliationReportParams,
   GetReconciliationSummaryParams,
   GetTrialBalanceReportParams,
   HealthStatus,
@@ -148,6 +149,7 @@ import type {
   ProgramSpendingReport,
   Receipt,
   ReceiptListResponse,
+  ReconciliationReport,
   ReconciliationSummary,
   RegenerateBillAccountingDraftBody,
   RejectAgentAction200,
@@ -5409,6 +5411,113 @@ export function useGetTrialBalanceReport<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetTrialBalanceReportQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Programmatic tie-out checks proving Trial Balance, P&L, and Balance Sheet
+all reconcile to the same posted-JE source of truth. Admin/approver only.
+
+ */
+export const getGetReconciliationReportUrl = (
+  params?: GetReconciliationReportParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reports/reconciliation?${stringifiedParams}`
+    : `/api/reports/reconciliation`;
+};
+
+export const getReconciliationReport = async (
+  params?: GetReconciliationReportParams,
+  options?: RequestInit,
+): Promise<ReconciliationReport> => {
+  return customFetch<ReconciliationReport>(
+    getGetReconciliationReportUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetReconciliationReportQueryKey = (
+  params?: GetReconciliationReportParams,
+) => {
+  return [`/api/reports/reconciliation`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetReconciliationReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getReconciliationReport>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetReconciliationReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getReconciliationReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetReconciliationReportQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getReconciliationReport>>
+  > = ({ signal }) =>
+    getReconciliationReport(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getReconciliationReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetReconciliationReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getReconciliationReport>>
+>;
+export type GetReconciliationReportQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Programmatic tie-out checks proving Trial Balance, P&L, and Balance Sheet
+all reconcile to the same posted-JE source of truth. Admin/approver only.
+
+ */
+
+export function useGetReconciliationReport<
+  TData = Awaited<ReturnType<typeof getReconciliationReport>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetReconciliationReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getReconciliationReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetReconciliationReportQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
