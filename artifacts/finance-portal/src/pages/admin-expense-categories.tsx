@@ -7,9 +7,9 @@
  * hiding all action buttons unless the current user is admin.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useSearch } from "wouter";
 import {
   Card,
   CardContent,
@@ -164,6 +164,27 @@ export default function AdminExpenseCategoriesPage() {
   const categories = categoriesQuery.data?.categories ?? [];
   const missing = missingQuery.data?.categories ?? [];
 
+  // Deep-link support — pages like the blocked-accounting queue link
+  // here with ?focus=<categoryId> so finance can jump straight to the
+  // mapping that's blocking work. Scroll the row into view and add a
+  // temporary highlight so it's obvious which one was targeted.
+  const search = useSearch();
+  const focusId = useMemo(() => {
+    const params = new URLSearchParams(search);
+    const raw = params.get("focus");
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  }, [search]);
+  const focusRowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (focusId === null) return;
+    if (categoriesQuery.isLoading) return;
+    if (focusRowRef.current) {
+      focusRowRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [focusId, categoriesQuery.isLoading, categories.length]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -264,6 +285,8 @@ export default function AdminExpenseCategoriesPage() {
                   key={cat.id}
                   category={cat}
                   isAdmin={isAdmin}
+                  isFocused={cat.id === focusId}
+                  rowRef={cat.id === focusId ? focusRowRef : undefined}
                   onEdit={() => setEditing(cat)}
                   onEditRules={() => setRuleEditingFor(cat)}
                   onDeactivate={async () => {
@@ -321,18 +344,28 @@ export default function AdminExpenseCategoriesPage() {
 function CategoryRow({
   category,
   isAdmin,
+  isFocused = false,
+  rowRef,
   onEdit,
   onEditRules,
   onDeactivate,
 }: {
   category: ExpenseCategory;
   isAdmin: boolean;
+  isFocused?: boolean;
+  rowRef?: React.RefObject<HTMLDivElement | null>;
   onEdit: () => void;
   onEditRules: () => void;
   onDeactivate: () => Promise<void> | void;
 }) {
   return (
-    <div className="border rounded-md p-3 space-y-2" data-testid={`category-row-${category.id}`}>
+    <div
+      ref={rowRef}
+      className={`border rounded-md p-3 space-y-2 transition-shadow ${
+        isFocused ? "ring-2 ring-primary shadow-md" : ""
+      }`}
+      data-testid={`category-row-${category.id}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="font-medium flex items-center gap-2">

@@ -38,6 +38,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { AlertTriangle, MoreHorizontal, RefreshCw, Settings } from "lucide-react";
@@ -70,14 +77,27 @@ function reasonLabel(code: string | null | undefined): string {
 export default function AccountingBlockedExpenses() {
   const [page, setPage] = useState(1);
   const pageSize = 25;
+  const [reasonFilter, setReasonFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const qc = useQueryClient();
   const { toast } = useToast();
 
-  const { data, isLoading } = useListBlockedExpenses(
-    { page, pageSize },
+  // Build query params — only include filters when they're set so the
+  // generated hook doesn't send `reasonCode=all` to the server.
+  const listParams: {
+    page: number;
+    pageSize: number;
+    reasonCode?: string;
+    categoryId?: number;
+  } = { page, pageSize };
+  if (reasonFilter !== "all") listParams.reasonCode = reasonFilter;
+  if (categoryFilter !== "all") listParams.categoryId = Number(categoryFilter);
+
+  const { data, isLoading, isError, error } = useListBlockedExpenses(
+    listParams,
     {
       query: {
-        queryKey: getListBlockedExpensesQueryKey({ page, pageSize }),
+        queryKey: getListBlockedExpensesQueryKey(listParams),
       },
     },
   );
@@ -242,6 +262,65 @@ export default function AccountingBlockedExpenses() {
           )}
         </CardContent>
       </Card>
+
+      {/* Filters — keep the queue scannable when one block reason or
+          category dominates. Both reset pagination since the filtered set
+          changes the meaningful page count. */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <Label htmlFor="filter-reason" className="text-xs text-muted-foreground">
+            Block reason
+          </Label>
+          <Select
+            value={reasonFilter}
+            onValueChange={(v) => {
+              setReasonFilter(v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger
+              id="filter-reason"
+              className="w-[260px]"
+              data-testid="select-reason-filter"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All reasons</SelectItem>
+              {Object.entries(REASON_LABEL).map(([code, label]) => (
+                <SelectItem key={code} value={code}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {(reasonFilter !== "all" || categoryFilter !== "all") && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setReasonFilter("all");
+              setCategoryFilter("all");
+              setPage(1);
+            }}
+            data-testid="button-clear-filters"
+          >
+            Clear filters
+          </Button>
+        )}
+      </div>
+
+      {/* Auth/permission errors should not silently render an empty queue —
+          surface a clear message so finance can call the right person. */}
+      {isError && (
+        <Card className="border-destructive">
+          <CardContent className="p-4 text-sm text-destructive">
+            Could not load the blocked queue
+            {error instanceof Error ? `: ${error.message}` : "."}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Action bar */}
       <div className="flex flex-wrap items-center justify-between gap-2">

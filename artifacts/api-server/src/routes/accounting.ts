@@ -5109,15 +5109,6 @@ router.delete(
 // All three are admin/approver only — submitters can't see the queue.
 // ---------------------------------------------------------------------------
 
-const PAYMENT_METHOD_LABEL: Record<string, string> = {
-  cash: "Cash",
-  check: "Check",
-  credit_card: "Credit card",
-  debit_card: "Debit card",
-  bank_transfer: "Bank transfer",
-  other: "Other",
-};
-
 router.get(
   "/accounting/blocked-expenses",
   async (req, res): Promise<void> => {
@@ -5132,7 +5123,40 @@ router.get(
     const pageSize =
       Number.isInteger(sizeRaw) && sizeRaw > 0 && sizeRaw <= 100 ? sizeRaw : 25;
 
-    const where = eq(expensesTable.accountingStatus, "blocked");
+    // Optional filters — reasonCode narrows the queue to one block reason,
+    // categoryId targets a specific category (or 0 = "no category"). The
+    // metrics breakdown always reflects the full blocked set so the UI can
+    // show "5 of 12 blocked" style context.
+    const reasonCode =
+      typeof req.query["reasonCode"] === "string" &&
+      req.query["reasonCode"].length > 0
+        ? (req.query["reasonCode"] as string)
+        : null;
+    const categoryIdRaw = req.query["categoryId"];
+    let categoryFilter: number | null | undefined;
+    if (categoryIdRaw !== undefined) {
+      const n = Number(categoryIdRaw);
+      if (!Number.isInteger(n) || n < 0) {
+        res.status(400).json({ error: "categoryId must be a non-negative integer" });
+        return;
+      }
+      categoryFilter = n === 0 ? null : n;
+    }
+
+    const blockedOnly = eq(expensesTable.accountingStatus, "blocked");
+    const filterClauses = [blockedOnly];
+    if (reasonCode !== null) {
+      filterClauses.push(eq(expensesTable.accountingBlockReason, reasonCode));
+    }
+    if (categoryFilter !== undefined) {
+      filterClauses.push(
+        categoryFilter === null
+          ? sql`${expensesTable.categoryId} IS NULL`
+          : eq(expensesTable.categoryId, categoryFilter),
+      );
+    }
+    const where =
+      filterClauses.length === 1 ? filterClauses[0]! : and(...filterClauses)!;
 
     const [rows, totalRow, metricRows] = await Promise.all([
       db
@@ -5146,13 +5170,15 @@ router.get(
         .select({ cnt: sql<number>`count(*)::int` })
         .from(expensesTable)
         .where(where),
+      // Metrics ignore the reason/category filter so the chips remain a
+      // useful overview of the whole queue, not just the filtered slice.
       db
         .select({
           reason: expensesTable.accountingBlockReason,
           cnt: sql<number>`count(*)::int`,
         })
         .from(expensesTable)
-        .where(where)
+        .where(blockedOnly)
         .groupBy(expensesTable.accountingBlockReason),
     ]);
 
@@ -5263,6 +5289,24 @@ router.post(
     const u = req.authUser!;
     const actorDisplay =
       `${u.firstName} ${u.lastName}`.trim() || u.email;
+    // Pre-filter to blocked-only. The generator path is destructive — calling
+    // it for a non-blocked expense (e.g. one a teammate just unblocked, or an
+    // unapproved record) can flip its accountingStatus and overwrite a real
+    // draft. We return per-id `not_blocked` results for anything outside the
+    // queue rather than mutating it.
+    const blockedRows = await db
+      .select({
+        id: expensesTable.id,
+        accountingStatus: expensesTable.accountingStatus,
+      })
+      .from(expensesTable)
+      .where(
+        and(
+          inArray(expensesTable.id, cleanIds),
+          eq(expensesTable.accountingStatus, "blocked"),
+        ),
+      );
+    const blockedIdSet = new Set(blockedRows.map((r) => r.id));
     // Sequential retry — generator updates DB per call and we want
     // determinate per-id outcomes (also keeps connection pressure low).
     const results: Array<{
@@ -5276,6 +5320,18 @@ router.post(
         | { ok: false; reason: string; message?: string };
     }> = [];
     for (const expenseId of cleanIds) {
+      if (!blockedIdSet.has(expenseId)) {
+        results.push({
+          expenseId,
+          result: {
+            ok: false,
+            reason: "not_blocked",
+            message:
+              "Expense is not in the blocked queue (already resolved or not approved).",
+          },
+        });
+        continue;
+      }
       const r = await generateDraftFromExpense(expenseId, {
         id: u.id,
         display: actorDisplay,
@@ -5299,10 +5355,5 @@ router.post(
     res.json({ results });
   },
 );
-
-// Reference PAYMENT_METHOD_LABEL so it isn't tree-shaken away from the
-// build (it's exported transitively for future bill-side UI parity but
-// currently used only by clients via the OpenAPI enum).
-void PAYMENT_METHOD_LABEL;
 
 export default router;

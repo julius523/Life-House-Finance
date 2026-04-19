@@ -1567,6 +1567,16 @@ paths:
           schema:
             type: integer
             default: 25
+        - name: reasonCode
+          in: query
+          description: Filter by accountingBlockReason (missing_category, missing_mapping, archived_account, non_postable_account, invalid_payment_method_rule, other)
+          schema:
+            type: string
+        - name: categoryId
+          in: query
+          description: Filter by expense categoryId. Use 0 for "no category".
+          schema:
+            type: integer
       responses:
         "200":
           description: Paginated blocked-expense rows + reason-code metrics

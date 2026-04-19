@@ -2809,6 +2809,16 @@ export const ListBlockedExpensesQueryParams = zod.object({
   pageSize: zod.coerce
     .number()
     .default(listBlockedExpensesQueryPageSizeDefault),
+  reasonCode: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "Filter by accountingBlockReason (missing_category, missing_mapping, archived_account, non_postable_account, invalid_payment_method_rule, other)",
+    ),
+  categoryId: zod.coerce
+    .number()
+    .optional()
+    .describe('Filter by expense categoryId. Use 0 for \"no category\".'),
 });
 
 export const ListBlockedExpensesResponse = zod.object({

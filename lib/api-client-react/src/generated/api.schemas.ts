@@ -1568,6 +1568,14 @@ export const ListExpenseCategoriesIncludeInactive = {
 export type ListBlockedExpensesParams = {
   page?: number;
   pageSize?: number;
+  /**
+   * Filter by accountingBlockReason (missing_category, missing_mapping, archived_account, non_postable_account, invalid_payment_method_rule, other)
+   */
+  reasonCode?: string;
+  /**
+   * Filter by expense categoryId. Use 0 for "no category".
+   */
+  categoryId?: number;
 };
 
 export type GetBlockedExpensesCount200 = {
