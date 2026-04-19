@@ -2233,16 +2233,29 @@ function parseExpectedVersion(raw: unknown):
   return { ok: true, value: n };
 }
 
-function versionConflictResponse(
+async function versionConflictResponse(
   res: Response,
   current: ManualJournalEntryDraftRow,
-): void {
+): Promise<void> {
+  // Re-read the draft so the client sees the truly-current version /
+  // status rather than the snapshot we read at the start of the
+  // request (which can be stale by the time we conflict).
+  let live = current;
+  try {
+    const [reread] = await db
+      .select()
+      .from(manualJournalEntryDraftsTable)
+      .where(eq(manualJournalEntryDraftsTable.id, current.id));
+    if (reread) live = reread;
+  } catch {
+    // fall back to the snapshot — code/message are still correct
+  }
   res.status(409).json({
     error:
       "This draft was changed by someone else. Refresh to see the latest version.",
     code: "DRAFT_VERSION_CONFLICT",
-    currentVersion: current.version,
-    currentStatus: current.status,
+    currentVersion: live.version,
+    currentStatus: live.status,
   });
 }
 
