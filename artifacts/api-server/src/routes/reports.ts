@@ -682,6 +682,120 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
 });
 
 // ---------------------------------------------------------------------------
+// Task 38 — GET /reports/account-activity?accountId=&from=&to=
+//
+// Drill-down for the Reports page Balance Sheet: returns posted journal-entry
+// lines that contributed to a single CoA account's balance over the requested
+// date range. Includes both `posted` and `reversed` originals so the rendered
+// list matches what the Balance Sheet was computed from (reversal pairs net
+// to zero in both views).
+// ---------------------------------------------------------------------------
+const AccountActivityQuery = z.object({
+  accountId: z.coerce.number().int().positive(),
+  fromDate: isoDateString.optional(),
+  toDate: isoDateString.optional(),
+  from: isoDateString.optional(),
+  to: isoDateString.optional(),
+}).transform((d) => ({
+  accountId: d.accountId,
+  fromDate: d.fromDate ?? d.from,
+  toDate: d.toDate ?? d.to,
+}));
+
+router.get("/reports/account-activity", async (req, res): Promise<void> => {
+  const parsed = AccountActivityQuery.safeParse(req.query);
+  if (!parsed.success) {
+    res
+      .status(400)
+      .json({ error: "Invalid query", details: parsed.error.format() });
+    return;
+  }
+  const { accountId, fromDate, toDate } = parsed.data;
+
+  const [account] = await db
+    .select()
+    .from(chartOfAccountsTable)
+    .where(eq(chartOfAccountsTable.id, accountId));
+  if (!account) {
+    res.status(404).json({ error: "Account not found" });
+    return;
+  }
+
+  const conds = [
+    eq(journalEntryLinesTable.accountId, accountId),
+    sql`${journalEntriesTable.status} in ('posted', 'reversed')`,
+  ];
+  if (fromDate) conds.push(gte(journalEntriesTable.entryDate, fromDate));
+  if (toDate) conds.push(lte(journalEntriesTable.entryDate, toDate));
+
+  const rows = await db
+    .select({
+      lineId: journalEntryLinesTable.id,
+      journalEntryId: journalEntryLinesTable.journalEntryId,
+      type: journalEntryLinesTable.type,
+      amountCents: journalEntryLinesTable.amountCents,
+      lineMemo: journalEntryLinesTable.memo,
+      program: journalEntryLinesTable.program,
+      fund: journalEntryLinesTable.fund,
+      entryNo: journalEntriesTable.entryNo,
+      entryDate: journalEntriesTable.entryDate,
+      entryMemo: journalEntriesTable.memo,
+      entryStatus: journalEntriesTable.status,
+    })
+    .from(journalEntryLinesTable)
+    .innerJoin(
+      journalEntriesTable,
+      eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+    )
+    .where(and(...conds))
+    .orderBy(
+      sql`${journalEntriesTable.entryDate} desc, ${journalEntryLinesTable.id} desc`,
+    );
+
+  let debitsCents = 0;
+  let creditsCents = 0;
+  const lines = rows.map((r) => {
+    const amount = Number(r.amountCents);
+    const debit = r.type === "debit" ? amount : 0;
+    const credit = r.type === "credit" ? amount : 0;
+    debitsCents += debit;
+    creditsCents += credit;
+    return {
+      lineId: r.lineId,
+      journalEntryId: r.journalEntryId,
+      entryNo: r.entryNo,
+      entryDate: r.entryDate,
+      entryMemo: r.entryMemo,
+      entryStatus: r.entryStatus,
+      lineMemo: r.lineMemo,
+      program: r.program,
+      fund: r.fund,
+      debit: debit / 100,
+      credit: credit / 100,
+    };
+  });
+
+  // Signed balance follows the account's normal-balance convention so the
+  // total here matches the balance shown on the Balance Sheet card.
+  const balanceCents =
+    account.normalBalance === "credit"
+      ? creditsCents - debitsCents
+      : debitsCents - creditsCents;
+
+  res.json({
+    account,
+    fromDate: fromDate ?? null,
+    toDate: toDate ?? null,
+    lines,
+    totals: {
+      debits: debitsCents / 100,
+      credits: creditsCents / 100,
+      balance: balanceCents / 100,
+    },
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Step 9 — GET /reports/trial-balance?from=YYYY-MM-DD&to=YYYY-MM-DD
 //
 // Returns one row per Chart of Accounts code with the sum of debit and credit

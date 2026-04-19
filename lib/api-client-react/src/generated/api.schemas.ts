@@ -1007,6 +1007,34 @@ export interface ChartOfAccountActivityResponse {
   activity: ChartOfAccountActivityRow[];
 }
 
+export type AccountActivityReportTotals = {
+  debits: number;
+  credits: number;
+  balance: number;
+};
+
+export interface AccountActivityLine {
+  lineId: number;
+  journalEntryId: number;
+  entryNo: string;
+  entryDate: string;
+  entryMemo?: string | null;
+  entryStatus: string;
+  lineMemo?: string | null;
+  program?: string | null;
+  fund?: string | null;
+  debit: number;
+  credit: number;
+}
+
+export interface AccountActivityReport {
+  account: ChartOfAccount;
+  fromDate?: string | null;
+  toDate?: string | null;
+  lines: AccountActivityLine[];
+  totals: AccountActivityReportTotals;
+}
+
 export interface ChartOfAccountListResponse {
   accounts: ChartOfAccount[];
 }
@@ -1521,6 +1549,12 @@ export const GetFinancialSummaryReportSource = {
   operational: "operational",
   ledger: "ledger",
 } as const;
+
+export type GetAccountActivityReportParams = {
+  accountId: number;
+  from?: string;
+  to?: string;
+};
 
 export type GetTrialBalanceReportParams = {
   fromDate?: string;

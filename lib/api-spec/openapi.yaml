@@ -1158,6 +1158,39 @@ paths:
               schema:
                 $ref: "#/components/schemas/FinancialSummaryReport"
 
+  /reports/account-activity:
+    get:
+      operationId: getAccountActivityReport
+      tags: [reports]
+      summary: |
+        Posted journal-entry lines that contributed to a single Chart-of-Accounts
+        balance over a date range. Powers the drill-down on the Reports page
+        Balance Sheet, where clicking an account name reveals the underlying
+        ledger activity without leaving the page.
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Account metadata, in-range JE lines, and aggregate totals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountActivityReport"
+
   /reports/trial-balance:
     get:
       operationId: getTrialBalanceReport
@@ -3431,6 +3464,74 @@ components:
           items:
             $ref: "#/components/schemas/ChartOfAccountActivityRow"
       required: [account, activity]
+
+    AccountActivityReport:
+      type: object
+      properties:
+        account:
+          $ref: "#/components/schemas/ChartOfAccount"
+        fromDate:
+          type: string
+          format: date
+          nullable: true
+        toDate:
+          type: string
+          format: date
+          nullable: true
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountActivityLine"
+        totals:
+          type: object
+          properties:
+            debits:
+              type: number
+            credits:
+              type: number
+            balance:
+              type: number
+          required: [debits, credits, balance]
+      required: [account, lines, totals]
+
+    AccountActivityLine:
+      type: object
+      properties:
+        lineId:
+          type: integer
+        journalEntryId:
+          type: integer
+        entryNo:
+          type: string
+        entryDate:
+          type: string
+          format: date
+        entryMemo:
+          type: string
+          nullable: true
+        entryStatus:
+          type: string
+        lineMemo:
+          type: string
+          nullable: true
+        program:
+          type: string
+          nullable: true
+        fund:
+          type: string
+          nullable: true
+        debit:
+          type: number
+        credit:
+          type: number
+      required:
+        - lineId
+        - journalEntryId
+        - entryNo
+        - entryDate
+        - entryStatus
+        - debit
+        - credit
 
     ChartOfAccountListResponse:
       type: object

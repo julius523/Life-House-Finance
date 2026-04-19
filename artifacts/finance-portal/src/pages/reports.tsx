@@ -2,7 +2,9 @@ import { useMemo, useState } from "react";
 import {
   useGetFinancialSummaryReport,
   useGetTrialBalanceReport,
+  useGetAccountActivityReport,
 } from "@workspace/api-client-react";
+import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -561,16 +563,22 @@ export default function ReportsPage() {
                           k="Cash"
                           v={fmtMoney(data.balanceSheet.cash)}
                           accounts={data.balanceSheet.cashAccounts}
+                          fromDate={fromDate}
+                          toDate={toDate}
                         />
                         <ExpandableRow
                           k="Accounts receivable"
                           v={fmtMoney(data.balanceSheet.accountsReceivable)}
                           accounts={data.balanceSheet.accountsReceivableAccounts}
+                          fromDate={fromDate}
+                          toDate={toDate}
                         />
                         <ExpandableRow
                           k="Other assets"
                           v={fmtMoney(data.balanceSheet.otherAssets)}
                           accounts={data.balanceSheet.otherAssetAccounts}
+                          fromDate={fromDate}
+                          toDate={toDate}
                         />
                       </>
                     ) : (
@@ -601,11 +609,15 @@ export default function ReportsPage() {
                           k="Accounts payable"
                           v={fmtMoney(data.balanceSheet.accountsPayable)}
                           accounts={data.balanceSheet.accountsPayableAccounts}
+                          fromDate={fromDate}
+                          toDate={toDate}
                         />
                         <ExpandableRow
                           k="Other liabilities"
                           v={fmtMoney(data.balanceSheet.otherLiabilities)}
                           accounts={data.balanceSheet.otherLiabilityAccounts}
+                          fromDate={fromDate}
+                          toDate={toDate}
                         />
                       </>
                     ) : (
@@ -1127,13 +1139,18 @@ function ExpandableRow({
   k,
   v,
   accounts,
+  fromDate,
+  toDate,
 }: {
   k: string;
   v: string;
   accounts: { accountId: number; code: string; name: string; balance: number }[];
+  fromDate: string;
+  toDate: string;
 }) {
   const [open, setOpen] = useState(false);
   const hasAccounts = accounts.length > 0;
+  const slug = k.replace(/\s+/g, "-").toLowerCase();
   return (
     <div className="py-1">
       <button
@@ -1145,7 +1162,7 @@ function ExpandableRow({
             ? "cursor-pointer hover:text-foreground"
             : "cursor-default"
         }`}
-        data-testid={`bs-row-${k.replace(/\s+/g, "-").toLowerCase()}`}
+        data-testid={`bs-row-${slug}`}
         aria-expanded={open}
       >
         <span className="text-muted-foreground inline-flex items-center gap-1.5">
@@ -1162,30 +1179,141 @@ function ExpandableRow({
       {open && hasAccounts && (
         <ul
           className="mt-1 mb-1 ml-5 border-l pl-3 text-xs space-y-1"
-          data-testid={`bs-row-${k.replace(/\s+/g, "-").toLowerCase()}-accounts`}
+          data-testid={`bs-row-${slug}-accounts`}
         >
           {accounts.map((a) => (
-            <li
+            <AccountDrillDownRow
               key={a.accountId}
-              className="flex items-center justify-between gap-3"
-            >
-              <span className="truncate">
-                <span className="font-mono text-muted-foreground mr-2">
-                  {a.code}
-                </span>
-                {a.name}
-              </span>
-              <span className="tabular-nums font-medium">
-                {new Intl.NumberFormat("en-US", {
-                  style: "currency",
-                  currency: "USD",
-                  minimumFractionDigits: 2,
-                }).format(a.balance)}
-              </span>
-            </li>
+              account={a}
+              fromDate={fromDate}
+              toDate={toDate}
+              parentSlug={slug}
+            />
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+function AccountDrillDownRow({
+  account,
+  fromDate,
+  toDate,
+  parentSlug,
+}: {
+  account: { accountId: number; code: string; name: string; balance: number };
+  fromDate: string;
+  toDate: string;
+  parentSlug: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading, error } = useGetAccountActivityReport(
+    { accountId: account.accountId, from: fromDate, to: toDate },
+    { query: { enabled: open } },
+  );
+  const errMsg = error
+    ? String((error as Error)?.message ?? error)
+    : null;
+  const fmt = (n: number) =>
+    new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+    }).format(n);
+  return (
+    <li data-testid={`bs-account-${parentSlug}-${account.accountId}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-3 text-left hover:text-foreground"
+        aria-expanded={open}
+        data-testid={`bs-account-toggle-${account.accountId}`}
+      >
+        <span className="truncate inline-flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground tabular-nums w-3 inline-block">
+            {open ? "▾" : "▸"}
+          </span>
+          <span className="font-mono text-muted-foreground mr-2">
+            {account.code}
+          </span>
+          <span className="underline-offset-2 hover:underline">
+            {account.name}
+          </span>
+        </span>
+        <span className="tabular-nums font-medium">{fmt(account.balance)}</span>
+      </button>
+      {open && (
+        <div
+          className="mt-1 mb-2 ml-5 border-l pl-3"
+          data-testid={`bs-account-activity-${account.accountId}`}
+        >
+          {isLoading && (
+            <div className="py-1 text-muted-foreground">Loading activity…</div>
+          )}
+          {errMsg && (
+            <div className="py-1 text-destructive">
+              Could not load activity: {errMsg}
+            </div>
+          )}
+          {data && data.lines.length === 0 && (
+            <div className="py-1 text-muted-foreground italic">
+              No posted journal-entry lines in this period.
+            </div>
+          )}
+          {data && data.lines.length > 0 && (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted-foreground border-b">
+                  <th className="py-1 pr-2 font-normal">Date</th>
+                  <th className="py-1 pr-2 font-normal">Entry</th>
+                  <th className="py-1 pr-2 text-right font-normal">Debit</th>
+                  <th className="py-1 text-right font-normal">Credit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.lines.map((l) => (
+                  <tr key={l.lineId} className="border-b last:border-0">
+                    <td className="py-1 pr-2 tabular-nums whitespace-nowrap">
+                      {l.entryDate}
+                    </td>
+                    <td className="py-1 pr-2">
+                      <Link
+                        href={`/accounting/journal-entries/${l.journalEntryId}`}
+                        className="text-primary hover:underline font-mono"
+                      >
+                        {l.entryNo}
+                      </Link>
+                      {(l.lineMemo ?? l.entryMemo) && (
+                        <span className="text-muted-foreground ml-2">
+                          {l.lineMemo ?? l.entryMemo}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1 pr-2 text-right tabular-nums">
+                      {l.debit > 0 ? fmt(l.debit) : ""}
+                    </td>
+                    <td className="py-1 text-right tabular-nums">
+                      {l.credit > 0 ? fmt(l.credit) : ""}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="border-t-2">
+                  <td className="py-1 pr-2 font-semibold" colSpan={2}>
+                    Totals
+                  </td>
+                  <td className="py-1 pr-2 text-right tabular-nums font-semibold">
+                    {fmt(data.totals.debits)}
+                  </td>
+                  <td className="py-1 text-right tabular-nums font-semibold">
+                    {fmt(data.totals.credits)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </li>
   );
 }

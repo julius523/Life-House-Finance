@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./accountActivityLine";
+export * from "./accountActivityReport";
+export * from "./accountActivityReportTotals";
 export * from "./accountingDashboardLastClosedPeriod";
 export * from "./accountingDashboardOpenPeriod";
 export * from "./accountingDashboardStatus";
@@ -91,6 +94,7 @@ export * from "./financialSummaryReportProfitAndLossExpensesByProgramItem";
 export * from "./financialSummaryReportProfitAndLossIncomeByProgramItem";
 export * from "./financialSummaryReportSpendByProgramItem";
 export * from "./financialSummaryReportTopVendorsItem";
+export * from "./getAccountActivityReportParams";
 export * from "./getBlockedExpensesCount200";
 export * from "./getChartOfAccountActivityParams";
 export * from "./getFinancialSummaryReportParams";

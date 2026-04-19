@@ -2127,6 +2127,69 @@ export const GetFinancialSummaryReportResponse = zod.object({
 });
 
 /**
+ * @summary Posted journal-entry lines that contributed to a single Chart-of-Accounts
+balance over a date range. Powers the drill-down on the Reports page
+Balance Sheet, where clicking an account name reveals the underlying
+ledger activity without leaving the page.
+
+ */
+export const GetAccountActivityReportQueryParams = zod.object({
+  accountId: zod.coerce.number(),
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+});
+
+export const GetAccountActivityReportResponse = zod.object({
+  account: zod.object({
+    id: zod.number(),
+    code: zod.string(),
+    name: zod.string(),
+    description: zod.string().nullish(),
+    type: zod.enum([
+      "asset",
+      "liability",
+      "equity",
+      "revenue",
+      "expense",
+      "contra_asset",
+      "contra_liability",
+      "contra_revenue",
+      "other",
+    ]),
+    subtype: zod.string().nullish(),
+    normalBalance: zod.enum(["debit", "credit"]),
+    parentAccountId: zod.number().nullish(),
+    isActive: zod.boolean(),
+    isSystem: zod.boolean(),
+    allowManualPosting: zod.boolean(),
+    createdAt: zod.coerce.date().optional(),
+    updatedAt: zod.coerce.date().optional(),
+  }),
+  fromDate: zod.coerce.date().nullish(),
+  toDate: zod.coerce.date().nullish(),
+  lines: zod.array(
+    zod.object({
+      lineId: zod.number(),
+      journalEntryId: zod.number(),
+      entryNo: zod.string(),
+      entryDate: zod.coerce.date(),
+      entryMemo: zod.string().nullish(),
+      entryStatus: zod.string(),
+      lineMemo: zod.string().nullish(),
+      program: zod.string().nullish(),
+      fund: zod.string().nullish(),
+      debit: zod.number(),
+      credit: zod.number(),
+    }),
+  ),
+  totals: zod.object({
+    debits: zod.number(),
+    credits: zod.number(),
+    balance: zod.number(),
+  }),
+});
+
+/**
  * @summary Trial Balance — debits/credits per account over a date range
  */
 export const GetTrialBalanceReportQueryParams = zod.object({

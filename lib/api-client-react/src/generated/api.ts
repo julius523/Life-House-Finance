@@ -17,6 +17,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AccountActivityReport,
   AccountingDashboardStatus,
   AccountingDraftResult,
   AccountingSettingsResponse,
@@ -54,6 +55,7 @@ import type {
   ExpenseCategoryResponse,
   ExpenseListResponse,
   FinancialSummaryReport,
+  GetAccountActivityReportParams,
   GetBlockedExpensesCount200,
   GetChartOfAccountActivityParams,
   GetFinancialSummaryReportParams,
@@ -4430,6 +4432,120 @@ export function useGetFinancialSummaryReport<
     params,
     options,
   );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Posted journal-entry lines that contributed to a single Chart-of-Accounts
+balance over a date range. Powers the drill-down on the Reports page
+Balance Sheet, where clicking an account name reveals the underlying
+ledger activity without leaving the page.
+
+ */
+export const getGetAccountActivityReportUrl = (
+  params: GetAccountActivityReportParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reports/account-activity?${stringifiedParams}`
+    : `/api/reports/account-activity`;
+};
+
+export const getAccountActivityReport = async (
+  params: GetAccountActivityReportParams,
+  options?: RequestInit,
+): Promise<AccountActivityReport> => {
+  return customFetch<AccountActivityReport>(
+    getGetAccountActivityReportUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAccountActivityReportQueryKey = (
+  params?: GetAccountActivityReportParams,
+) => {
+  return [
+    `/api/reports/account-activity`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetAccountActivityReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAccountActivityReport>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetAccountActivityReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAccountActivityReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAccountActivityReportQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAccountActivityReport>>
+  > = ({ signal }) =>
+    getAccountActivityReport(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAccountActivityReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAccountActivityReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAccountActivityReport>>
+>;
+export type GetAccountActivityReportQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Posted journal-entry lines that contributed to a single Chart-of-Accounts
+balance over a date range. Powers the drill-down on the Reports page
+Balance Sheet, where clicking an account name reveals the underlying
+ledger activity without leaving the page.
+
+ */
+
+export function useGetAccountActivityReport<
+  TData = Awaited<ReturnType<typeof getAccountActivityReport>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetAccountActivityReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAccountActivityReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAccountActivityReportQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
