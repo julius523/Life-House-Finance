@@ -25,6 +25,7 @@ import {
   expenseCategoryPaymentMethodRulesTable,
   expensesTable,
   accountingSourceLinksTable,
+  programsTable,
   type ManualJournalEntryDraftRow,
   type CopilotMessageRow,
   type CopilotThreadRow,
@@ -1670,6 +1671,16 @@ type OriginatingExpenseSummary = {
   amount: number;
   expenseDate: string;
   status: string;
+  // Task #53 review fixes — surface enough context that the
+  // "Originating expense" cards on the draft and JE detail pages can
+  // stand on their own without an extra fetch.
+  programId: number | null;
+  programName: string | null;
+  submitter: {
+    name: string;
+    email: string | null;
+  } | null;
+  approvedAt: string | null;
 };
 
 function serializeJournalEntry(
@@ -1773,6 +1784,9 @@ async function loadOriginatingExpenses(opts: {
       amount: expensesTable.amount,
       expenseDate: expensesTable.expenseDate,
       status: expensesTable.status,
+      programId: expensesTable.programId,
+      submittedBy: expensesTable.submittedBy,
+      submittedByEmail: expensesTable.submittedByEmail,
     })
     .from(accountingSourceLinksTable)
     .innerJoin(
@@ -1780,13 +1794,70 @@ async function loadOriginatingExpenses(opts: {
       eq(expensesTable.id, accountingSourceLinksTable.sourceId),
     )
     .where(and(...conds));
+
+  // Task #53 review fixes — batch-load program names and the latest
+  // 'expense_approved' activity-log timestamp for each expense so the
+  // originating-expense card can stand on its own without an extra
+  // fetch and without per-row N+1 queries.
+  const expenseIds = Array.from(new Set(rows.map((r) => r.expenseId)));
+  const programIds = Array.from(
+    new Set(rows.map((r) => r.programId).filter((v): v is number => v !== null)),
+  );
+  const programNameById = new Map<number, string>();
+  if (programIds.length > 0) {
+    const progs = await db
+      .select({ id: programsTable.id, name: programsTable.name })
+      .from(programsTable)
+      .where(inArray(programsTable.id, programIds));
+    for (const p of progs) programNameById.set(p.id, p.name);
+  }
+  const approvedAtByExpenseId = new Map<number, Date>();
+  if (expenseIds.length > 0) {
+    const approvals = await db
+      .select({
+        referenceId: activityLogTable.referenceId,
+        createdAt: activityLogTable.createdAt,
+      })
+      .from(activityLogTable)
+      .where(
+        and(
+          eq(activityLogTable.type, "expense_approved"),
+          eq(activityLogTable.referenceType, "expense"),
+          inArray(activityLogTable.referenceId, expenseIds),
+        ),
+      )
+      .orderBy(desc(activityLogTable.createdAt));
+    // First row per expense wins because we sorted desc above.
+    for (const a of approvals) {
+      if (a.referenceId === null || a.referenceId === undefined) continue;
+      if (!approvedAtByExpenseId.has(a.referenceId)) {
+        approvedAtByExpenseId.set(a.referenceId, a.createdAt);
+      }
+    }
+  }
+
   for (const r of rows) {
+    const submitterName = r.submittedBy?.trim() ?? "";
+    const approvedAt = approvedAtByExpenseId.get(r.expenseId) ?? null;
     const summary: OriginatingExpenseSummary = {
       id: r.expenseId,
       merchant: r.merchant,
       amount: parseFloat(r.amount),
       expenseDate: r.expenseDate,
       status: r.status,
+      programId: r.programId ?? null,
+      programName:
+        r.programId !== null
+          ? (programNameById.get(r.programId) ?? null)
+          : null,
+      submitter:
+        submitterName.length > 0 || r.submittedByEmail
+          ? {
+              name: submitterName.length > 0 ? submitterName : (r.submittedByEmail ?? ""),
+              email: r.submittedByEmail ?? null,
+            }
+          : null,
+      approvedAt: approvedAt ? approvedAt.toISOString() : null,
     };
     if (r.journalEntryId !== null) {
       byJournalEntryId.set(r.journalEntryId, summary);
@@ -1796,6 +1867,48 @@ async function loadOriginatingExpenses(opts: {
     }
   }
   return { byJournalEntryId, byManualDraftId };
+}
+
+/**
+ * Task #53 review fix — JE → expense backlink resolution. The bridge
+ * table may have only a draft-link row (no journal-entry-link row) for
+ * an expense whose draft was later posted. Resolve in three steps:
+ *   1) direct accounting_source_links.journalEntryId
+ *   2) fall back via the JE's manualDraftId
+ * Returns a map from JE id → originating expense for the input set.
+ */
+async function loadOriginatingExpensesForJournalEntries(
+  jes: Array<{ id: number; manualDraftId: number | null }>,
+): Promise<Map<number, OriginatingExpenseSummary>> {
+  if (jes.length === 0) return new Map();
+  const direct = await loadOriginatingExpenses({
+    journalEntryIds: jes.map((j) => j.id),
+  });
+  const result = new Map<number, OriginatingExpenseSummary>(
+    direct.byJournalEntryId,
+  );
+  // Fall back through manualDraftId for entries that didn't resolve directly.
+  const draftIdsToResolve: number[] = [];
+  const draftIdToJeId = new Map<number, number>();
+  for (const j of jes) {
+    if (result.has(j.id)) continue;
+    if (j.manualDraftId !== null && j.manualDraftId !== undefined) {
+      draftIdsToResolve.push(j.manualDraftId);
+      draftIdToJeId.set(j.manualDraftId, j.id);
+    }
+  }
+  if (draftIdsToResolve.length > 0) {
+    const viaDraft = await loadOriginatingExpenses({
+      manualDraftIds: draftIdsToResolve,
+    });
+    for (const [draftId, summary] of viaDraft.byManualDraftId.entries()) {
+      const jeId = draftIdToJeId.get(draftId);
+      if (jeId !== undefined && !result.has(jeId)) {
+        result.set(jeId, summary);
+      }
+    }
+  }
+  return result;
 }
 
 router.post(
@@ -2169,22 +2282,38 @@ router.get(
     } else if (source === "manual") {
       // Task #53 — "manual" now excludes expense-sourced entries so the
       // three source buckets ('manual'|'copilot'|'expense') don't overlap.
+      // Mirror serialization: an entry counts as expense-sourced if a
+      // bridge row exists either directly on the JE or through its
+      // manual_draft_id (the post-time fallback).
       conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
       conds.push(sql`NOT EXISTS (
         SELECT 1 FROM ${accountingSourceLinksTable}
-        WHERE ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
-          AND ${accountingSourceLinksTable.sourceType} = 'expense'
+        WHERE ${accountingSourceLinksTable.sourceType} = 'expense'
+          AND (
+            ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
+            OR (
+              ${journalEntriesTable.manualDraftId} IS NOT NULL
+              AND ${accountingSourceLinksTable.manualJournalEntryDraftId} = ${journalEntriesTable.manualDraftId}
+            )
+          )
       )`);
     } else if (source === "expense") {
       // Task #53 — keep buckets mutually exclusive: deriveJournalEntrySource
       // gives copilot precedence over expense, so an entry with both an
       // agentActionId and an accounting_source_links row serializes as
-      // 'copilot'. The expense filter must mirror that precedence.
+      // 'copilot'. The expense filter must mirror that precedence and
+      // include rows whose only bridge linkage is via manual_draft_id.
       conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
       conds.push(sql`EXISTS (
         SELECT 1 FROM ${accountingSourceLinksTable}
-        WHERE ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
-          AND ${accountingSourceLinksTable.sourceType} = 'expense'
+        WHERE ${accountingSourceLinksTable.sourceType} = 'expense'
+          AND (
+            ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
+            OR (
+              ${journalEntriesTable.manualDraftId} IS NOT NULL
+              AND ${accountingSourceLinksTable.manualJournalEntryDraftId} = ${journalEntriesTable.manualDraftId}
+            )
+          )
       )`);
     }
     if (from) {
@@ -2209,9 +2338,12 @@ router.get(
         .where(whereExpr),
     ]);
     const users = await loadJournalEntryActors(rows);
-    const { byJournalEntryId } = await loadOriginatingExpenses({
-      journalEntryIds: rows.map((r) => r.id),
-    });
+    // Task #53 review fix — use the fallback resolver so JEs whose only
+    // bridge row is on the originating draft (not the JE itself) still
+    // surface the originating expense in the list.
+    const byJournalEntryId = await loadOriginatingExpensesForJournalEntries(
+      rows.map((r) => ({ id: r.id, manualDraftId: r.manualDraftId })),
+    );
     res.json({
       entries: rows.map((r) =>
         serializeJournalEntry(r, undefined, users, byJournalEntryId.get(r.id) ?? null),
@@ -2292,15 +2424,27 @@ router.get(
       conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
       conds.push(sql`NOT EXISTS (
         SELECT 1 FROM ${accountingSourceLinksTable}
-        WHERE ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
-          AND ${accountingSourceLinksTable.sourceType} = 'expense'
+        WHERE ${accountingSourceLinksTable.sourceType} = 'expense'
+          AND (
+            ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
+            OR (
+              ${journalEntriesTable.manualDraftId} IS NOT NULL
+              AND ${accountingSourceLinksTable.manualJournalEntryDraftId} = ${journalEntriesTable.manualDraftId}
+            )
+          )
       )`);
     } else if (source === "expense") {
       conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
       conds.push(sql`EXISTS (
         SELECT 1 FROM ${accountingSourceLinksTable}
-        WHERE ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
-          AND ${accountingSourceLinksTable.sourceType} = 'expense'
+        WHERE ${accountingSourceLinksTable.sourceType} = 'expense'
+          AND (
+            ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
+            OR (
+              ${journalEntriesTable.manualDraftId} IS NOT NULL
+              AND ${accountingSourceLinksTable.manualJournalEntryDraftId} = ${journalEntriesTable.manualDraftId}
+            )
+          )
       )`);
     }
     if (from) {
@@ -2474,9 +2618,11 @@ router.get(
       .where(eq(journalEntryLinesTable.journalEntryId, je.id))
       .orderBy(asc(journalEntryLinesTable.lineNo));
     const users = await loadJournalEntryActors([je]);
-    const { byJournalEntryId } = await loadOriginatingExpenses({
-      journalEntryIds: [je.id],
-    });
+    // Task #53 review fix — fall back through manualDraftId so the
+    // origin link survives even when the bridge row is on the draft.
+    const byJournalEntryId = await loadOriginatingExpensesForJournalEntries(
+      [{ id: je.id, manualDraftId: je.manualDraftId }],
+    );
     res.json({
       journalEntry: serializeJournalEntry(
         je,

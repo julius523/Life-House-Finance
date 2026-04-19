@@ -55,6 +55,71 @@ const RECEIPT_DELETABLE_EXPENSE_STATUSES = new Set([
   "needs_correction",
 ]);
 
+// Task #53 — render an accounting bridge status with a human label
+// (the API enum is snake_case). We want this to be visible for every
+// expense, even before approval.
+const ACCOUNTING_STATUS_LABEL: Record<string, string> = {
+  pending: "Pending",
+  draft_created: "Draft created",
+  posted: "Posted",
+  blocked: "Blocked",
+  not_applicable: "Not applicable",
+};
+
+function AccountingStatusBadge({
+  status,
+}: {
+  status?: string | null;
+}) {
+  const label = ACCOUNTING_STATUS_LABEL[status ?? ""] ?? "Pending";
+  if (status === "posted")
+    return (
+      <Badge data-testid="badge-accounting-status">{label}</Badge>
+    );
+  if (status === "blocked")
+    return (
+      <Badge variant="destructive" data-testid="badge-accounting-status">
+        {label}
+      </Badge>
+    );
+  if (status === "draft_created")
+    return (
+      <Badge variant="secondary" data-testid="badge-accounting-status">
+        {label}
+      </Badge>
+    );
+  if (status === "not_applicable")
+    return (
+      <Badge variant="outline" data-testid="badge-accounting-status">
+        {label}
+      </Badge>
+    );
+  return (
+    <Badge variant="outline" data-testid="badge-accounting-status">
+      {label}
+    </Badge>
+  );
+}
+
+// Map the backend's snake_case block-reason enum into a sentence the
+// reviewer can act on without consulting docs.
+const BLOCK_REASON_LABEL: Record<string, string> = {
+  no_category_mapping:
+    "No accounting category mapping for this expense category.",
+  no_program_assigned: "No program assigned to this expense.",
+  missing_payment_method: "Payment method is required to post.",
+  unmapped_program_fund: "Program fund mapping is missing.",
+  non_postable_account: "Mapped account is not postable.",
+  invalid_payment_method_rule:
+    "Payment method does not match the category's posting rules.",
+  other: "Blocked by an accounting rule.",
+};
+
+function humanizeBlockReason(reason?: string | null): string {
+  if (!reason) return "Blocked by an accounting rule.";
+  return BLOCK_REASON_LABEL[reason] ?? reason.replace(/_/g, " ");
+}
+
 export default function ExpenseDetail() {
   const [, params] = useRoute("/expenses/:id");
   const id = params?.id ? parseInt(params.id) : 0;
@@ -558,22 +623,38 @@ export default function ExpenseDetail() {
           </Card>
 
           {/*
-            Task #53 — Accounting bridge card. Renders only when the
-            backend has populated `accountingLink` (i.e. an
-            accounting_source_links row exists for this expense). Shows
-            the draft + posted journal entry status with deep links.
+            Task #53 — Accounting bridge card. Always rendered for
+            visibility into where this expense sits in the accounting
+            pipeline. Shows the bridge status badge (pending /
+            draft created / posted / blocked / not applicable), a
+            plain-English block reason when blocked, and deep links
+            into the originating draft and (once posted) the journal
+            entry when accounting_source_links has been populated.
           */}
-          {expense.accountingLink && (
-            <Card data-testid="card-accounting-link">
-              <CardHeader className="pb-4">
-                <CardTitle className="flex items-center gap-2">
-                  <BookOpen className="h-4 w-4" />
-                  Accounting
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {expense.accountingLink.draftId !== null &&
-                  expense.accountingLink.draftId !== undefined && (
+          <Card data-testid="card-accounting-link">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4" />
+                Accounting
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex items-center justify-between">
+                <div className="text-muted-foreground">Status</div>
+                <AccountingStatusBadge status={expense.accountingStatus} />
+              </div>
+              {expense.accountingStatus === "blocked" &&
+                expense.accountingBlockReason && (
+                  <div
+                    className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-destructive"
+                    data-testid="text-accounting-block-reason"
+                  >
+                    {humanizeBlockReason(expense.accountingBlockReason)}
+                  </div>
+                )}
+              {expense.accountingLink?.draftId !== undefined &&
+                expense.accountingLink?.draftId !== null && (
+                  <div className="border-t pt-3 space-y-1">
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="text-muted-foreground">Draft</div>
@@ -591,9 +672,28 @@ export default function ExpenseDetail() {
                         </Badge>
                       )}
                     </div>
-                  )}
-                {expense.accountingLink.journalEntryId !== null &&
-                  expense.accountingLink.journalEntryId !== undefined && (
+                    {expense.accountingLink.draftEntryDate && (
+                      <div className="text-xs text-muted-foreground">
+                        Entry date{" "}
+                        {format(
+                          new Date(expense.accountingLink.draftEntryDate),
+                          "MMM d, yyyy",
+                        )}
+                      </div>
+                    )}
+                    {expense.accountingLink.draftMemo && (
+                      <div
+                        className="text-xs text-muted-foreground line-clamp-2"
+                        title={expense.accountingLink.draftMemo}
+                      >
+                        {expense.accountingLink.draftMemo}
+                      </div>
+                    )}
+                  </div>
+                )}
+              {expense.accountingLink?.journalEntryId !== undefined &&
+                expense.accountingLink?.journalEntryId !== null && (
+                  <div className="border-t pt-3">
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="text-muted-foreground">
@@ -632,16 +732,10 @@ export default function ExpenseDetail() {
                         </Badge>
                       )}
                     </div>
-                  )}
-                {expense.accountingLink.draftId === null &&
-                  expense.accountingLink.journalEntryId === null && (
-                    <div className="text-muted-foreground">
-                      Bridge present but no draft/entry yet.
-                    </div>
-                  )}
-              </CardContent>
-            </Card>
-          )}
+                  </div>
+                )}
+            </CardContent>
+          </Card>
         </div>
       </div>
 

@@ -76,6 +76,13 @@ type JournalEntry = {
     amount: number;
     expenseDate: string;
     status: string;
+    programId: number | null;
+    programName: string | null;
+    submitter: {
+      name: string;
+      email: string | null;
+    } | null;
+    approvedAt: string | null;
   } | null;
 };
 
@@ -422,7 +429,7 @@ export default function JournalEntryDetailPage() {
             </div>
             <div>
               <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                Vendor
+                Merchant
               </div>
               <div className="font-medium">
                 {entry.originatingExpense.merchant}
@@ -447,6 +454,51 @@ export default function JournalEntryDetailPage() {
                 ${entry.originatingExpense.amount.toFixed(2)}
               </div>
             </div>
+            {entry.originatingExpense.programName && (
+              <div data-testid="text-originating-expense-program">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Program
+                </div>
+                <div className="font-medium">
+                  {entry.originatingExpense.programName}
+                </div>
+              </div>
+            )}
+            {entry.originatingExpense.submitter && (
+              <div
+                className="md:col-span-2"
+                data-testid="text-originating-expense-submitter"
+              >
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Submitter
+                </div>
+                <div className="font-medium">
+                  {entry.originatingExpense.submitter.name ||
+                    entry.originatingExpense.submitter.email ||
+                    "—"}
+                </div>
+                {entry.originatingExpense.submitter.email &&
+                  entry.originatingExpense.submitter.email !==
+                    entry.originatingExpense.submitter.name && (
+                    <div className="text-xs text-muted-foreground">
+                      {entry.originatingExpense.submitter.email}
+                    </div>
+                  )}
+              </div>
+            )}
+            {entry.originatingExpense.approvedAt && (
+              <div data-testid="text-originating-expense-approved-at">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Approved
+                </div>
+                <div className="font-medium">
+                  {format(
+                    new Date(entry.originatingExpense.approvedAt),
+                    "MMM d, yyyy",
+                  )}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

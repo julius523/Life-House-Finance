@@ -18,6 +18,8 @@ the journal entry without a second round-trip.
 export type ExpenseAccountingLink = {
   draftId?: number | null;
   draftStatus?: ExpenseAccountingLinkDraftStatus;
+  draftEntryDate?: Date | null;
+  draftMemo?: string | null;
   journalEntryId?: number | null;
   journalEntryNo?: string | null;
   journalEntryDate?: Date | null;

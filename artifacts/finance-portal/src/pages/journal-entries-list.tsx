@@ -65,9 +65,12 @@ type JournalEntry = {
   reversesJournalEntryId: number | null;
   postedBy: EntryActor | null;
   approver: EntryActor | null;
-  // Task #53 — backend-derived source: 'expense' wins over 'copilot'
-  // wins over 'manual'. Use this instead of the agentActionId heuristic.
+  // Task #53 — backend-derived source. Resolution order on the
+  // server: copilot first, then expense, then manual.
   source?: "manual" | "copilot" | "expense";
+  // Task #53 — when source === 'expense', the originating expense
+  // summary is included so the list cell can render "Expense #N".
+  originatingExpense?: { id: number; merchant: string } | null;
 };
 
 function actorName(a: EntryActor | null): string {
@@ -699,9 +702,24 @@ export default function JournalEntriesListPage() {
                               Copilot
                             </Badge>
                           ) : src === "expense" ? (
-                            <Badge variant="secondary" className="gap-1">
-                              Expense
-                            </Badge>
+                            e.originatingExpense ? (
+                              <Link
+                                href={`/expenses/${e.originatingExpense.id}`}
+                                onClick={(ev) => ev.stopPropagation()}
+                                data-testid={`link-source-expense-${e.id}`}
+                              >
+                                <Badge
+                                  variant="secondary"
+                                  className="gap-1 hover:underline"
+                                >
+                                  Expense #{e.originatingExpense.id}
+                                </Badge>
+                              </Link>
+                            ) : (
+                              <Badge variant="secondary" className="gap-1">
+                                Expense
+                              </Badge>
+                            )
                           ) : (
                             <Badge variant="outline" className="gap-1">
                               <User className="h-3 w-3" />

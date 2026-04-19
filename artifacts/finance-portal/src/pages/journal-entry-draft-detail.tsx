@@ -88,6 +88,13 @@ type DraftRecord = {
     amount: number;
     expenseDate: string;
     status: string;
+    programId: number | null;
+    programName: string | null;
+    submitter: {
+      name: string;
+      email: string | null;
+    } | null;
+    approvedAt: string | null;
   } | null;
 };
 
@@ -509,7 +516,7 @@ export default function JournalEntryDraftDetailPage() {
             </div>
             <div>
               <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                Vendor
+                Merchant
               </div>
               <div className="font-medium">
                 {draft.originatingExpense.merchant}
@@ -534,6 +541,51 @@ export default function JournalEntryDraftDetailPage() {
                 ${draft.originatingExpense.amount.toFixed(2)}
               </div>
             </div>
+            {draft.originatingExpense.programName && (
+              <div data-testid="text-originating-expense-program">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Program
+                </div>
+                <div className="font-medium">
+                  {draft.originatingExpense.programName}
+                </div>
+              </div>
+            )}
+            {draft.originatingExpense.submitter && (
+              <div
+                className="md:col-span-2"
+                data-testid="text-originating-expense-submitter"
+              >
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Submitter
+                </div>
+                <div className="font-medium">
+                  {draft.originatingExpense.submitter.name ||
+                    draft.originatingExpense.submitter.email ||
+                    "—"}
+                </div>
+                {draft.originatingExpense.submitter.email &&
+                  draft.originatingExpense.submitter.email !==
+                    draft.originatingExpense.submitter.name && (
+                    <div className="text-xs text-muted-foreground">
+                      {draft.originatingExpense.submitter.email}
+                    </div>
+                  )}
+              </div>
+            )}
+            {draft.originatingExpense.approvedAt && (
+              <div data-testid="text-originating-expense-approved-at">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Approved
+                </div>
+                <div className="font-medium">
+                  {format(
+                    new Date(draft.originatingExpense.approvedAt),
+                    "MMM d, yyyy",
+                  )}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

@@ -71,6 +71,11 @@ type AccountingLinkSummary = {
     | "rejected"
     | "posted"
     | null;
+  // Task #53 review fix — surface enough draft context that the
+  // expense-side Accounting card can show what's pending without an
+  // extra fetch.
+  draftEntryDate: string | null;
+  draftMemo: string | null;
   journalEntryId: number | null;
   journalEntryNo: string | null;
   journalEntryDate: string | null;
@@ -101,14 +106,22 @@ async function loadAccountingLinkForExpense(
     links.find((l) => l.journalEntryId !== null)?.journalEntryId ?? null;
 
   let draftStatus: AccountingLinkSummary["draftStatus"] = null;
+  let draftEntryDate: string | null = null;
+  let draftMemo: string | null = null;
   if (draftId !== null) {
     const [d] = await db
-      .select({ status: manualJournalEntryDraftsTable.status })
+      .select({
+        status: manualJournalEntryDraftsTable.status,
+        entryDate: manualJournalEntryDraftsTable.entryDate,
+        memo: manualJournalEntryDraftsTable.memo,
+      })
       .from(manualJournalEntryDraftsTable)
       .where(eq(manualJournalEntryDraftsTable.id, draftId))
       .limit(1);
     draftStatus =
       (d?.status as AccountingLinkSummary["draftStatus"]) ?? null;
+    draftEntryDate = d?.entryDate ?? null;
+    draftMemo = d?.memo ?? null;
   }
 
   let journalEntryNo: string | null = null;
@@ -135,6 +148,8 @@ async function loadAccountingLinkForExpense(
   return {
     draftId,
     draftStatus,
+    draftEntryDate,
+    draftMemo,
     journalEntryId,
     journalEntryNo,
     journalEntryDate,

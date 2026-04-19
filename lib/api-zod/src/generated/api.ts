@@ -172,6 +172,8 @@ export const ListExpensesResponse = zod.object({
           draftStatus: zod
             .enum(["draft", "submitted", "approved", "rejected", "posted"])
             .nullish(),
+          draftEntryDate: zod.coerce.date().nullish(),
+          draftMemo: zod.string().nullish(),
           journalEntryId: zod.number().nullish(),
           journalEntryNo: zod.string().nullish(),
           journalEntryDate: zod.coerce.date().nullish(),
@@ -292,6 +294,8 @@ export const GetExpenseResponse = zod.object({
       draftStatus: zod
         .enum(["draft", "submitted", "approved", "rejected", "posted"])
         .nullish(),
+      draftEntryDate: zod.coerce.date().nullish(),
+      draftMemo: zod.string().nullish(),
       journalEntryId: zod.number().nullish(),
       journalEntryNo: zod.string().nullish(),
       journalEntryDate: zod.coerce.date().nullish(),
@@ -410,6 +414,8 @@ export const UpdateExpenseResponse = zod.object({
       draftStatus: zod
         .enum(["draft", "submitted", "approved", "rejected", "posted"])
         .nullish(),
+      draftEntryDate: zod.coerce.date().nullish(),
+      draftMemo: zod.string().nullish(),
       journalEntryId: zod.number().nullish(),
       journalEntryNo: zod.string().nullish(),
       journalEntryDate: zod.coerce.date().nullish(),
@@ -511,6 +517,8 @@ export const ApproveExpenseResponse = zod
         draftStatus: zod
           .enum(["draft", "submitted", "approved", "rejected", "posted"])
           .nullish(),
+        draftEntryDate: zod.coerce.date().nullish(),
+        draftMemo: zod.string().nullish(),
         journalEntryId: zod.number().nullish(),
         journalEntryNo: zod.string().nullish(),
         journalEntryDate: zod.coerce.date().nullish(),
@@ -652,6 +660,8 @@ export const DismissExpenseDuplicateResponse = zod.object({
       draftStatus: zod
         .enum(["draft", "submitted", "approved", "rejected", "posted"])
         .nullish(),
+      draftEntryDate: zod.coerce.date().nullish(),
+      draftMemo: zod.string().nullish(),
       journalEntryId: zod.number().nullish(),
       journalEntryNo: zod.string().nullish(),
       journalEntryDate: zod.coerce.date().nullish(),
@@ -753,6 +763,8 @@ export const RejectExpenseResponse = zod.object({
       draftStatus: zod
         .enum(["draft", "submitted", "approved", "rejected", "posted"])
         .nullish(),
+      draftEntryDate: zod.coerce.date().nullish(),
+      draftMemo: zod.string().nullish(),
       journalEntryId: zod.number().nullish(),
       journalEntryNo: zod.string().nullish(),
       journalEntryDate: zod.coerce.date().nullish(),
@@ -1399,6 +1411,8 @@ export const ConvertTransactionToExpenseResponse = zod.object({
         draftStatus: zod
           .enum(["draft", "submitted", "approved", "rejected", "posted"])
           .nullish(),
+        draftEntryDate: zod.coerce.date().nullish(),
+        draftMemo: zod.string().nullish(),
         journalEntryId: zod.number().nullish(),
         journalEntryNo: zod.string().nullish(),
         journalEntryDate: zod.coerce.date().nullish(),
