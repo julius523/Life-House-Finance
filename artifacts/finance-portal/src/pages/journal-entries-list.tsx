@@ -449,6 +449,12 @@ export default function JournalEntriesListPage() {
                       `User #${d.createdBy.id}`;
                     const editable =
                       d.status === "draft" || d.status === "rejected";
+                    const openLabel =
+                      d.status === "posted"
+                        ? "View"
+                        : d.status === "submitted" || d.status === "approved"
+                          ? "Review"
+                          : "Open";
                     return (
                       <TableRow
                         key={d.id}
@@ -479,18 +485,8 @@ export default function JournalEntriesListPage() {
                               variant="outline"
                               data-testid={`button-open-draft-${d.id}`}
                             >
-                              <Link
-                                href={
-                                  editable
-                                    ? `/accounting/journal-entries/new?draft=${d.id}`
-                                    : `/accounting/journal-entry-drafts/${d.id}`
-                                }
-                              >
-                                {editable
-                                  ? "Resume"
-                                  : d.status === "posted"
-                                    ? "View"
-                                    : "Review"}
+                              <Link href={`/accounting/journal-entry-drafts/${d.id}`}>
+                                {openLabel}
                               </Link>
                             </Button>
                             {editable && (
