@@ -34,6 +34,7 @@ import {
   useListJournalEntries,
   useListJournalEntryDrafts,
   useDeleteJournalEntryDraft,
+  useListJournalEntryActors,
   useListAccountingPeriods,
   useCreateAccountingPeriod,
   useCloseAccountingPeriod,
@@ -43,6 +44,7 @@ import {
   ListJournalEntriesSource,
   type ListJournalEntriesParams,
   type ListJournalEntryDraftsParams,
+  type AuthUser,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
@@ -201,6 +203,11 @@ export default function JournalEntriesListPage() {
   const [source, setSource] = useState<SourceFilter>("all");
   const [from, setFrom] = useState<string>("");
   const [to, setTo] = useState<string>("");
+  // Task #50 — "any" means "no filter" (the default). Otherwise we hold
+  // a user id as a string to keep the Select component happy (it requires
+  // string values).
+  const [postedByFilter, setPostedByFilter] = useState<string>("any");
+  const [approverFilter, setApproverFilter] = useState<string>("any");
   const [page, setPage] = useState(0);
 
   const queryClient = useQueryClient();
@@ -323,7 +330,24 @@ export default function JournalEntriesListPage() {
   // Reset to first page when filters change.
   useEffect(() => {
     setPage(0);
-  }, [status, source, from, to]);
+  }, [status, source, from, to, postedByFilter, approverFilter]);
+
+  // Task #50 — fetch the distinct posters/approvers so the pickers show
+  // only people who have actually touched a journal entry.
+  const { data: actorsData } = useListJournalEntryActors({
+    query: { enabled: canView },
+  });
+  const posters = (actorsData?.posters ?? []) as AuthUser[];
+  const approvers = (actorsData?.approvers ?? []) as AuthUser[];
+
+  const postedByUserId =
+    postedByFilter !== "any" && /^\d+$/.test(postedByFilter)
+      ? Number(postedByFilter)
+      : null;
+  const approverUserId =
+    approverFilter !== "any" && /^\d+$/.test(approverFilter)
+      ? Number(approverFilter)
+      : null;
 
   const entriesParams = useMemo<ListJournalEntriesParams>(() => {
     const p: ListJournalEntriesParams = {
@@ -342,8 +366,10 @@ export default function JournalEntriesListPage() {
     }
     if (from) p.from = from;
     if (to) p.to = to;
+    if (postedByUserId !== null) p.postedBy = postedByUserId;
+    if (approverUserId !== null) p.approver = approverUserId;
     return p;
-  }, [status, source, from, to, page]);
+  }, [status, source, from, to, postedByUserId, approverUserId, page]);
 
   const {
     data: entriesData,
@@ -392,10 +418,17 @@ export default function JournalEntriesListPage() {
     setSource("all");
     setFrom("");
     setTo("");
+    setPostedByFilter("any");
+    setApproverFilter("any");
   };
 
   const filtersActive =
-    status !== "all" || source !== "all" || from !== "" || to !== "";
+    status !== "all" ||
+    source !== "all" ||
+    from !== "" ||
+    to !== "" ||
+    postedByFilter !== "any" ||
+    approverFilter !== "any";
 
   const downloadCsv = async () => {
     setExporting(true);
@@ -405,6 +438,8 @@ export default function JournalEntriesListPage() {
       if (source !== "all") p.set("source", source);
       if (from) p.set("from", from);
       if (to) p.set("to", to);
+      if (postedByUserId !== null) p.set("postedBy", String(postedByUserId));
+      if (approverUserId !== null) p.set("approver", String(approverUserId));
       if (includeLines) p.set("includeLines", "true");
       const res = await fetch(`/api/accounting/journal-entries.csv?${p.toString()}`, {
         credentials: "include",
@@ -480,7 +515,7 @@ export default function JournalEntriesListPage() {
             Filter by date range, status, and how the entry was posted.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+        <CardContent className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
           <div className="space-y-1.5">
             <Label htmlFor="je-from">From</Label>
             <Input
@@ -527,12 +562,75 @@ export default function JournalEntriesListPage() {
               </SelectContent>
             </Select>
           </div>
-          <div>
+          <div className="space-y-1.5">
+            <Label>Posted by</Label>
+            <Select
+              value={postedByFilter}
+              onValueChange={setPostedByFilter}
+            >
+              <SelectTrigger data-testid="select-posted-by">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="any">Anyone</SelectItem>
+                {posters.map((u) => (
+                  <SelectItem
+                    key={u.id}
+                    value={String(u.id)}
+                    data-testid={`option-posted-by-${u.id}`}
+                  >
+                    {actorName({
+                      id: u.id,
+                      firstName: u.firstName ?? null,
+                      lastName: u.lastName ?? null,
+                      email: u.email ?? null,
+                    })}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Approver</Label>
+            <Select
+              value={approverFilter}
+              onValueChange={setApproverFilter}
+            >
+              <SelectTrigger data-testid="select-approver">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="any">Anyone</SelectItem>
+                {approvers.length === 0 ? (
+                  <SelectItem value="__none__" disabled>
+                    No copilot approvals yet
+                  </SelectItem>
+                ) : (
+                  approvers.map((u) => (
+                    <SelectItem
+                      key={u.id}
+                      value={String(u.id)}
+                      data-testid={`option-approver-${u.id}`}
+                    >
+                      {actorName({
+                        id: u.id,
+                        firstName: u.firstName ?? null,
+                        lastName: u.lastName ?? null,
+                        email: u.email ?? null,
+                      })}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="md:col-span-2 flex md:justify-end">
             <Button
               variant="outline"
               onClick={clearFilters}
               disabled={!filtersActive}
-              className="w-full"
+              className="w-full md:w-auto"
+              data-testid="button-clear-filters"
             >
               Clear
             </Button>

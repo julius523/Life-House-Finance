@@ -25,6 +25,10 @@ export type JournalEntryCsvFilters = {
   from?: string | null;
   /** YYYY-MM-DD inclusive upper bound on entry_date. */
   to?: string | null;
+  /** Task #50 — only entries posted by this user id. */
+  postedByUserId?: number | null;
+  /** Task #50 — only entries approved by this user id (copilot entries). */
+  approverUserId?: number | null;
   includeLines?: boolean;
 };
 
@@ -128,6 +132,20 @@ export async function generateJournalEntryCsv(
   }
   if (filters.to && /^\d{4}-\d{2}-\d{2}$/.test(filters.to)) {
     conds.push(sql`${journalEntriesTable.entryDate} <= ${filters.to}`);
+  }
+  if (
+    typeof filters.postedByUserId === "number" &&
+    Number.isInteger(filters.postedByUserId) &&
+    filters.postedByUserId > 0
+  ) {
+    conds.push(eq(journalEntriesTable.postedByUserId, filters.postedByUserId));
+  }
+  if (
+    typeof filters.approverUserId === "number" &&
+    Number.isInteger(filters.approverUserId) &&
+    filters.approverUserId > 0
+  ) {
+    conds.push(eq(journalEntriesTable.approverUserId, filters.approverUserId));
   }
   const whereExpr = conds.length ? and(...conds) : undefined;
 

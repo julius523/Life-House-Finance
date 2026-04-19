@@ -2583,6 +2583,14 @@ export type ListJournalEntriesParams = {
   source?: ListJournalEntriesSource;
   from?: string;
   to?: string;
+  /**
+   * Filter to entries posted by this user id.
+   */
+  postedBy?: number;
+  /**
+   * Filter to entries approved by this user id (copilot entries).
+   */
+  approver?: number;
   limit?: number;
   offset?: number;
 };
@@ -2609,6 +2617,11 @@ export type ListJournalEntries200 = {
   total: number;
   limit?: number;
   offset?: number;
+};
+
+export type ListJournalEntryActors200 = {
+  posters: AuthUser[];
+  approvers: AuthUser[];
 };
 
 export type GetJournalEntry200 = {

@@ -231,6 +231,7 @@ export * from "./listJournalEntries200";
 export * from "./listJournalEntriesParams";
 export * from "./listJournalEntriesSource";
 export * from "./listJournalEntriesStatus";
+export * from "./listJournalEntryActors200";
 export * from "./listJournalEntryDrafts200";
 export * from "./listJournalEntryDraftsParams";
 export * from "./listJournalEntryDraftsScope";

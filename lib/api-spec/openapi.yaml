@@ -2772,6 +2772,18 @@ paths:
           required: false
           schema:
             type: string
+        - name: postedBy
+          in: query
+          required: false
+          description: Filter to entries posted by this user id.
+          schema:
+            type: integer
+        - name: approver
+          in: query
+          required: false
+          description: Filter to entries approved by this user id (copilot entries).
+          schema:
+            type: integer
         - name: limit
           in: query
           required: false
@@ -2801,6 +2813,33 @@ paths:
                   offset:
                     type: integer
                 required: [entries, total]
+
+  /accounting/journal-entries/actors:
+    get:
+      operationId: listJournalEntryActors
+      tags: [accounting]
+      summary: List distinct posters and approvers across journal entries
+      description: |
+        Returns the set of users that have posted or approved at least one
+        journal entry, so the journal-entries list can render person-pickers
+        without exposing the full user directory to approvers.
+      responses:
+        "200":
+          description: Actors
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  posters:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuthUser"
+                  approvers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuthUser"
+                required: [posters, approvers]
 
   /accounting/journal-entries/{id}:
     get:

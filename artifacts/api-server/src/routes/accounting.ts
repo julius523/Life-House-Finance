@@ -2540,6 +2540,15 @@ router.get(
     const to = typeof q["to"] === "string" && /^\d{4}-\d{2}-\d{2}$/.test(q["to"] as string)
       ? (q["to"] as string)
       : null;
+    // Task #50 — filter by who posted / who approved. Both are user ids.
+    // Invalid values (non-positive integers, NaN) are silently ignored so
+    // an empty picker selection just clears the filter rather than 400ing.
+    const postedByRaw = Number(q["postedBy"]);
+    const postedByUserId =
+      Number.isInteger(postedByRaw) && postedByRaw > 0 ? postedByRaw : null;
+    const approverRaw = Number(q["approver"]);
+    const approverUserId =
+      Number.isInteger(approverRaw) && approverRaw > 0 ? approverRaw : null;
     const limitRaw = Number(q["limit"]);
     const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 500 ? limitRaw : 100;
     const offsetRaw = Number(q["offset"]);
@@ -2609,6 +2618,12 @@ router.get(
     }
     if (to) {
       conds.push(sql`${journalEntriesTable.entryDate} <= ${to}`);
+    }
+    if (postedByUserId !== null) {
+      conds.push(eq(journalEntriesTable.postedByUserId, postedByUserId));
+    }
+    if (approverUserId !== null) {
+      conds.push(eq(journalEntriesTable.approverUserId, approverUserId));
     }
     const whereExpr = conds.length ? and(...conds) : undefined;
 
@@ -2695,6 +2710,14 @@ router.get(
     const to = typeof q["to"] === "string" ? (q["to"] as string) : null;
     const includeLines =
       q["includeLines"] === "true" || q["includeLines"] === "1";
+    // Task #50 — accept the same poster/approver filters as the JSON list
+    // so a downloaded CSV matches the rows currently visible on screen.
+    const postedByRaw = Number(q["postedBy"]);
+    const postedByUserId =
+      Number.isInteger(postedByRaw) && postedByRaw > 0 ? postedByRaw : null;
+    const approverRaw = Number(q["approver"]);
+    const approverUserId =
+      Number.isInteger(approverRaw) && approverRaw > 0 ? approverRaw : null;
 
     const result = await generateJournalEntryCsv({
       status:
@@ -2708,6 +2731,8 @@ router.get(
           : null,
       from,
       to,
+      postedByUserId,
+      approverUserId,
       includeLines,
     });
 
@@ -2726,6 +2751,81 @@ router.get(
       `attachment; filename="${result.filename}"`,
     );
     res.send(result.csv);
+  },
+);
+
+// Task #50 — distinct posters / approvers across journal entries, used to
+// populate the "Posted by" and "Approver" pickers on the JE list page.
+// Returns only users that have actually posted or approved at least one
+// entry, so approvers (who can't see the full /admin/users directory) can
+// still drive the picker, and so submitters who never posted don't clutter
+// the dropdown.
+router.get(
+  "/accounting/journal-entries/actors",
+  async (req, res): Promise<void> => {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const posterIdsRows = await db
+      .selectDistinct({ id: journalEntriesTable.postedByUserId })
+      .from(journalEntriesTable)
+      .where(sql`${journalEntriesTable.postedByUserId} IS NOT NULL`);
+    const approverIdsRows = await db
+      .selectDistinct({ id: journalEntriesTable.approverUserId })
+      .from(journalEntriesTable)
+      .where(sql`${journalEntriesTable.approverUserId} IS NOT NULL`);
+    const allIds = new Set<number>();
+    for (const r of posterIdsRows) {
+      if (r.id !== null) allIds.add(r.id);
+    }
+    for (const r of approverIdsRows) {
+      if (r.id !== null) allIds.add(r.id);
+    }
+    if (allIds.size === 0) {
+      res.json({ posters: [], approvers: [] });
+      return;
+    }
+    const userRows = await db
+      .select()
+      .from(usersTable)
+      .where(inArray(usersTable.id, Array.from(allIds)))
+      .orderBy(asc(usersTable.firstName), asc(usersTable.lastName));
+    const userById = new Map<number, typeof usersTable.$inferSelect>();
+    for (const u of userRows) userById.set(u.id, u);
+    const toAuthUser = (u: typeof usersTable.$inferSelect) => ({
+      id: u.id,
+      email: u.email,
+      firstName: u.firstName,
+      lastName: u.lastName,
+      role: u.role,
+    });
+    // Sort by display name so the picker order is deterministic
+    // regardless of how the DB returned the distinct ids.
+    const byName = (
+      a: typeof usersTable.$inferSelect,
+      b: typeof usersTable.$inferSelect,
+    ): number => {
+      const an = `${a.firstName} ${a.lastName}`.toLowerCase();
+      const bn = `${b.firstName} ${b.lastName}`.toLowerCase();
+      return an < bn ? -1 : an > bn ? 1 : a.id - b.id;
+    };
+    const posterIds = new Set<number>();
+    for (const r of posterIdsRows) if (r.id !== null) posterIds.add(r.id);
+    const approverIds = new Set<number>();
+    for (const r of approverIdsRows) if (r.id !== null) approverIds.add(r.id);
+    const posters = Array.from(posterIds)
+      .map((id) => userById.get(id))
+      .filter((u): u is typeof usersTable.$inferSelect => !!u)
+      .sort(byName)
+      .map(toAuthUser);
+    const approvers = Array.from(approverIds)
+      .map((id) => userById.get(id))
+      .filter((u): u is typeof usersTable.$inferSelect => !!u)
+      .sort(byName)
+      .map(toAuthUser);
+    res.json({ posters, approvers });
   },
 );
 

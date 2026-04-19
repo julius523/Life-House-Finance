@@ -4222,6 +4222,14 @@ export const ListJournalEntriesQueryParams = zod.object({
   source: zod.enum(["manual", "copilot", "expense"]).optional(),
   from: zod.coerce.string().optional(),
   to: zod.coerce.string().optional(),
+  postedBy: zod.coerce
+    .number()
+    .optional()
+    .describe("Filter to entries posted by this user id."),
+  approver: zod.coerce
+    .number()
+    .optional()
+    .describe("Filter to entries approved by this user id (copilot entries)."),
   limit: zod.coerce.number().optional(),
   offset: zod.coerce.number().optional(),
 });
@@ -4310,6 +4318,34 @@ export const ListJournalEntriesResponse = zod.object({
   total: zod.number(),
   limit: zod.number().optional(),
   offset: zod.number().optional(),
+});
+
+/**
+ * Returns the set of users that have posted or approved at least one
+journal entry, so the journal-entries list can render person-pickers
+without exposing the full user directory to approvers.
+
+ * @summary List distinct posters and approvers across journal entries
+ */
+export const ListJournalEntryActorsResponse = zod.object({
+  posters: zod.array(
+    zod.object({
+      id: zod.number(),
+      email: zod.string(),
+      firstName: zod.string(),
+      lastName: zod.string(),
+      role: zod.enum(["admin", "approver", "submitter"]),
+    }),
+  ),
+  approvers: zod.array(
+    zod.object({
+      id: zod.number(),
+      email: zod.string(),
+      firstName: zod.string(),
+      lastName: zod.string(),
+      role: zod.enum(["admin", "approver", "submitter"]),
+    }),
+  ),
 });
 
 /**

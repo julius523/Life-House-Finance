@@ -122,6 +122,7 @@ import type {
   ListExpensesParams,
   ListJournalEntries200,
   ListJournalEntriesParams,
+  ListJournalEntryActors200,
   ListJournalEntryDrafts200,
   ListJournalEntryDraftsParams,
   ListNotificationsParams,
@@ -10567,6 +10568,89 @@ export function useListJournalEntries<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getListJournalEntriesQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Returns the set of users that have posted or approved at least one
+journal entry, so the journal-entries list can render person-pickers
+without exposing the full user directory to approvers.
+
+ * @summary List distinct posters and approvers across journal entries
+ */
+export const getListJournalEntryActorsUrl = () => {
+  return `/api/accounting/journal-entries/actors`;
+};
+
+export const listJournalEntryActors = async (
+  options?: RequestInit,
+): Promise<ListJournalEntryActors200> => {
+  return customFetch<ListJournalEntryActors200>(
+    getListJournalEntryActorsUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListJournalEntryActorsQueryKey = () => {
+  return [`/api/accounting/journal-entries/actors`] as const;
+};
+
+export const getListJournalEntryActorsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listJournalEntryActors>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listJournalEntryActors>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListJournalEntryActorsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listJournalEntryActors>>
+  > = ({ signal }) => listJournalEntryActors({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listJournalEntryActors>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListJournalEntryActorsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listJournalEntryActors>>
+>;
+export type ListJournalEntryActorsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List distinct posters and approvers across journal entries
+ */
+
+export function useListJournalEntryActors<
+  TData = Awaited<ReturnType<typeof listJournalEntryActors>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listJournalEntryActors>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListJournalEntryActorsQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

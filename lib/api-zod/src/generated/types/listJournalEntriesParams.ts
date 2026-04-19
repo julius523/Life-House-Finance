@@ -13,6 +13,14 @@ export type ListJournalEntriesParams = {
   source?: ListJournalEntriesSource;
   from?: string;
   to?: string;
+  /**
+   * Filter to entries posted by this user id.
+   */
+  postedBy?: number;
+  /**
+   * Filter to entries approved by this user id (copilot entries).
+   */
+  approver?: number;
   limit?: number;
   offset?: number;
 };
