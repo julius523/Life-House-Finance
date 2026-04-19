@@ -1,0 +1,180 @@
+{
+  "generatedAt": "2026-04-19T00:02:00.321Z",
+  "base": "http://localhost:8080",
+  "front": "https://88b8e478-c4e7-419d-b3d2-b2d3cf59bab0-00-zqnc2hhsn5k9.spock.replit.dev",
+  "results": [
+    {
+      "id": "T1",
+      "label": "Happy path: balanced manual JE posts (201) and is visible in posted list with actor + timestamp",
+      "pass": true,
+      "evidence": {
+        "postStatus": 201,
+        "entryNo": "JE-2026-000018",
+        "jeId": 20,
+        "foundInList": true,
+        "postedByUserId": 2,
+        "postedAt": "2026-04-19T00:02:00.020Z"
+      }
+    },
+    {
+      "id": "T2",
+      "label": "Unbalanced JE rejected (422 UNBALANCED) and no JE row created",
+      "pass": true,
+      "evidence": {
+        "status": 422,
+        "code": "UNBALANCED",
+        "debitsCents": 10000,
+        "creditsCents": 5000,
+        "leaked": false
+      }
+    },
+    {
+      "id": "T3a",
+      "label": "Archived account rejected (400 INVALID_ACCOUNT, reason=archived_account)",
+      "pass": true,
+      "evidence": {
+        "status": 400,
+        "body": {
+          "error": "Posting refused: line 1 — account 'ARCH-T25-920087' is archived.",
+          "code": "INVALID_ACCOUNT",
+          "lineNo": 1,
+          "account": "ARCH-T25-920087",
+          "reason": "archived_account"
+        }
+      }
+    },
+    {
+      "id": "T3b",
+      "label": "allow_manual_posting=false account rejected (400 INVALID_ACCOUNT, reason=not_manual_postable)",
+      "pass": true,
+      "evidence": {
+        "status": 400,
+        "body": {
+          "error": "Posting refused: line 1 — account 'NOMAN-T25-920125' is not allowed for manual posting.",
+          "code": "INVALID_ACCOUNT",
+          "lineNo": 1,
+          "account": "NOMAN-T25-920125",
+          "reason": "manual_posting_disabled"
+        }
+      }
+    },
+    {
+      "id": "T3c",
+      "label": "Unknown account rejected (400 INVALID_ACCOUNT, reason=unknown_account)",
+      "pass": true,
+      "evidence": {
+        "status": 400,
+        "body": {
+          "error": "Posting refused: line 1 — account 'ZZZ-NOPE-T25' is not in the chart of accounts.",
+          "code": "INVALID_ACCOUNT",
+          "lineNo": 1,
+          "account": "ZZZ-NOPE-T25",
+          "reason": "unknown_account"
+        }
+      }
+    },
+    {
+      "id": "T3-no-leak",
+      "label": "None of the rejected T3 entries created a JE row",
+      "pass": true,
+      "evidence": {
+        "leaked": false
+      }
+    },
+    {
+      "id": "T4",
+      "label": "Posting into a closed/non-existent period rejected (409 PERIOD_LOCKED) and no JE created",
+      "pass": true,
+      "evidence": {
+        "status": 409,
+        "body": {
+          "error": "Posting refused: 2020-01-15 falls in no open accounting period.",
+          "code": "PERIOD_LOCKED",
+          "entryDate": "2020-01-15",
+          "periodLabel": null
+        },
+        "leaked": false
+      }
+    },
+    {
+      "id": "T5a",
+      "label": "Submitter blocked (403 forbidden)",
+      "pass": true,
+      "evidence": {
+        "status": 403,
+        "body": {
+          "error": "Admins or approvers only"
+        }
+      }
+    },
+    {
+      "id": "T5b",
+      "label": "Approver allowed (201)",
+      "pass": true,
+      "evidence": {
+        "status": 201,
+        "entryNo": "JE-2026-000019"
+      }
+    },
+    {
+      "id": "T5c",
+      "label": "Unauthenticated request blocked (401/403)",
+      "pass": true,
+      "evidence": {
+        "status": 401
+      }
+    },
+    {
+      "id": "T6",
+      "label": "Duplicate-submit behavior (informational — no idempotency key in merged route)",
+      "pass": true,
+      "evidence": {
+        "dup1Status": 201,
+        "dup2Status": 201,
+        "dup1Id": 22,
+        "dup2Id": 23,
+        "distinctJeCount": 2,
+        "gap": "BOTH submissions posted distinct JEs — the merged route has no idempotency key. Recommend adding one (e.g. Idempotency-Key header) when Task #29 introduces drafts."
+      }
+    },
+    {
+      "id": "T7",
+      "label": "JE detail endpoint returns posted JE with id, entryNo, postedByUserId, postedAt, evidenceSnapshot.source='manual_ui' and lines",
+      "pass": true,
+      "evidence": {
+        "status": 200,
+        "jeId": 20,
+        "entryNo": "JE-2026-000018",
+        "postedByUserId": 2,
+        "postedAt": "2026-04-19T00:02:00.020Z",
+        "evidenceSource": "manual_ui",
+        "lineCount": 2
+      }
+    },
+    {
+      "id": "T8",
+      "label": "Step-8 reversal still works against a manually-posted JE (creates inverse JE, original goes status=reversed)",
+      "pass": true,
+      "evidence": {
+        "status": 201,
+        "originalId": 20,
+        "originalStatus": "reversed",
+        "reversalId": 24,
+        "reversalEntryNo": "JE-2026-000022",
+        "reversesJournalEntryId": 20
+      }
+    },
+    {
+      "id": "T9",
+      "label": "Frontend page /accounting/journal-entries/new responds (200 or auth-redirect 3xx)",
+      "pass": true,
+      "evidence": {
+        "status": 200
+      }
+    }
+  ],
+  "notes": [
+    "Out-of-scope (deferred to Task #29): create-draft, edit-draft, submit-for-approval, approve, reject, no-self-approval enforcement on manual drafts.",
+    "Task #25 is the direct-post slice only. There is no submitter→approver split for manual posts in the merged code; admin/approver may post directly."
+  ]
+}
