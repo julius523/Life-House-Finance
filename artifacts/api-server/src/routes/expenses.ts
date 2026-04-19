@@ -660,6 +660,104 @@ router.post("/expenses/:id/reject", requireRole("admin", "approver"), async (req
   res.json(RejectExpenseResponse.parse(formatExpense(expense, programName)));
 });
 
+// Task #54 — flip a blocked expense to accountingStatus='not_applicable'
+// with a required note. Used from the blocked-expense queue when an
+// expense legitimately should never reach accounting (e.g. submitted in
+// error, refund already processed elsewhere). Writes an activity log so
+// the audit trail explains why the bridge was abandoned.
+router.post(
+  "/expenses/:id/mark-accounting-not-applicable",
+  requireRole("admin", "approver"),
+  async (req, res): Promise<void> => {
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const note =
+      typeof req.body?.note === "string" ? req.body.note.trim() : "";
+    if (note.length < 3 || note.length > 500) {
+      res
+        .status(400)
+        .json({ error: "note is required (3–500 characters)" });
+      return;
+    }
+    const [exp] = await db
+      .select()
+      .from(expensesTable)
+      .where(eq(expensesTable.id, id));
+    if (!exp) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    // Only allow flipping when the expense hasn't already produced a
+    // posted ledger entry. blocked / pending / not_applicable are safe;
+    // draft_created and posted are not — those need a draft action first.
+    if (exp.accountingStatus !== "blocked" && exp.accountingStatus !== "pending") {
+      res.status(409).json({
+        error:
+          "Only blocked or pending expenses can be marked not applicable.",
+        code: "INVALID_ACCOUNTING_STATE",
+        accountingStatus: exp.accountingStatus,
+      });
+      return;
+    }
+    // Atomic guard: only flip if the row is still in a safe state. A
+    // concurrent retry could have just promoted the expense to
+    // draft_created/posted between the read above and this write — without
+    // the inArray() filter we'd silently overwrite that progress.
+    const [updated] = await db
+      .update(expensesTable)
+      .set({
+        accountingStatus: "not_applicable",
+        accountingBlockReason: null,
+        accountingGeneratedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(expensesTable.id, id),
+          inArray(expensesTable.accountingStatus, ["blocked", "pending"]),
+        ),
+      )
+      .returning();
+    if (!updated) {
+      res.status(409).json({
+        error:
+          "Expense state changed; refresh and try again.",
+        code: "INVALID_ACCOUNTING_STATE",
+      });
+      return;
+    }
+    const u = req.authUser!;
+    const actorDisplay =
+      `${u.firstName} ${u.lastName}`.trim() || u.email;
+    await db.insert(activityLogTable).values({
+      type: "expense_accounting_not_applicable",
+      description: `Marked not applicable for accounting: ${note}`,
+      actor: actorDisplay,
+      actorUserId: u.id,
+      referenceId: updated.id,
+      referenceType: "expense",
+    });
+    const programName = await getProgramName(updated.programId);
+    let cName: string | null = null;
+    if (updated.categoryId !== null) {
+      const [c] = await db
+        .select({ name: expenseCategoriesTable.name })
+        .from(expenseCategoriesTable)
+        .where(eq(expenseCategoriesTable.id, updated.categoryId))
+        .limit(1);
+      cName = c?.name ?? null;
+    }
+    res.json(
+      GetExpenseResponse.parse(
+        formatExpense(updated, programName, [], cName),
+      ),
+    );
+  },
+);
+
 router.post("/expenses/:id/dismiss-duplicate", async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isInteger(id) || id <= 0) {

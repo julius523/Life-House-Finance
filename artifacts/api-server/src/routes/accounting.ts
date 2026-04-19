@@ -34,6 +34,7 @@ import {
   type AgentActionRow,
 } from "@workspace/db";
 import { requireAuth } from "../lib/auth";
+import { generateDraftFromExpense } from "../lib/expenseDraftService";
 import {
   postApprovedJournalEntry,
   postManualJournalEntry,
@@ -5095,5 +5096,213 @@ router.delete(
     res.status(204).send();
   },
 );
+
+// ---------------------------------------------------------------------------
+// Task #54 — Blocked accounting queue.
+//
+// Surfaces every approved expense whose draft generation failed
+// (accountingStatus='blocked') in one place so finance can fix the
+// underlying mapping and retry. Three endpoints back the page:
+//   GET  /accounting/blocked-expenses          — paginated rows + metrics
+//   GET  /accounting/blocked-expenses/count    — light count for nav badge
+//   POST /accounting/blocked-expenses/retry    — bulk retry generator
+// All three are admin/approver only — submitters can't see the queue.
+// ---------------------------------------------------------------------------
+
+const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  cash: "Cash",
+  check: "Check",
+  credit_card: "Credit card",
+  debit_card: "Debit card",
+  bank_transfer: "Bank transfer",
+  other: "Other",
+};
+
+router.get(
+  "/accounting/blocked-expenses",
+  async (req, res): Promise<void> => {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const pageRaw = Number(req.query["page"]);
+    const page = Number.isInteger(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+    const sizeRaw = Number(req.query["pageSize"]);
+    const pageSize =
+      Number.isInteger(sizeRaw) && sizeRaw > 0 && sizeRaw <= 100 ? sizeRaw : 25;
+
+    const where = eq(expensesTable.accountingStatus, "blocked");
+
+    const [rows, totalRow, metricRows] = await Promise.all([
+      db
+        .select()
+        .from(expensesTable)
+        .where(where)
+        .orderBy(desc(expensesTable.accountingGeneratedAt))
+        .limit(pageSize)
+        .offset((page - 1) * pageSize),
+      db
+        .select({ cnt: sql<number>`count(*)::int` })
+        .from(expensesTable)
+        .where(where),
+      db
+        .select({
+          reason: expensesTable.accountingBlockReason,
+          cnt: sql<number>`count(*)::int`,
+        })
+        .from(expensesTable)
+        .where(where)
+        .groupBy(expensesTable.accountingBlockReason),
+    ]);
+
+    const programIds = Array.from(
+      new Set(
+        rows.map((r) => r.programId).filter((v): v is number => v !== null),
+      ),
+    );
+    const categoryIds = Array.from(
+      new Set(
+        rows.map((r) => r.categoryId).filter((v): v is number => v !== null),
+      ),
+    );
+    const programNameById = new Map<number, string>();
+    if (programIds.length > 0) {
+      const progs = await db
+        .select({ id: programsTable.id, name: programsTable.name })
+        .from(programsTable)
+        .where(inArray(programsTable.id, programIds));
+      for (const p of progs) programNameById.set(p.id, p.name);
+    }
+    const categoryNameById = new Map<number, string>();
+    if (categoryIds.length > 0) {
+      const cats = await db
+        .select({
+          id: expenseCategoriesTable.id,
+          name: expenseCategoriesTable.name,
+        })
+        .from(expenseCategoriesTable)
+        .where(inArray(expenseCategoriesTable.id, categoryIds));
+      for (const c of cats) categoryNameById.set(c.id, c.name);
+    }
+
+    const items = rows.map((e) => ({
+      id: e.id,
+      expenseDate: e.expenseDate,
+      merchant: e.merchant,
+      amount: parseFloat(e.amount),
+      submittedBy: e.submittedBy,
+      submittedByEmail: e.submittedByEmail ?? null,
+      programId: e.programId ?? null,
+      programName:
+        e.programId !== null ? (programNameById.get(e.programId) ?? null) : null,
+      categoryId: e.categoryId ?? null,
+      categoryName:
+        e.categoryId !== null
+          ? (categoryNameById.get(e.categoryId) ?? null)
+          : null,
+      paymentMethod: e.paymentMethod,
+      accountingBlockReason: e.accountingBlockReason ?? null,
+      accountingGeneratedAt: e.accountingGeneratedAt?.toISOString() ?? null,
+    }));
+
+    const metrics: Record<string, number> = {};
+    for (const m of metricRows) {
+      const key = m.reason ?? "other";
+      metrics[key] = (metrics[key] ?? 0) + Number(m.cnt);
+    }
+
+    res.json({
+      items,
+      total: Number(totalRow[0]?.cnt ?? 0),
+      page,
+      pageSize,
+      metrics,
+    });
+  },
+);
+
+router.get(
+  "/accounting/blocked-expenses/count",
+  async (req, res): Promise<void> => {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const [row] = await db
+      .select({ cnt: sql<number>`count(*)::int` })
+      .from(expensesTable)
+      .where(eq(expensesTable.accountingStatus, "blocked"));
+    res.json({ total: Number(row?.cnt ?? 0) });
+  },
+);
+
+router.post(
+  "/accounting/blocked-expenses/retry",
+  async (req, res): Promise<void> => {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const ids: unknown = req.body?.expenseIds;
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > 200) {
+      res.status(400).json({ error: "expenseIds must be a 1–200 element array" });
+      return;
+    }
+    const cleanIds: number[] = [];
+    for (const v of ids) {
+      const n = Number(v);
+      if (!Number.isInteger(n) || n <= 0) {
+        res.status(400).json({ error: "expenseIds must contain positive integers" });
+        return;
+      }
+      cleanIds.push(n);
+    }
+    const u = req.authUser!;
+    const actorDisplay =
+      `${u.firstName} ${u.lastName}`.trim() || u.email;
+    // Sequential retry — generator updates DB per call and we want
+    // determinate per-id outcomes (also keeps connection pressure low).
+    const results: Array<{
+      expenseId: number;
+      result:
+        | {
+            ok: true;
+            created: boolean;
+            manualJournalEntryDraftId: number;
+          }
+        | { ok: false; reason: string; message?: string };
+    }> = [];
+    for (const expenseId of cleanIds) {
+      const r = await generateDraftFromExpense(expenseId, {
+        id: u.id,
+        display: actorDisplay,
+      });
+      if (r.ok) {
+        results.push({
+          expenseId,
+          result: {
+            ok: true,
+            created: r.created,
+            manualJournalEntryDraftId: r.draftId,
+          },
+        });
+      } else {
+        results.push({
+          expenseId,
+          result: { ok: false, reason: r.reason, message: r.message },
+        });
+      }
+    }
+    res.json({ results });
+  },
+);
+
+// Reference PAYMENT_METHOD_LABEL so it isn't tree-shaken away from the
+// build (it's exported transitively for future bill-side UI parity but
+// currently used only by clients via the OpenAPI enum).
+void PAYMENT_METHOD_LABEL;
 
 export default router;

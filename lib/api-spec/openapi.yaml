@@ -1551,6 +1551,127 @@ paths:
         "204":
           description: Deleted
 
+  /accounting/blocked-expenses:
+    get:
+      operationId: listBlockedExpenses
+      tags: [accounting]
+      summary: Task #54 — review queue of expenses whose accounting draft generation failed
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 25
+      responses:
+        "200":
+          description: Paginated blocked-expense rows + reason-code metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockedExpensesListResponse"
+        "403":
+          description: Admin/approver only
+
+  /accounting/blocked-expenses/count:
+    get:
+      operationId: getBlockedExpensesCount
+      tags: [accounting]
+      summary: Lightweight count of blocked expenses (used for nav badge)
+      responses:
+        "200":
+          description: Total count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                required: [total]
+        "403":
+          description: Admin/approver only
+
+  /accounting/blocked-expenses/retry:
+    post:
+      operationId: retryBlockedExpenses
+      tags: [accounting]
+      summary: Bulk re-run accounting draft generation for the given blocked expense ids
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expenseIds:
+                  type: array
+                  items:
+                    type: integer
+                  minItems: 1
+                  maxItems: 200
+              required: [expenseIds]
+      responses:
+        "200":
+          description: Per-id retry result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        expenseId:
+                          type: integer
+                        result:
+                          $ref: "#/components/schemas/AccountingDraftResult"
+                      required: [expenseId, result]
+                required: [results]
+        "403":
+          description: Admin/approver only
+
+  /expenses/{id}/mark-accounting-not-applicable:
+    post:
+      operationId: markExpenseAccountingNotApplicable
+      tags: [expenses]
+      summary: Flip a blocked expense to accountingStatus='not_applicable' with a required note
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  minLength: 3
+                  maxLength: 500
+              required: [note]
+      responses:
+        "200":
+          description: Updated expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+        "403":
+          description: Admin/approver only
+        "409":
+          description: Expense is not in a state that can be marked not-applicable
+
   /accounting/dashboard-status:
     get:
       operationId: getAccountingDashboardStatus
@@ -1823,6 +1944,86 @@ components:
         - expenses
         - bills
         - total
+
+    BlockedExpenseRow:
+      type: object
+      description: |
+        Task #54 — single row in the blocked-expense review queue. Joins
+        in human-readable program / category / payment-method labels so
+        the page can render without per-row lookups.
+      properties:
+        id:
+          type: integer
+        expenseDate:
+          type: string
+          format: date
+        merchant:
+          type: string
+        amount:
+          type: number
+        submittedBy:
+          type: string
+        submittedByEmail:
+          type: string
+          nullable: true
+        programId:
+          type: integer
+          nullable: true
+        programName:
+          type: string
+          nullable: true
+        categoryId:
+          type: integer
+          nullable: true
+        categoryName:
+          type: string
+          nullable: true
+        paymentMethod:
+          type: string
+          enum: [cash, check, credit_card, debit_card, bank_transfer, other]
+        accountingBlockReason:
+          type: string
+          nullable: true
+          enum:
+            [
+              missing_category,
+              missing_mapping,
+              archived_account,
+              non_postable_account,
+              invalid_payment_method_rule,
+              other,
+            ]
+        accountingGeneratedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - expenseDate
+        - merchant
+        - amount
+        - submittedBy
+        - paymentMethod
+
+    BlockedExpensesListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlockedExpenseRow"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        metrics:
+          type: object
+          description: Counts keyed by accountingBlockReason. Missing keys mean zero.
+          additionalProperties:
+            type: integer
+      required: [items, total, page, pageSize, metrics]
 
     AccountingDraftResult:
       type: object

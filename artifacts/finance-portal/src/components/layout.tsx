@@ -21,6 +21,8 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth, canAccess, type Section } from "@/lib/auth";
 import { NotificationBell } from "@/components/notification-bell";
+import { useGetBlockedExpensesCount } from "@workspace/api-client-react";
+import { Badge } from "@/components/ui/badge";
 
 const NAV_ITEMS: Array<{
   href: string;
@@ -52,6 +54,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const visible = NAV_ITEMS.filter((item) => canAccess(user?.role, item.section));
 
+  // Task #54 — light-touch sidebar badge so finance sees blocked-queue
+  // depth without opening the page. Endpoint is admin/approver-only;
+  // skip the fetch entirely for submitters.
+  const canSeeBlocked =
+    user?.role === "admin" || user?.role === "approver";
+  const { data: blockedCount } = useGetBlockedExpensesCount({
+    query: {
+      enabled: canSeeBlocked,
+      refetchInterval: 60_000,
+    },
+  });
+  const blockedTotal = blockedCount?.total ?? 0;
+
   const SidebarContent = () => (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       <div className="p-6">
@@ -81,7 +96,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 }`}
               >
                 <item.icon className="h-5 w-5" />
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {item.href === "/accounting" && blockedTotal > 0 && (
+                  <Badge
+                    variant="destructive"
+                    className="h-5 min-w-5 justify-center px-1.5 text-[10px]"
+                    data-testid="badge-nav-blocked-count"
+                  >
+                    {blockedTotal}
+                  </Badge>
+                )}
               </div>
             </Link>
           );

@@ -34,6 +34,7 @@ import AccountingPage from "@/pages/accounting";
 import AccountingCoaPage from "@/pages/accounting-coa";
 import AccountingCoaDetail from "@/pages/accounting-coa-detail";
 import AccountingSettingsPage from "@/pages/accounting-settings";
+import AccountingBlockedExpensesPage from "@/pages/accounting-blocked-expenses";
 import JournalEntriesNewPage from "@/pages/journal-entries-new";
 import JournalEntriesListPage from "@/pages/journal-entries-list";
 import JournalEntryDetailPage from "@/pages/journal-entries-detail";
@@ -119,6 +120,11 @@ function AppRoutes() {
           "/accounting/journal-entry-drafts/:id",
           "accounting",
           JournalEntryDraftDetailPage,
+        )}
+        {route(
+          "/accounting/blocked-expenses",
+          "accounting",
+          AccountingBlockedExpensesPage,
         )}
         {route("/accounting/coa", "accounting", AccountingCoaPage)}
         {route("/accounting/coa/:id", "accounting", AccountingCoaDetail)}

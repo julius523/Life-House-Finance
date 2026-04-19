@@ -2799,6 +2799,212 @@ export const DeleteExpenseCategoryPaymentMethodRuleParams = zod.object({
 });
 
 /**
+ * @summary Task
+ */
+export const listBlockedExpensesQueryPageDefault = 1;
+export const listBlockedExpensesQueryPageSizeDefault = 25;
+
+export const ListBlockedExpensesQueryParams = zod.object({
+  page: zod.coerce.number().default(listBlockedExpensesQueryPageDefault),
+  pageSize: zod.coerce
+    .number()
+    .default(listBlockedExpensesQueryPageSizeDefault),
+});
+
+export const ListBlockedExpensesResponse = zod.object({
+  items: zod.array(
+    zod
+      .object({
+        id: zod.number(),
+        expenseDate: zod.coerce.date(),
+        merchant: zod.string(),
+        amount: zod.number(),
+        submittedBy: zod.string(),
+        submittedByEmail: zod.string().nullish(),
+        programId: zod.number().nullish(),
+        programName: zod.string().nullish(),
+        categoryId: zod.number().nullish(),
+        categoryName: zod.string().nullish(),
+        paymentMethod: zod.enum([
+          "cash",
+          "check",
+          "credit_card",
+          "debit_card",
+          "bank_transfer",
+          "other",
+        ]),
+        accountingBlockReason: zod
+          .enum([
+            "missing_category",
+            "missing_mapping",
+            "archived_account",
+            "non_postable_account",
+            "invalid_payment_method_rule",
+            "other",
+          ])
+          .nullish(),
+        accountingGeneratedAt: zod.coerce.date().nullish(),
+      })
+      .describe(
+        "Task #54 — single row in the blocked-expense review queue. Joins\nin human-readable program \/ category \/ payment-method labels so\nthe page can render without per-row lookups.\n",
+      ),
+  ),
+  total: zod.number(),
+  page: zod.number(),
+  pageSize: zod.number(),
+  metrics: zod
+    .record(zod.string(), zod.number())
+    .describe("Counts keyed by accountingBlockReason. Missing keys mean zero."),
+});
+
+/**
+ * @summary Lightweight count of blocked expenses (used for nav badge)
+ */
+export const GetBlockedExpensesCountResponse = zod.object({
+  total: zod.number(),
+});
+
+/**
+ * @summary Bulk re-run accounting draft generation for the given blocked expense ids
+ */
+export const retryBlockedExpensesBodyExpenseIdsMax = 200;
+
+export const RetryBlockedExpensesBody = zod.object({
+  expenseIds: zod
+    .array(zod.number())
+    .min(1)
+    .max(retryBlockedExpensesBodyExpenseIdsMax),
+});
+
+export const RetryBlockedExpensesResponse = zod.object({
+  results: zod.array(
+    zod.object({
+      expenseId: zod.number(),
+      result: zod
+        .object({
+          ok: zod.boolean(),
+          created: zod.boolean().optional(),
+          manualJournalEntryDraftId: zod.number().optional(),
+          reason: zod
+            .enum([
+              "missing_category",
+              "missing_mapping",
+              "archived_account",
+              "non_postable_account",
+              "invalid_payment_method_rule",
+              "other",
+            ])
+            .optional(),
+          message: zod.string().optional(),
+        })
+        .describe(
+          "Task #52 — outcome of an attempt to bridge an expense (or future\nbill) into a manual journal entry draft. `ok=true` means a draft\nis now linked; `created` distinguishes a brand new draft from\nre-returning an existing one (idempotent retry). `ok=false`\ncarries a stable machine-readable `reason` code.\n",
+        ),
+    }),
+  ),
+});
+
+/**
+ * @summary Flip a blocked expense to accountingStatus='not_applicable' with a required note
+ */
+export const MarkExpenseAccountingNotApplicableParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const markExpenseAccountingNotApplicableBodyNoteMin = 3;
+export const markExpenseAccountingNotApplicableBodyNoteMax = 500;
+
+export const MarkExpenseAccountingNotApplicableBody = zod.object({
+  note: zod
+    .string()
+    .min(markExpenseAccountingNotApplicableBodyNoteMin)
+    .max(markExpenseAccountingNotApplicableBodyNoteMax),
+});
+
+export const MarkExpenseAccountingNotApplicableResponse = zod.object({
+  id: zod.number(),
+  submittedBy: zod.string(),
+  submittedByEmail: zod.string().optional(),
+  expenseDate: zod.coerce.date(),
+  merchant: zod.string(),
+  description: zod.string(),
+  amount: zod.number(),
+  paymentMethod: zod.enum([
+    "cash",
+    "check",
+    "credit_card",
+    "debit_card",
+    "bank_transfer",
+    "other",
+  ]),
+  programId: zod.number().optional(),
+  programName: zod.string().optional(),
+  categoryId: zod.number().nullish(),
+  categoryName: zod
+    .string()
+    .nullish()
+    .describe(
+      "Resolved category display name. Null when categoryId is null (legacy uncategorized expense).",
+    ),
+  status: zod.enum([
+    "draft",
+    "submitted",
+    "approved",
+    "rejected",
+    "reimbursed",
+    "needs_correction",
+  ]),
+  managerApprovedBy: zod.string().optional(),
+  financeApprovedBy: zod.string().optional(),
+  rejectionReason: zod.string().optional(),
+  reimbursedDate: zod.coerce.date().optional(),
+  receiptIds: zod.array(zod.number()).optional(),
+  accountingEntryRef: zod.string().optional(),
+  accountingStatus: zod
+    .enum(["pending", "draft_created", "posted", "blocked", "not_applicable"])
+    .optional()
+    .describe("Task"),
+  accountingBlockReason: zod
+    .enum([
+      "missing_category",
+      "missing_mapping",
+      "archived_account",
+      "non_postable_account",
+      "invalid_payment_method_rule",
+      "other",
+    ])
+    .nullish(),
+  accountingGeneratedAt: zod.coerce.date().nullish(),
+  accountingLink: zod
+    .object({
+      draftId: zod.number().nullish(),
+      draftStatus: zod
+        .enum(["draft", "submitted", "approved", "rejected", "posted"])
+        .nullish(),
+      draftEntryDate: zod.coerce.date().nullish(),
+      draftMemo: zod.string().nullish(),
+      journalEntryId: zod.number().nullish(),
+      journalEntryNo: zod.string().nullish(),
+      journalEntryDate: zod.coerce.date().nullish(),
+      journalEntryStatus: zod.enum(["posted", "reversed"]).nullish(),
+    })
+    .optional()
+    .describe(
+      "Task #53 — populated by the detail endpoint when an\naccounting_source_links row exists for this expense. Lets\nthe UI link out to the generated draft and (once posted)\nthe journal entry without a second round-trip.\n",
+    ),
+  duplicateDismissed: zod
+    .boolean()
+    .optional()
+    .describe("True when the user has confirmed this is not a duplicate."),
+  potentialDuplicateIds: zod
+    .array(zod.number())
+    .optional()
+    .describe("Other expense ids with matching date + amount."),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date().optional(),
+});
+
+/**
  * @summary Open period, unposted drafts, trial balance status, last close
  */
 export const GetAccountingDashboardStatusResponse = zod.object({

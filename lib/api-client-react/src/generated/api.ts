@@ -25,6 +25,7 @@ import type {
   ApprovalQueueItem,
   ApproveExpense200,
   Bill,
+  BlockedExpensesListResponse,
   ChartOfAccountActivityResponse,
   ChartOfAccountDetailResponse,
   ChartOfAccountListResponse,
@@ -53,6 +54,7 @@ import type {
   ExpenseCategoryResponse,
   ExpenseListResponse,
   FinancialSummaryReport,
+  GetBlockedExpensesCount200,
   GetChartOfAccountActivityParams,
   GetFinancialSummaryReportParams,
   GetProgramSpendingParams,
@@ -65,6 +67,7 @@ import type {
   LinkTransactionToProgramBody,
   ListApprovalsParams,
   ListBillsParams,
+  ListBlockedExpensesParams,
   ListChartOfAccountsParams,
   ListExpenseCategoriesParams,
   ListExpensesParams,
@@ -74,6 +77,7 @@ import type {
   ListTransactionsParams,
   ListVendorsParams,
   MarkAllNotificationsRead200,
+  MarkExpenseAccountingNotApplicableBody,
   MissingReceiptItem,
   MonthEndChecklist,
   Notification,
@@ -90,6 +94,8 @@ import type {
   RejectionBody,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
+  RetryBlockedExpenses200,
+  RetryBlockedExpensesBody,
   SpendingByDimension,
   Transaction,
   TransactionListResponse,
@@ -6223,6 +6229,368 @@ export const useDeleteExpenseCategoryPaymentMethodRule = <
 > => {
   return useMutation(
     getDeleteExpenseCategoryPaymentMethodRuleMutationOptions(options),
+  );
+};
+
+/**
+ * @summary Task
+ */
+export const getListBlockedExpensesUrl = (
+  params?: ListBlockedExpensesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/accounting/blocked-expenses?${stringifiedParams}`
+    : `/api/accounting/blocked-expenses`;
+};
+
+export const listBlockedExpenses = async (
+  params?: ListBlockedExpensesParams,
+  options?: RequestInit,
+): Promise<BlockedExpensesListResponse> => {
+  return customFetch<BlockedExpensesListResponse>(
+    getListBlockedExpensesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListBlockedExpensesQueryKey = (
+  params?: ListBlockedExpensesParams,
+) => {
+  return [
+    `/api/accounting/blocked-expenses`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListBlockedExpensesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listBlockedExpenses>>,
+  TError = ErrorType<void>,
+>(
+  params?: ListBlockedExpensesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listBlockedExpenses>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListBlockedExpensesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listBlockedExpenses>>
+  > = ({ signal }) =>
+    listBlockedExpenses(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listBlockedExpenses>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListBlockedExpensesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listBlockedExpenses>>
+>;
+export type ListBlockedExpensesQueryError = ErrorType<void>;
+
+/**
+ * @summary Task
+ */
+
+export function useListBlockedExpenses<
+  TData = Awaited<ReturnType<typeof listBlockedExpenses>>,
+  TError = ErrorType<void>,
+>(
+  params?: ListBlockedExpensesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listBlockedExpenses>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListBlockedExpensesQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Lightweight count of blocked expenses (used for nav badge)
+ */
+export const getGetBlockedExpensesCountUrl = () => {
+  return `/api/accounting/blocked-expenses/count`;
+};
+
+export const getBlockedExpensesCount = async (
+  options?: RequestInit,
+): Promise<GetBlockedExpensesCount200> => {
+  return customFetch<GetBlockedExpensesCount200>(
+    getGetBlockedExpensesCountUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetBlockedExpensesCountQueryKey = () => {
+  return [`/api/accounting/blocked-expenses/count`] as const;
+};
+
+export const getGetBlockedExpensesCountQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBlockedExpensesCount>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBlockedExpensesCount>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetBlockedExpensesCountQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBlockedExpensesCount>>
+  > = ({ signal }) => getBlockedExpensesCount({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBlockedExpensesCount>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBlockedExpensesCountQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBlockedExpensesCount>>
+>;
+export type GetBlockedExpensesCountQueryError = ErrorType<void>;
+
+/**
+ * @summary Lightweight count of blocked expenses (used for nav badge)
+ */
+
+export function useGetBlockedExpensesCount<
+  TData = Awaited<ReturnType<typeof getBlockedExpensesCount>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBlockedExpensesCount>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBlockedExpensesCountQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Bulk re-run accounting draft generation for the given blocked expense ids
+ */
+export const getRetryBlockedExpensesUrl = () => {
+  return `/api/accounting/blocked-expenses/retry`;
+};
+
+export const retryBlockedExpenses = async (
+  retryBlockedExpensesBody: RetryBlockedExpensesBody,
+  options?: RequestInit,
+): Promise<RetryBlockedExpenses200> => {
+  return customFetch<RetryBlockedExpenses200>(getRetryBlockedExpensesUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(retryBlockedExpensesBody),
+  });
+};
+
+export const getRetryBlockedExpensesMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof retryBlockedExpenses>>,
+    TError,
+    { data: BodyType<RetryBlockedExpensesBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof retryBlockedExpenses>>,
+  TError,
+  { data: BodyType<RetryBlockedExpensesBody> },
+  TContext
+> => {
+  const mutationKey = ["retryBlockedExpenses"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof retryBlockedExpenses>>,
+    { data: BodyType<RetryBlockedExpensesBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return retryBlockedExpenses(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RetryBlockedExpensesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof retryBlockedExpenses>>
+>;
+export type RetryBlockedExpensesMutationBody =
+  BodyType<RetryBlockedExpensesBody>;
+export type RetryBlockedExpensesMutationError = ErrorType<void>;
+
+/**
+ * @summary Bulk re-run accounting draft generation for the given blocked expense ids
+ */
+export const useRetryBlockedExpenses = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof retryBlockedExpenses>>,
+    TError,
+    { data: BodyType<RetryBlockedExpensesBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof retryBlockedExpenses>>,
+  TError,
+  { data: BodyType<RetryBlockedExpensesBody> },
+  TContext
+> => {
+  return useMutation(getRetryBlockedExpensesMutationOptions(options));
+};
+
+/**
+ * @summary Flip a blocked expense to accountingStatus='not_applicable' with a required note
+ */
+export const getMarkExpenseAccountingNotApplicableUrl = (id: number) => {
+  return `/api/expenses/${id}/mark-accounting-not-applicable`;
+};
+
+export const markExpenseAccountingNotApplicable = async (
+  id: number,
+  markExpenseAccountingNotApplicableBody: MarkExpenseAccountingNotApplicableBody,
+  options?: RequestInit,
+): Promise<Expense> => {
+  return customFetch<Expense>(getMarkExpenseAccountingNotApplicableUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(markExpenseAccountingNotApplicableBody),
+  });
+};
+
+export const getMarkExpenseAccountingNotApplicableMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markExpenseAccountingNotApplicable>>,
+    TError,
+    { id: number; data: BodyType<MarkExpenseAccountingNotApplicableBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof markExpenseAccountingNotApplicable>>,
+  TError,
+  { id: number; data: BodyType<MarkExpenseAccountingNotApplicableBody> },
+  TContext
+> => {
+  const mutationKey = ["markExpenseAccountingNotApplicable"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof markExpenseAccountingNotApplicable>>,
+    { id: number; data: BodyType<MarkExpenseAccountingNotApplicableBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return markExpenseAccountingNotApplicable(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MarkExpenseAccountingNotApplicableMutationResult = NonNullable<
+  Awaited<ReturnType<typeof markExpenseAccountingNotApplicable>>
+>;
+export type MarkExpenseAccountingNotApplicableMutationBody =
+  BodyType<MarkExpenseAccountingNotApplicableBody>;
+export type MarkExpenseAccountingNotApplicableMutationError = ErrorType<void>;
+
+/**
+ * @summary Flip a blocked expense to accountingStatus='not_applicable' with a required note
+ */
+export const useMarkExpenseAccountingNotApplicable = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markExpenseAccountingNotApplicable>>,
+    TError,
+    { id: number; data: BodyType<MarkExpenseAccountingNotApplicableBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof markExpenseAccountingNotApplicable>>,
+  TError,
+  { id: number; data: BodyType<MarkExpenseAccountingNotApplicableBody> },
+  TContext
+> => {
+  return useMutation(
+    getMarkExpenseAccountingNotApplicableMutationOptions(options),
   );
 };
 

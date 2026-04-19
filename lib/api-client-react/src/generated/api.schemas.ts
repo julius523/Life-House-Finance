@@ -64,6 +64,67 @@ export interface PendingApprovalsCount {
   total: number;
 }
 
+export type BlockedExpenseRowPaymentMethod =
+  (typeof BlockedExpenseRowPaymentMethod)[keyof typeof BlockedExpenseRowPaymentMethod];
+
+export const BlockedExpenseRowPaymentMethod = {
+  cash: "cash",
+  check: "check",
+  credit_card: "credit_card",
+  debit_card: "debit_card",
+  bank_transfer: "bank_transfer",
+  other: "other",
+} as const;
+
+export type BlockedExpenseRowAccountingBlockReason =
+  | (typeof BlockedExpenseRowAccountingBlockReason)[keyof typeof BlockedExpenseRowAccountingBlockReason]
+  | null;
+
+export const BlockedExpenseRowAccountingBlockReason = {
+  missing_category: "missing_category",
+  missing_mapping: "missing_mapping",
+  archived_account: "archived_account",
+  non_postable_account: "non_postable_account",
+  invalid_payment_method_rule: "invalid_payment_method_rule",
+  other: "other",
+} as const;
+
+/**
+ * Task #54 — single row in the blocked-expense review queue. Joins
+in human-readable program / category / payment-method labels so
+the page can render without per-row lookups.
+
+ */
+export interface BlockedExpenseRow {
+  id: number;
+  expenseDate: string;
+  merchant: string;
+  amount: number;
+  submittedBy: string;
+  submittedByEmail?: string | null;
+  programId?: number | null;
+  programName?: string | null;
+  categoryId?: number | null;
+  categoryName?: string | null;
+  paymentMethod: BlockedExpenseRowPaymentMethod;
+  accountingBlockReason?: BlockedExpenseRowAccountingBlockReason;
+  accountingGeneratedAt?: string | null;
+}
+
+/**
+ * Counts keyed by accountingBlockReason. Missing keys mean zero.
+ */
+export type BlockedExpensesListResponseMetrics = { [key: string]: number };
+
+export interface BlockedExpensesListResponse {
+  items: BlockedExpenseRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Counts keyed by accountingBlockReason. Missing keys mean zero. */
+  metrics: BlockedExpensesListResponseMetrics;
+}
+
 export type AccountingDraftResultReason =
   (typeof AccountingDraftResultReason)[keyof typeof AccountingDraftResultReason];
 
@@ -1503,6 +1564,40 @@ export const ListExpenseCategoriesIncludeInactive = {
   true: "true",
   false: "false",
 } as const;
+
+export type ListBlockedExpensesParams = {
+  page?: number;
+  pageSize?: number;
+};
+
+export type GetBlockedExpensesCount200 = {
+  total: number;
+};
+
+export type RetryBlockedExpensesBody = {
+  /**
+   * @minItems 1
+   * @maxItems 200
+   */
+  expenseIds: number[];
+};
+
+export type RetryBlockedExpenses200ResultsItem = {
+  expenseId: number;
+  result: AccountingDraftResult;
+};
+
+export type RetryBlockedExpenses200 = {
+  results: RetryBlockedExpenses200ResultsItem[];
+};
+
+export type MarkExpenseAccountingNotApplicableBody = {
+  /**
+   * @minLength 3
+   * @maxLength 500
+   */
+  note: string;
+};
 
 export type ListNotificationsParams = {
   unreadOnly?: boolean;
