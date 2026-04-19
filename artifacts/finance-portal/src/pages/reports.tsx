@@ -162,6 +162,8 @@ const PER_ENTRY_CHECK_LABELS: Record<string, string> = {
   je_missing_account: "Missing account mapping",
   je_zero_lines: "No lines",
   je_invalid_line_amount: "Non-positive line amount",
+  je_archived_account: "Archived account referenced",
+  je_non_postable_account: "Non-postable account referenced",
 };
 
 /**
@@ -179,6 +181,8 @@ function remediationLinkForCheck(
     je_unbalanced: "unbalanced_entry",
     je_missing_account: "missing_account",
     je_invalid_line_amount: "invalid_line_amount",
+    je_archived_account: "archived_account",
+    je_non_postable_account: "non_postable_account",
   };
   const code = map[checkCode];
   if (!code) return null;

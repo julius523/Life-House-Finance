@@ -2649,6 +2649,8 @@ export const GetReconciliationReportResponse = zod.object({
               "je_missing_account",
               "je_zero_lines",
               "je_invalid_line_amount",
+              "je_archived_account",
+              "je_non_postable_account",
             ]),
             status: zod.enum(["fail"]),
             deltaCents: zod

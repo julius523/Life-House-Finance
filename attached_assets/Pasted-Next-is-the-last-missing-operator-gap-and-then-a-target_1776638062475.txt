@@ -1,0 +1,121 @@
+Next is the last missing operator gap and then a targeted integrity expansion.
+
+What shipped in this slice
+
+You finished:
+
+* posted-row action menu
+* posted remediation dialog
+* both corrective paths
+* note validation
+* error mapping fixes
+* partial-success recovery
+* cache invalidation for new entries
+* the two small cleanup items
+
+That means the core remediation workflow is now usable.
+
+What is next
+
+1. Expand per-entry integrity so remediation deep links actually light up
+
+Right now the Reports deep links exist, but they do not show up for archived/non-postable account references because the per-entry integrity engine is only flagging:
+
+* unbalanced entries
+* missing account
+* zero lines
+* invalid line amounts
+
+That is the next real gap.
+
+Builder-ready revision for the next slice
+
+Extend the reconciliation per-entry engine to also emit stable failure codes for posted JEs with:
+
+* je_archived_account
+* je_non_postable_account
+
+Acceptance criteria
+
+* /reports/reconciliation includes those failures in perEntry.failures
+* affected rows render on the Reports page
+* each row shows the existing Remediate deep link
+* clicking the link lands on /accounting/remediation with the right filters/state
+* the remediation queue already knows how to handle posted rows, so no new queue workflow is needed
+
+Backend rules
+
+For every posted/reversed JE in the date window:
+
+* if any linked CoA account is archived, emit je_archived_account
+* if any linked CoA account is non-postable where posting is invalid, emit je_non_postable_account
+
+Keep them line-level aware in the payload where possible:
+
+* journalEntryId
+* entryNumber
+* failureCode
+* lineIndex if available
+* accountId
+* accountCode
+* accountName
+* short human-readable detail
+
+Do not roll these into generic other. Stable codes matter.
+
+UI rules
+
+On the Reconciliation card:
+
+* render these failures in the same Per-entry integrity table
+* label them clearly
+* preserve the existing Remediate link behavior
+
+⸻
+
+2. Then add the posted-entry corrective dialog to the queue row detail context
+
+This is polish, not blocker.
+
+The dialog works, but the next revision should improve context by showing:
+
+* originating expense or bill summary if linked
+* source link chips
+* period lock status
+* whether the corrective action will create:
+    * reversal + replacement draft, or
+    * adjusting JE
+
+This reduces finance-user hesitation and bad clicks.
+
+⸻
+
+3. Then add regression coverage for the contracts you just hardened
+
+You fixed real behavior that can regress easily.
+
+Add tests for:
+
+* typed-client error parsing via err.data
+* reversal succeeds / replacement fails → dialog stays open
+* new replacement or adjusting entry id is invalidated
+* forbidden → 403-specific message
+* period lock → 409-specific message
+* required note enforcement
+
+That is boring work. Also exactly the work that saves you from future nonsense.
+
+⸻
+
+Recommended exact order
+
+1. Per-entry integrity expansion for archived/non-postable accounts
+2. Reports deep-link validation end-to-end
+3. Posted dialog context polish
+4. Regression tests for the remediation dialog
+
+One-line task framing
+
+Task #67 — Reconciliation integrity expansion for archived/non-postable posted accounts, with live remediation deep links.
+
+That is the clean next move.

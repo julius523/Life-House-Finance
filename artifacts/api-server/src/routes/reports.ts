@@ -1277,6 +1277,17 @@ router.get("/reports/reconciliation", async (req, res): Promise<void> => {
       creditsCents: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
       missingAccountLineCount: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.id} is not null and ${chartOfAccountsTable.id} is null then 1 else 0 end), 0)::int`,
       invalidAmountLineCount: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.id} is not null and ${journalEntryLinesTable.amountCents} <= 0 then 1 else 0 end), 0)::int`,
+      // Archived account: linked CoA exists but is_active = false. We
+      // consider this a separate failure mode from missing_account so the
+      // remediation queue can offer the right deep link (the operator
+      // needs to repoint these lines to a different active account, not
+      // pick "any" account from a missing reference).
+      archivedAccountLineCount: sql<number>`coalesce(sum(case when ${chartOfAccountsTable.id} is not null and ${chartOfAccountsTable.isActive} = false then 1 else 0 end), 0)::int`,
+      // Non-postable account: linked CoA exists, is active, but
+      // allow_manual_posting = false (e.g. system roll-up accounts that
+      // should never carry direct postings). These are valid lookups but
+      // structurally invalid postings and need a corrective action.
+      nonPostableAccountLineCount: sql<number>`coalesce(sum(case when ${chartOfAccountsTable.id} is not null and ${chartOfAccountsTable.isActive} = true and ${chartOfAccountsTable.allowManualPosting} = false then 1 else 0 end), 0)::int`,
     })
     .from(journalEntriesTable)
     .leftJoin(
@@ -1298,7 +1309,9 @@ router.get("/reports/reconciliation", async (req, res): Promise<void> => {
     | "je_unbalanced"
     | "je_missing_account"
     | "je_zero_lines"
-    | "je_invalid_line_amount";
+    | "je_invalid_line_amount"
+    | "je_archived_account"
+    | "je_non_postable_account";
 
   type PerEntryFailure = {
     journalEntryId: number;
@@ -1319,6 +1332,8 @@ router.get("/reports/reconciliation", async (req, res): Promise<void> => {
     const credits = Number(row.creditsCents);
     const missing = Number(row.missingAccountLineCount);
     const badAmount = Number(row.invalidAmountLineCount);
+    const archived = Number(row.archivedAccountLineCount);
+    const nonPostable = Number(row.nonPostableAccountLineCount);
     const base = {
       journalEntryId: row.journalEntryId,
       entryNumber: row.entryNo,
@@ -1367,6 +1382,28 @@ router.get("/reports/reconciliation", async (req, res): Promise<void> => {
           badAmount === 1
             ? "1 line has a non-positive amount."
             : `${badAmount} lines have a non-positive amount.`,
+      });
+    }
+    if (archived > 0) {
+      failingEntries.push({
+        ...base,
+        checkCode: "je_archived_account",
+        deltaCents: null,
+        shortMessage:
+          archived === 1
+            ? "1 line references an archived account."
+            : `${archived} lines reference an archived account.`,
+      });
+    }
+    if (nonPostable > 0) {
+      failingEntries.push({
+        ...base,
+        checkCode: "je_non_postable_account",
+        deltaCents: null,
+        shortMessage:
+          nonPostable === 1
+            ? "1 line references a non-postable account."
+            : `${nonPostable} lines reference a non-postable account.`,
       });
     }
   }
