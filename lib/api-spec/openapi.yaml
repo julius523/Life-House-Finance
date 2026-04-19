@@ -30,6 +30,8 @@ tags:
     description: Month-end close checklists
   - name: notifications
     description: In-app notifications for the current user
+  - name: accounting
+    description: Chart of Accounts, accounting settings, and ledger status
 
 paths:
   /healthz:
@@ -1107,6 +1109,15 @@ paths:
           schema:
             type: string
             format: date
+        - name: source
+          in: query
+          description: |
+            `operational` (default) computes P&L and Balance Sheet from
+            expenses/bills/transactions. `ledger` recomputes them from posted
+            journal_entry_lines aggregated by Chart-of-Accounts type.
+          schema:
+            type: string
+            enum: [operational, ledger]
       responses:
         "200":
           description: Financial summary report
@@ -1114,6 +1125,188 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FinancialSummaryReport"
+
+  /reports/trial-balance:
+    get:
+      operationId: getTrialBalanceReport
+      tags: [reports]
+      summary: Trial Balance — debits/credits per account over a date range
+      parameters:
+        - name: fromDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: toDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: from
+          in: query
+          description: Alias for fromDate.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: Alias for toDate.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Trial Balance report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrialBalanceReport"
+
+  /accounting/chart-of-accounts:
+    get:
+      operationId: listChartOfAccounts
+      tags: [accounting]
+      summary: List Chart of Accounts
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            $ref: "#/components/schemas/ChartOfAccountType"
+        - name: includeArchived
+          in: query
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        "200":
+          description: Chart of Accounts list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChartOfAccountListResponse"
+    post:
+      operationId: createChartOfAccount
+      tags: [accounting]
+      summary: Create a new Chart of Accounts row (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChartOfAccountBody"
+      responses:
+        "201":
+          description: Created account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChartOfAccountResponse"
+
+  /accounting/chart-of-accounts/{id}:
+    get:
+      operationId: getChartOfAccount
+      tags: [accounting]
+      summary: Get Chart of Accounts row by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Account detail with usage count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChartOfAccountDetailResponse"
+    patch:
+      operationId: updateChartOfAccount
+      tags: [accounting]
+      summary: Update a Chart of Accounts row (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChartOfAccountBody"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChartOfAccountResponse"
+    delete:
+      operationId: deleteChartOfAccount
+      tags: [accounting]
+      summary: Delete an unused Chart of Accounts row (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteChartOfAccountResponse"
+
+  /accounting/settings:
+    get:
+      operationId: getAccountingSettings
+      tags: [accounting]
+      summary: Get the singleton accounting settings row (admin only)
+      responses:
+        "200":
+          description: Accounting settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountingSettingsResponse"
+    patch:
+      operationId: updateAccountingSettings
+      tags: [accounting]
+      summary: Update accounting settings (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAccountingSettingsBody"
+      responses:
+        "200":
+          description: Updated accounting settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountingSettingsResponse"
+
+  /accounting/dashboard-status:
+    get:
+      operationId: getAccountingDashboardStatus
+      tags: [accounting]
+      summary: Open period, unposted drafts, trial balance status, last close
+      responses:
+        "200":
+          description: Accounting status block for the dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountingDashboardStatus"
 
   /month-end:
     get:
@@ -2490,3 +2683,370 @@ components:
       required:
         - items
         - unreadCount
+
+    ChartOfAccountType:
+      type: string
+      enum:
+        - asset
+        - liability
+        - equity
+        - revenue
+        - expense
+        - contra_asset
+        - contra_liability
+        - contra_revenue
+        - other
+
+    ChartOfAccountNormalBalance:
+      type: string
+      enum: [debit, credit]
+
+    ChartOfAccount:
+      type: object
+      properties:
+        id:
+          type: integer
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        type:
+          $ref: "#/components/schemas/ChartOfAccountType"
+        subtype:
+          type: string
+          nullable: true
+        normalBalance:
+          $ref: "#/components/schemas/ChartOfAccountNormalBalance"
+        parentAccountId:
+          type: integer
+          nullable: true
+        isActive:
+          type: boolean
+        isSystem:
+          type: boolean
+        allowManualPosting:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - code
+        - name
+        - type
+        - normalBalance
+        - isActive
+        - isSystem
+        - allowManualPosting
+
+    ChartOfAccountListResponse:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChartOfAccount"
+      required: [accounts]
+
+    ChartOfAccountResponse:
+      type: object
+      properties:
+        account:
+          $ref: "#/components/schemas/ChartOfAccount"
+      required: [account]
+
+    ChartOfAccountDetailResponse:
+      type: object
+      properties:
+        account:
+          $ref: "#/components/schemas/ChartOfAccount"
+        usageCount:
+          type: integer
+      required: [account, usageCount]
+
+    CreateChartOfAccountBody:
+      type: object
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        type:
+          $ref: "#/components/schemas/ChartOfAccountType"
+        subtype:
+          type: string
+          nullable: true
+        normalBalance:
+          $ref: "#/components/schemas/ChartOfAccountNormalBalance"
+        parentAccountId:
+          type: integer
+          nullable: true
+        isActive:
+          type: boolean
+        allowManualPosting:
+          type: boolean
+      required:
+        - code
+        - name
+        - type
+        - normalBalance
+
+    UpdateChartOfAccountBody:
+      type: object
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        type:
+          $ref: "#/components/schemas/ChartOfAccountType"
+        subtype:
+          type: string
+          nullable: true
+        normalBalance:
+          $ref: "#/components/schemas/ChartOfAccountNormalBalance"
+        parentAccountId:
+          type: integer
+          nullable: true
+        isActive:
+          type: boolean
+        allowManualPosting:
+          type: boolean
+
+    DeleteChartOfAccountResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        id:
+          type: integer
+      required: [ok, id]
+
+    AccountingSettings:
+      type: object
+      properties:
+        id:
+          type: integer
+        accountingMethod:
+          type: string
+          enum: [cash, accrual]
+        separationOfDuties:
+          type: boolean
+        defaultCashAccountId:
+          type: integer
+          nullable: true
+        defaultApAccountId:
+          type: integer
+          nullable: true
+        defaultArAccountId:
+          type: integer
+          nullable: true
+        defaultExpenseClearingAccountId:
+          type: integer
+          nullable: true
+        defaultRoundingAccountId:
+          type: integer
+          nullable: true
+        receiptRequiredOverCents:
+          type: integer
+        periodCloseRequiresAdmin:
+          type: boolean
+        updatedAt:
+          type: string
+          format: date-time
+        updatedByUserId:
+          type: integer
+          nullable: true
+      required:
+        - id
+        - accountingMethod
+        - separationOfDuties
+        - receiptRequiredOverCents
+        - periodCloseRequiresAdmin
+
+    AccountingSettingsResponse:
+      type: object
+      properties:
+        settings:
+          $ref: "#/components/schemas/AccountingSettings"
+      required: [settings]
+
+    UpdateAccountingSettingsBody:
+      type: object
+      properties:
+        accountingMethod:
+          type: string
+          enum: [cash, accrual]
+        separationOfDuties:
+          type: boolean
+        defaultCashAccountId:
+          type: integer
+          nullable: true
+        defaultApAccountId:
+          type: integer
+          nullable: true
+        defaultArAccountId:
+          type: integer
+          nullable: true
+        defaultExpenseClearingAccountId:
+          type: integer
+          nullable: true
+        defaultRoundingAccountId:
+          type: integer
+          nullable: true
+        receiptRequiredOverCents:
+          type: integer
+        periodCloseRequiresAdmin:
+          type: boolean
+
+    TrialBalanceRow:
+      type: object
+      properties:
+        accountId:
+          type: integer
+          nullable: true
+        code:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          nullable: true
+        subtype:
+          type: string
+          nullable: true
+        normalBalance:
+          type: string
+          enum: [debit, credit]
+          nullable: true
+        isActive:
+          type: boolean
+        debits:
+          type: string
+          description: Debit total formatted as a fixed-2 decimal string.
+        credits:
+          type: string
+          description: Credit total formatted as a fixed-2 decimal string.
+        balance:
+          type: string
+          description: Net balance on the account's normal side, fixed-2 decimal.
+        balanceSide:
+          type: string
+          enum: [debit, credit]
+          nullable: true
+      required:
+        - accountId
+        - code
+        - name
+        - type
+        - subtype
+        - normalBalance
+        - isActive
+        - debits
+        - credits
+        - balance
+        - balanceSide
+
+    TrialBalanceTotals:
+      type: object
+      properties:
+        debits:
+          type: string
+        credits:
+          type: string
+        balanced:
+          type: boolean
+        differenceCents:
+          type: integer
+      required: [debits, credits, balanced, differenceCents]
+
+    TrialBalanceReport:
+      type: object
+      properties:
+        fromDate:
+          type: string
+          format: date
+          nullable: true
+        toDate:
+          type: string
+          format: date
+          nullable: true
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrialBalanceRow"
+        totals:
+          $ref: "#/components/schemas/TrialBalanceTotals"
+      required: [fromDate, toDate, rows, totals]
+
+    AccountingDashboardOpenPeriod:
+      type: object
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+      required: [id, label, startDate, endDate]
+
+    AccountingDashboardLastClosedPeriod:
+      type: object
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        endDate:
+          type: string
+          format: date
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, label, endDate]
+
+    AccountingDashboardStatus:
+      type: object
+      properties:
+        openPeriod:
+          allOf:
+            - $ref: "#/components/schemas/AccountingDashboardOpenPeriod"
+          nullable: true
+        unpostedDrafts:
+          type: object
+          properties:
+            count:
+              type: integer
+          required: [count]
+        trialBalanceStatus:
+          type: object
+          properties:
+            debitsCents:
+              type: integer
+            creditsCents:
+              type: integer
+            inBalance:
+              type: boolean
+          required: [debitsCents, creditsCents, inBalance]
+        lastClosedPeriod:
+          allOf:
+            - $ref: "#/components/schemas/AccountingDashboardLastClosedPeriod"
+          nullable: true
+      required: [openPeriod, unpostedDrafts, trialBalanceStatus, lastClosedPeriod]

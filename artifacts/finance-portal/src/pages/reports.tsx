@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { useGetFinancialSummaryReport } from "@workspace/api-client-react";
+import { useMemo, useState } from "react";
+import {
+  useGetFinancialSummaryReport,
+  useGetTrialBalanceReport,
+} from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,31 +35,6 @@ type SectionKey =
   | "missingReceipts"
   | "topVendors"
   | "bank";
-
-type TrialBalanceRow = {
-  accountId: number | null;
-  code: string;
-  name: string;
-  type: string | null;
-  subtype: string | null;
-  normalBalance: "debit" | "credit" | null;
-  isActive: boolean;
-  debits: string;
-  credits: string;
-  balance: string;
-  balanceSide: "debit" | "credit" | null;
-};
-type TrialBalanceResponse = {
-  fromDate: string | null;
-  toDate: string | null;
-  rows: TrialBalanceRow[];
-  totals: {
-    debits: string;
-    credits: string;
-    balanced: boolean;
-    differenceCents: number;
-  };
-};
 
 export default function ReportsPage() {
   const today = new Date().toISOString().split("T")[0]!;
@@ -164,56 +142,31 @@ export default function ReportsPage() {
     fromDate,
     toDate,
   });
-  // Ledger fetch (raw — typed hook does not yet accept the `source` param).
-  const [ledgerData, setLedgerData] = useState<typeof opData | null>(null);
-  const [ledgerLoading, setLedgerLoading] = useState(false);
-  const [ledgerError, setLedgerError] = useState<string | null>(null);
-  useEffect(() => {
-    if (source !== "ledger") return;
-    let cancelled = false;
-    setLedgerLoading(true);
-    setLedgerError(null);
-    const params = new URLSearchParams({
-      fromDate,
-      toDate,
-      source: "ledger",
-    });
-    fetch(
-      `${import.meta.env.BASE_URL}api/reports/financial-summary?${params}`,
-      { credentials: "include" },
-    )
-      .then(async (r) => {
-        if (!r.ok) {
-          const text = await r.text().catch(() => "");
-          throw new Error(`Ledger fetch failed (${r.status}) ${text.slice(0, 200)}`);
-        }
-        return r.json();
-      })
-      .then((j) => {
-        if (!cancelled) setLedgerData(j);
-      })
-      .catch((err) => {
-        if (!cancelled) setLedgerError(String(err?.message ?? err));
-      })
-      .finally(() => {
-        if (!cancelled) setLedgerLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [source, fromDate, toDate]);
+  const {
+    data: ledgerData,
+    isLoading: ledgerLoading,
+    error: ledgerErrorObj,
+  } = useGetFinancialSummaryReport(
+    { fromDate, toDate, source: "ledger" },
+    { query: { enabled: source === "ledger" } },
+  );
+  const ledgerError = ledgerErrorObj
+    ? String((ledgerErrorObj as Error)?.message ?? ledgerErrorObj)
+    : null;
   const data = source === "ledger" ? ledgerData ?? opData : opData;
   const isLoading =
     source === "ledger"
       ? ledgerLoading && !ledgerData && !ledgerError
       : opLoading;
 
-  // Step 9: Trial Balance is fetched directly because the typed client hasn't
-  // been regenerated yet — once the OpenAPI spec is bumped this can move
-  // behind a useGetTrialBalanceReport hook for parity with the others.
-  const [tb, setTb] = useState<TrialBalanceResponse | null>(null);
-  const [tbLoading, setTbLoading] = useState(false);
-  const [tbError, setTbError] = useState<string | null>(null);
+  const {
+    data: tb,
+    isLoading: tbLoading,
+    error: tbErrorObj,
+  } = useGetTrialBalanceReport({ fromDate, toDate });
+  const tbError = tbErrorObj
+    ? String((tbErrorObj as Error)?.message ?? tbErrorObj)
+    : null;
   type TbSortKey = "code" | "name" | "type" | "debits" | "credits" | "balance";
   const [tbSort, setTbSort] = useState<{ key: TbSortKey; dir: "asc" | "desc" }>({
     key: "code",
@@ -241,34 +194,6 @@ export default function ReportsPage() {
     });
     return rows;
   }, [tb, tbSort]);
-  useEffect(() => {
-    let cancelled = false;
-    setTbLoading(true);
-    setTbError(null);
-    const params = new URLSearchParams();
-    if (fromDate) params.set("fromDate", fromDate);
-    if (toDate) params.set("toDate", toDate);
-    fetch(`${import.meta.env.BASE_URL}api/reports/trial-balance?${params}`, {
-      credentials: "include",
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((j: TrialBalanceResponse) => {
-        if (!cancelled) setTb(j);
-      })
-      .catch((e: Error) => {
-        if (!cancelled) setTbError(e.message);
-      })
-      .finally(() => {
-        if (!cancelled) setTbLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [fromDate, toDate]);
-
   const downloadTrialBalanceCsv = () => {
     if (!tb) return;
     const header = [

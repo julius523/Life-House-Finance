@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Card,
   CardContent,
@@ -27,7 +28,15 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { apiJson } from "@/lib/api";
+import {
+  useListChartOfAccounts,
+  useCreateChartOfAccount,
+  useUpdateChartOfAccount,
+  getListChartOfAccountsQueryKey,
+  type ChartOfAccount,
+  type ChartOfAccountType,
+  type ChartOfAccountNormalBalance,
+} from "@workspace/api-client-react";
 import { Plus, Pencil, Archive, ArchiveRestore, Eye } from "lucide-react";
 import { Link } from "wouter";
 import {
@@ -41,45 +50,22 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-type Account = {
-  id: number;
-  code: string;
-  name: string;
-  description: string | null;
-  type:
-    | "asset"
-    | "liability"
-    | "equity"
-    | "revenue"
-    | "expense"
-    | "contra_asset"
-    | "contra_liability"
-    | "contra_revenue"
-    | "other";
-  subtype: string | null;
-  normalBalance: "debit" | "credit";
-  parentAccountId: number | null;
-  isActive: boolean;
-  isSystem: boolean;
-  allowManualPosting: boolean;
-};
-
-const TYPES: Account["type"][] = [
+const TYPES: ChartOfAccountType[] = [
   "asset",
   "liability",
   "equity",
   "revenue",
   "expense",
 ];
-const NORMALS: Account["normalBalance"][] = ["debit", "credit"];
+const NORMALS: ChartOfAccountNormalBalance[] = ["debit", "credit"];
 
 const DEFAULT_FORM = {
   code: "",
   name: "",
   description: "",
-  type: "expense" as Account["type"],
+  type: "expense" as ChartOfAccountType,
   subtype: "",
-  normalBalance: "debit" as Account["normalBalance"],
+  normalBalance: "debit" as ChartOfAccountNormalBalance,
   isActive: true,
   allowManualPosting: true,
 };
@@ -87,42 +73,92 @@ const DEFAULT_FORM = {
 export default function AccountingCoaPage() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const isAdmin = user?.role === "admin";
 
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [loading, setLoading] = useState(true);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<"all" | Account["type"]>("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | ChartOfAccountType>(
+    "all",
+  );
 
-  const [editing, setEditing] = useState<Account | null>(null);
+  const [editing, setEditing] = useState<ChartOfAccount | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(DEFAULT_FORM);
-  const [saving, setSaving] = useState(false);
 
-  async function load() {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (includeArchived) params.set("includeArchived", "true");
-      const res = await apiJson<{ accounts: Account[] }>(
-        `/accounting/chart-of-accounts?${params}`,
-      );
-      setAccounts(res.accounts);
-    } catch (err) {
+  const listParams = includeArchived ? { includeArchived: "true" as const } : {};
+  const {
+    data: listData,
+    isLoading: loading,
+    error: loadError,
+  } = useListChartOfAccounts(listParams);
+  const accounts = listData?.accounts ?? [];
+
+  const invalidateLists = () =>
+    queryClient.invalidateQueries({
+      queryKey: [getListChartOfAccountsQueryKey()[0]],
+    });
+
+  const createMutation = useCreateChartOfAccount({
+    mutation: {
+      onSuccess: () => {
+        invalidateLists();
+        toast({ title: "Account created" });
+        closeDialog();
+      },
+      onError: (err) =>
+        toast({
+          variant: "destructive",
+          title: "Save failed",
+          description: String((err as Error)?.message ?? err),
+        }),
+    },
+  });
+  const updateMutation = useUpdateChartOfAccount({
+    mutation: {
+      onSuccess: () => {
+        invalidateLists();
+        toast({ title: "Account updated" });
+        closeDialog();
+      },
+      onError: (err) =>
+        toast({
+          variant: "destructive",
+          title: "Save failed",
+          description: String((err as Error)?.message ?? err),
+        }),
+    },
+  });
+  const archiveMutation = useUpdateChartOfAccount({
+    mutation: {
+      onSuccess: (_d, vars) => {
+        invalidateLists();
+        toast({
+          title: vars.data.isActive ? "Account restored" : "Account archived",
+        });
+        setArchiveTarget(null);
+      },
+      onError: (err) => {
+        toast({
+          variant: "destructive",
+          title: "Update failed",
+          description: String((err as Error)?.message ?? err),
+        });
+        setArchiveTarget(null);
+      },
+    },
+  });
+  const saving = createMutation.isPending || updateMutation.isPending;
+
+  useEffect(() => {
+    if (loadError) {
       toast({
         variant: "destructive",
         title: "Failed to load",
-        description: String((err as Error)?.message ?? err),
+        description: String((loadError as Error)?.message ?? loadError),
       });
-    } finally {
-      setLoading(false);
     }
-  }
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [includeArchived]);
+  }, [loadError, toast]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -143,7 +179,7 @@ export default function AccountingCoaPage() {
     setEditing(null);
     setCreating(true);
   }
-  function openEdit(a: Account) {
+  function openEdit(a: ChartOfAccount) {
     setForm({
       code: a.code,
       name: a.name,
@@ -162,48 +198,29 @@ export default function AccountingCoaPage() {
     setCreating(false);
   }
 
-  async function save() {
-    setSaving(true);
-    try {
-      const body = {
-        code: form.code.trim(),
-        name: form.name.trim(),
-        description: form.description.trim() || null,
-        type: form.type,
-        subtype: form.subtype.trim() || null,
-        normalBalance: form.normalBalance,
-        isActive: form.isActive,
-        allowManualPosting: form.allowManualPosting,
-      };
-      if (editing) {
-        await apiJson(`/accounting/chart-of-accounts/${editing.id}`, {
-          method: "PATCH",
-          body,
-        });
-        toast({ title: "Account updated" });
-      } else {
-        await apiJson("/accounting/chart-of-accounts", {
-          method: "POST",
-          body,
-        });
-        toast({ title: "Account created" });
-      }
-      closeDialog();
-      await load();
-    } catch (err) {
-      toast({
-        variant: "destructive",
-        title: "Save failed",
-        description: String((err as Error)?.message ?? err),
-      });
-    } finally {
-      setSaving(false);
+  function save() {
+    const body = {
+      code: form.code.trim(),
+      name: form.name.trim(),
+      description: form.description.trim() || null,
+      type: form.type,
+      subtype: form.subtype.trim() || null,
+      normalBalance: form.normalBalance,
+      isActive: form.isActive,
+      allowManualPosting: form.allowManualPosting,
+    };
+    if (editing) {
+      updateMutation.mutate({ id: editing.id, data: body });
+    } else {
+      createMutation.mutate({ data: body });
     }
   }
 
-  const [archiveTarget, setArchiveTarget] = useState<Account | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<ChartOfAccount | null>(
+    null,
+  );
 
-  function requestArchive(a: Account) {
+  function requestArchive(a: ChartOfAccount) {
     if (!a.isActive) {
       // Restoring is non-destructive — no confirmation needed.
       void doArchive(a);
@@ -212,25 +229,8 @@ export default function AccountingCoaPage() {
     setArchiveTarget(a);
   }
 
-  async function doArchive(a: Account) {
-    try {
-      await apiJson(`/accounting/chart-of-accounts/${a.id}`, {
-        method: "PATCH",
-        body: { isActive: !a.isActive },
-      });
-      toast({
-        title: a.isActive ? "Account archived" : "Account restored",
-      });
-      await load();
-    } catch (err) {
-      toast({
-        variant: "destructive",
-        title: "Update failed",
-        description: String((err as Error)?.message ?? err),
-      });
-    } finally {
-      setArchiveTarget(null);
-    }
+  async function doArchive(a: ChartOfAccount) {
+    archiveMutation.mutate({ id: a.id, data: { isActive: !a.isActive } });
   }
 
   return (
@@ -414,7 +414,7 @@ export default function AccountingCoaPage() {
                 <Select
                   value={form.type}
                   onValueChange={(v) =>
-                    setForm({ ...form, type: v as Account["type"] })
+                    setForm({ ...form, type: v as ChartOfAccountType })
                   }
                   disabled={!!editing?.isSystem}
                 >
@@ -465,7 +465,7 @@ export default function AccountingCoaPage() {
                   onValueChange={(v) =>
                     setForm({
                       ...form,
-                      normalBalance: v as Account["normalBalance"],
+                      normalBalance: v as ChartOfAccountNormalBalance,
                     })
                   }
                   disabled={!!editing?.isSystem}

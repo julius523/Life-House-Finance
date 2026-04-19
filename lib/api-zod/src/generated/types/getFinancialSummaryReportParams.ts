@@ -5,8 +5,16 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { GetFinancialSummaryReportSource } from "./getFinancialSummaryReportSource";
 
 export type GetFinancialSummaryReportParams = {
   fromDate?: Date;
   toDate?: Date;
+  /**
+ * `operational` (default) computes P&L and Balance Sheet from
+expenses/bills/transactions. `ledger` recomputes them from posted
+journal_entry_lines aggregated by Chart-of-Accounts type.
+
+ */
+  source?: GetFinancialSummaryReportSource;
 };

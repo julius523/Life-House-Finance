@@ -746,6 +746,214 @@ export interface NotificationListResponse {
   unreadCount: number;
 }
 
+export type ChartOfAccountType =
+  (typeof ChartOfAccountType)[keyof typeof ChartOfAccountType];
+
+export const ChartOfAccountType = {
+  asset: "asset",
+  liability: "liability",
+  equity: "equity",
+  revenue: "revenue",
+  expense: "expense",
+  contra_asset: "contra_asset",
+  contra_liability: "contra_liability",
+  contra_revenue: "contra_revenue",
+  other: "other",
+} as const;
+
+export type ChartOfAccountNormalBalance =
+  (typeof ChartOfAccountNormalBalance)[keyof typeof ChartOfAccountNormalBalance];
+
+export const ChartOfAccountNormalBalance = {
+  debit: "debit",
+  credit: "credit",
+} as const;
+
+export interface ChartOfAccount {
+  id: number;
+  code: string;
+  name: string;
+  description?: string | null;
+  type: ChartOfAccountType;
+  subtype?: string | null;
+  normalBalance: ChartOfAccountNormalBalance;
+  parentAccountId?: number | null;
+  isActive: boolean;
+  isSystem: boolean;
+  allowManualPosting: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ChartOfAccountListResponse {
+  accounts: ChartOfAccount[];
+}
+
+export interface ChartOfAccountResponse {
+  account: ChartOfAccount;
+}
+
+export interface ChartOfAccountDetailResponse {
+  account: ChartOfAccount;
+  usageCount: number;
+}
+
+export interface CreateChartOfAccountBody {
+  code: string;
+  name: string;
+  description?: string | null;
+  type: ChartOfAccountType;
+  subtype?: string | null;
+  normalBalance: ChartOfAccountNormalBalance;
+  parentAccountId?: number | null;
+  isActive?: boolean;
+  allowManualPosting?: boolean;
+}
+
+export interface UpdateChartOfAccountBody {
+  code?: string;
+  name?: string;
+  description?: string | null;
+  type?: ChartOfAccountType;
+  subtype?: string | null;
+  normalBalance?: ChartOfAccountNormalBalance;
+  parentAccountId?: number | null;
+  isActive?: boolean;
+  allowManualPosting?: boolean;
+}
+
+export interface DeleteChartOfAccountResponse {
+  ok: boolean;
+  id: number;
+}
+
+export type AccountingSettingsAccountingMethod =
+  (typeof AccountingSettingsAccountingMethod)[keyof typeof AccountingSettingsAccountingMethod];
+
+export const AccountingSettingsAccountingMethod = {
+  cash: "cash",
+  accrual: "accrual",
+} as const;
+
+export interface AccountingSettings {
+  id: number;
+  accountingMethod: AccountingSettingsAccountingMethod;
+  separationOfDuties: boolean;
+  defaultCashAccountId?: number | null;
+  defaultApAccountId?: number | null;
+  defaultArAccountId?: number | null;
+  defaultExpenseClearingAccountId?: number | null;
+  defaultRoundingAccountId?: number | null;
+  receiptRequiredOverCents: number;
+  periodCloseRequiresAdmin: boolean;
+  updatedAt?: string;
+  updatedByUserId?: number | null;
+}
+
+export interface AccountingSettingsResponse {
+  settings: AccountingSettings;
+}
+
+export type UpdateAccountingSettingsBodyAccountingMethod =
+  (typeof UpdateAccountingSettingsBodyAccountingMethod)[keyof typeof UpdateAccountingSettingsBodyAccountingMethod];
+
+export const UpdateAccountingSettingsBodyAccountingMethod = {
+  cash: "cash",
+  accrual: "accrual",
+} as const;
+
+export interface UpdateAccountingSettingsBody {
+  accountingMethod?: UpdateAccountingSettingsBodyAccountingMethod;
+  separationOfDuties?: boolean;
+  defaultCashAccountId?: number | null;
+  defaultApAccountId?: number | null;
+  defaultArAccountId?: number | null;
+  defaultExpenseClearingAccountId?: number | null;
+  defaultRoundingAccountId?: number | null;
+  receiptRequiredOverCents?: number;
+  periodCloseRequiresAdmin?: boolean;
+}
+
+export type TrialBalanceRowNormalBalance =
+  | (typeof TrialBalanceRowNormalBalance)[keyof typeof TrialBalanceRowNormalBalance]
+  | null;
+
+export const TrialBalanceRowNormalBalance = {
+  debit: "debit",
+  credit: "credit",
+} as const;
+
+export type TrialBalanceRowBalanceSide =
+  | (typeof TrialBalanceRowBalanceSide)[keyof typeof TrialBalanceRowBalanceSide]
+  | null;
+
+export const TrialBalanceRowBalanceSide = {
+  debit: "debit",
+  credit: "credit",
+} as const;
+
+export interface TrialBalanceRow {
+  accountId: number | null;
+  code: string;
+  name: string;
+  type: string | null;
+  subtype: string | null;
+  normalBalance: TrialBalanceRowNormalBalance;
+  isActive: boolean;
+  /** Debit total formatted as a fixed-2 decimal string. */
+  debits: string;
+  /** Credit total formatted as a fixed-2 decimal string. */
+  credits: string;
+  /** Net balance on the account's normal side, fixed-2 decimal. */
+  balance: string;
+  balanceSide: TrialBalanceRowBalanceSide;
+}
+
+export interface TrialBalanceTotals {
+  debits: string;
+  credits: string;
+  balanced: boolean;
+  differenceCents: number;
+}
+
+export interface TrialBalanceReport {
+  fromDate: string | null;
+  toDate: string | null;
+  rows: TrialBalanceRow[];
+  totals: TrialBalanceTotals;
+}
+
+export interface AccountingDashboardOpenPeriod {
+  id: number;
+  label: string;
+  startDate: string;
+  endDate: string;
+}
+
+export interface AccountingDashboardLastClosedPeriod {
+  id: number;
+  label: string;
+  endDate: string;
+  closedAt?: string | null;
+}
+
+export type AccountingDashboardStatusUnpostedDrafts = {
+  count: number;
+};
+
+export type AccountingDashboardStatusTrialBalanceStatus = {
+  debitsCents: number;
+  creditsCents: number;
+  inBalance: boolean;
+};
+
+export interface AccountingDashboardStatus {
+  openPeriod: AccountingDashboardOpenPeriod | null;
+  unpostedDrafts: AccountingDashboardStatusUnpostedDrafts;
+  trialBalanceStatus: AccountingDashboardStatusTrialBalanceStatus;
+  lastClosedPeriod: AccountingDashboardLastClosedPeriod | null;
+}
+
 export type GetRecentActivityParams = {
   limit?: number;
 };
@@ -931,7 +1139,49 @@ export const ListApprovalsType = {
 export type GetFinancialSummaryReportParams = {
   fromDate?: string;
   toDate?: string;
+  /**
+ * `operational` (default) computes P&L and Balance Sheet from
+expenses/bills/transactions. `ledger` recomputes them from posted
+journal_entry_lines aggregated by Chart-of-Accounts type.
+
+ */
+  source?: GetFinancialSummaryReportSource;
 };
+
+export type GetFinancialSummaryReportSource =
+  (typeof GetFinancialSummaryReportSource)[keyof typeof GetFinancialSummaryReportSource];
+
+export const GetFinancialSummaryReportSource = {
+  operational: "operational",
+  ledger: "ledger",
+} as const;
+
+export type GetTrialBalanceReportParams = {
+  fromDate?: string;
+  toDate?: string;
+  /**
+   * Alias for fromDate.
+   */
+  from?: string;
+  /**
+   * Alias for toDate.
+   */
+  to?: string;
+};
+
+export type ListChartOfAccountsParams = {
+  q?: string;
+  type?: ChartOfAccountType;
+  includeArchived?: ListChartOfAccountsIncludeArchived;
+};
+
+export type ListChartOfAccountsIncludeArchived =
+  (typeof ListChartOfAccountsIncludeArchived)[keyof typeof ListChartOfAccountsIncludeArchived];
+
+export const ListChartOfAccountsIncludeArchived = {
+  true: "true",
+  false: "false",
+} as const;
 
 export type ListNotificationsParams = {
   unreadOnly?: boolean;

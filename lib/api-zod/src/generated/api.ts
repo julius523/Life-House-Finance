@@ -1552,6 +1552,12 @@ export const ParseBankStatementResponse = zod.object({
 export const GetFinancialSummaryReportQueryParams = zod.object({
   fromDate: zod.date().optional(),
   toDate: zod.date().optional(),
+  source: zod
+    .enum(["operational", "ledger"])
+    .optional()
+    .describe(
+      "`operational` (default) computes P&L and Balance Sheet from\nexpenses\/bills\/transactions. `ledger` recomputes them from posted\njournal_entry_lines aggregated by Chart-of-Accounts type.\n",
+    ),
 });
 
 export const GetFinancialSummaryReportResponse = zod.object({
@@ -1682,6 +1688,313 @@ export const GetFinancialSummaryReportResponse = zod.object({
     totalLiabilities: zod.number(),
     equity: zod.number(),
   }),
+});
+
+/**
+ * @summary Trial Balance — debits/credits per account over a date range
+ */
+export const GetTrialBalanceReportQueryParams = zod.object({
+  fromDate: zod.date().optional(),
+  toDate: zod.date().optional(),
+  from: zod.date().optional().describe("Alias for fromDate."),
+  to: zod.date().optional().describe("Alias for toDate."),
+});
+
+export const GetTrialBalanceReportResponse = zod.object({
+  fromDate: zod.coerce.date().nullable(),
+  toDate: zod.coerce.date().nullable(),
+  rows: zod.array(
+    zod.object({
+      accountId: zod.number().nullable(),
+      code: zod.string(),
+      name: zod.string(),
+      type: zod.string().nullable(),
+      subtype: zod.string().nullable(),
+      normalBalance: zod.enum(["debit", "credit"]).nullable(),
+      isActive: zod.boolean(),
+      debits: zod
+        .string()
+        .describe("Debit total formatted as a fixed-2 decimal string."),
+      credits: zod
+        .string()
+        .describe("Credit total formatted as a fixed-2 decimal string."),
+      balance: zod
+        .string()
+        .describe("Net balance on the account's normal side, fixed-2 decimal."),
+      balanceSide: zod.enum(["debit", "credit"]).nullable(),
+    }),
+  ),
+  totals: zod.object({
+    debits: zod.string(),
+    credits: zod.string(),
+    balanced: zod.boolean(),
+    differenceCents: zod.number(),
+  }),
+});
+
+/**
+ * @summary List Chart of Accounts
+ */
+export const ListChartOfAccountsQueryParams = zod.object({
+  q: zod.coerce.string().optional(),
+  type: zod
+    .enum([
+      "asset",
+      "liability",
+      "equity",
+      "revenue",
+      "expense",
+      "contra_asset",
+      "contra_liability",
+      "contra_revenue",
+      "other",
+    ])
+    .optional(),
+  includeArchived: zod.enum(["true", "false"]).optional(),
+});
+
+export const ListChartOfAccountsResponse = zod.object({
+  accounts: zod.array(
+    zod.object({
+      id: zod.number(),
+      code: zod.string(),
+      name: zod.string(),
+      description: zod.string().nullish(),
+      type: zod.enum([
+        "asset",
+        "liability",
+        "equity",
+        "revenue",
+        "expense",
+        "contra_asset",
+        "contra_liability",
+        "contra_revenue",
+        "other",
+      ]),
+      subtype: zod.string().nullish(),
+      normalBalance: zod.enum(["debit", "credit"]),
+      parentAccountId: zod.number().nullish(),
+      isActive: zod.boolean(),
+      isSystem: zod.boolean(),
+      allowManualPosting: zod.boolean(),
+      createdAt: zod.coerce.date().optional(),
+      updatedAt: zod.coerce.date().optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Create a new Chart of Accounts row (admin only)
+ */
+export const CreateChartOfAccountBody = zod.object({
+  code: zod.string(),
+  name: zod.string(),
+  description: zod.string().nullish(),
+  type: zod.enum([
+    "asset",
+    "liability",
+    "equity",
+    "revenue",
+    "expense",
+    "contra_asset",
+    "contra_liability",
+    "contra_revenue",
+    "other",
+  ]),
+  subtype: zod.string().nullish(),
+  normalBalance: zod.enum(["debit", "credit"]),
+  parentAccountId: zod.number().nullish(),
+  isActive: zod.boolean().optional(),
+  allowManualPosting: zod.boolean().optional(),
+});
+
+/**
+ * @summary Get Chart of Accounts row by ID
+ */
+export const GetChartOfAccountParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetChartOfAccountResponse = zod.object({
+  account: zod.object({
+    id: zod.number(),
+    code: zod.string(),
+    name: zod.string(),
+    description: zod.string().nullish(),
+    type: zod.enum([
+      "asset",
+      "liability",
+      "equity",
+      "revenue",
+      "expense",
+      "contra_asset",
+      "contra_liability",
+      "contra_revenue",
+      "other",
+    ]),
+    subtype: zod.string().nullish(),
+    normalBalance: zod.enum(["debit", "credit"]),
+    parentAccountId: zod.number().nullish(),
+    isActive: zod.boolean(),
+    isSystem: zod.boolean(),
+    allowManualPosting: zod.boolean(),
+    createdAt: zod.coerce.date().optional(),
+    updatedAt: zod.coerce.date().optional(),
+  }),
+  usageCount: zod.number(),
+});
+
+/**
+ * @summary Update a Chart of Accounts row (admin only)
+ */
+export const UpdateChartOfAccountParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateChartOfAccountBody = zod.object({
+  code: zod.string().optional(),
+  name: zod.string().optional(),
+  description: zod.string().nullish(),
+  type: zod
+    .enum([
+      "asset",
+      "liability",
+      "equity",
+      "revenue",
+      "expense",
+      "contra_asset",
+      "contra_liability",
+      "contra_revenue",
+      "other",
+    ])
+    .optional(),
+  subtype: zod.string().nullish(),
+  normalBalance: zod.enum(["debit", "credit"]).optional(),
+  parentAccountId: zod.number().nullish(),
+  isActive: zod.boolean().optional(),
+  allowManualPosting: zod.boolean().optional(),
+});
+
+export const UpdateChartOfAccountResponse = zod.object({
+  account: zod.object({
+    id: zod.number(),
+    code: zod.string(),
+    name: zod.string(),
+    description: zod.string().nullish(),
+    type: zod.enum([
+      "asset",
+      "liability",
+      "equity",
+      "revenue",
+      "expense",
+      "contra_asset",
+      "contra_liability",
+      "contra_revenue",
+      "other",
+    ]),
+    subtype: zod.string().nullish(),
+    normalBalance: zod.enum(["debit", "credit"]),
+    parentAccountId: zod.number().nullish(),
+    isActive: zod.boolean(),
+    isSystem: zod.boolean(),
+    allowManualPosting: zod.boolean(),
+    createdAt: zod.coerce.date().optional(),
+    updatedAt: zod.coerce.date().optional(),
+  }),
+});
+
+/**
+ * @summary Delete an unused Chart of Accounts row (admin only)
+ */
+export const DeleteChartOfAccountParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DeleteChartOfAccountResponse = zod.object({
+  ok: zod.boolean(),
+  id: zod.number(),
+});
+
+/**
+ * @summary Get the singleton accounting settings row (admin only)
+ */
+export const GetAccountingSettingsResponse = zod.object({
+  settings: zod.object({
+    id: zod.number(),
+    accountingMethod: zod.enum(["cash", "accrual"]),
+    separationOfDuties: zod.boolean(),
+    defaultCashAccountId: zod.number().nullish(),
+    defaultApAccountId: zod.number().nullish(),
+    defaultArAccountId: zod.number().nullish(),
+    defaultExpenseClearingAccountId: zod.number().nullish(),
+    defaultRoundingAccountId: zod.number().nullish(),
+    receiptRequiredOverCents: zod.number(),
+    periodCloseRequiresAdmin: zod.boolean(),
+    updatedAt: zod.coerce.date().optional(),
+    updatedByUserId: zod.number().nullish(),
+  }),
+});
+
+/**
+ * @summary Update accounting settings (admin only)
+ */
+export const UpdateAccountingSettingsBody = zod.object({
+  accountingMethod: zod.enum(["cash", "accrual"]).optional(),
+  separationOfDuties: zod.boolean().optional(),
+  defaultCashAccountId: zod.number().nullish(),
+  defaultApAccountId: zod.number().nullish(),
+  defaultArAccountId: zod.number().nullish(),
+  defaultExpenseClearingAccountId: zod.number().nullish(),
+  defaultRoundingAccountId: zod.number().nullish(),
+  receiptRequiredOverCents: zod.number().optional(),
+  periodCloseRequiresAdmin: zod.boolean().optional(),
+});
+
+export const UpdateAccountingSettingsResponse = zod.object({
+  settings: zod.object({
+    id: zod.number(),
+    accountingMethod: zod.enum(["cash", "accrual"]),
+    separationOfDuties: zod.boolean(),
+    defaultCashAccountId: zod.number().nullish(),
+    defaultApAccountId: zod.number().nullish(),
+    defaultArAccountId: zod.number().nullish(),
+    defaultExpenseClearingAccountId: zod.number().nullish(),
+    defaultRoundingAccountId: zod.number().nullish(),
+    receiptRequiredOverCents: zod.number(),
+    periodCloseRequiresAdmin: zod.boolean(),
+    updatedAt: zod.coerce.date().optional(),
+    updatedByUserId: zod.number().nullish(),
+  }),
+});
+
+/**
+ * @summary Open period, unposted drafts, trial balance status, last close
+ */
+export const GetAccountingDashboardStatusResponse = zod.object({
+  openPeriod: zod
+    .object({
+      id: zod.number(),
+      label: zod.string(),
+      startDate: zod.coerce.date(),
+      endDate: zod.coerce.date(),
+    })
+    .nullable(),
+  unpostedDrafts: zod.object({
+    count: zod.number(),
+  }),
+  trialBalanceStatus: zod.object({
+    debitsCents: zod.number(),
+    creditsCents: zod.number(),
+    inBalance: zod.boolean(),
+  }),
+  lastClosedPeriod: zod
+    .object({
+      id: zod.number(),
+      label: zod.string(),
+      endDate: zod.coerce.date(),
+      closedAt: zod.coerce.date().nullish(),
+    })
+    .nullable(),
 });
 
 /**

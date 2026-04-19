@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Redirect } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Card,
   CardContent,
@@ -19,116 +20,99 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { apiJson } from "@/lib/api";
-
-type Account = {
-  id: number;
-  code: string;
-  name: string;
-  type: string;
-  isActive: boolean;
-};
-
-type Settings = {
-  id: number;
-  accountingMethod: "cash" | "accrual";
-  separationOfDuties: boolean;
-  defaultCashAccountId: number | null;
-  defaultApAccountId: number | null;
-  defaultArAccountId: number | null;
-  defaultExpenseClearingAccountId: number | null;
-  defaultRoundingAccountId: number | null;
-  receiptRequiredOverCents: number;
-  periodCloseRequiresAdmin: boolean;
-};
+import {
+  useGetAccountingSettings,
+  useUpdateAccountingSettings,
+  useListChartOfAccounts,
+  getGetAccountingSettingsQueryKey,
+  type AccountingSettings,
+  type UpdateAccountingSettingsBody,
+} from "@workspace/api-client-react";
 
 const NULL_ID = "__null__";
 
 export default function AccountingSettingsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const isAdmin = user?.role === "admin";
 
   // Step 9 9th-pass tightening: settings is admin-only at the page level too.
-  // Approver/staff users get redirected to the dashboard rather than seeing
-  // a disabled form whose GET would 403 anyway.
   if (user && !isAdmin) {
     return <Redirect to="/dashboard" />;
   }
 
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<Settings | null>(null);
+  const {
+    data: settingsResp,
+    isLoading: settingsLoading,
+    error: settingsError,
+  } = useGetAccountingSettings({ query: { enabled: !!user } });
+  const {
+    data: accountsResp,
+    isLoading: accountsLoading,
+    error: accountsError,
+  } = useListChartOfAccounts(undefined, { query: { enabled: !!user } });
 
-  async function load() {
-    setLoading(true);
-    try {
-      const [s, a] = await Promise.all([
-        apiJson<{ settings: Settings }>("/accounting/settings"),
-        apiJson<{ accounts: Account[] }>(
-          "/accounting/chart-of-accounts",
-        ),
-      ]);
-      setSettings(s.settings);
-      setForm(s.settings);
-      setAccounts(a.accounts.filter((x) => x.isActive));
-    } catch (err) {
+  const settings = settingsResp?.settings ?? null;
+  const accounts = useMemo(
+    () => (accountsResp?.accounts ?? []).filter((a) => a.isActive),
+    [accountsResp],
+  );
+
+  const [form, setForm] = useState<AccountingSettings | null>(null);
+  useEffect(() => {
+    if (settings) setForm(settings);
+  }, [settings]);
+
+  useEffect(() => {
+    const err = settingsError ?? accountsError;
+    if (err) {
       toast({
         variant: "destructive",
         title: "Failed to load",
         description: String((err as Error)?.message ?? err),
       });
-    } finally {
-      setLoading(false);
     }
-  }
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [settingsError, accountsError, toast]);
+
+  const updateMutation = useUpdateAccountingSettings({
+    mutation: {
+      onSuccess: (res) => {
+        queryClient.setQueryData(getGetAccountingSettingsQueryKey(), res);
+        setForm(res.settings);
+        toast({ title: "Settings saved" });
+      },
+      onError: (err) =>
+        toast({
+          variant: "destructive",
+          title: "Save failed",
+          description: String((err as Error)?.message ?? err),
+        }),
+    },
+  });
 
   const byType = useMemo(() => {
-    const m: Record<string, Account[]> = {};
+    const m: Record<string, typeof accounts> = {};
     for (const a of accounts) (m[a.type] ??= []).push(a);
     for (const k of Object.keys(m))
       m[k]!.sort((x, y) => x.code.localeCompare(y.code));
     return m;
   }, [accounts]);
 
-  async function save() {
+  function save() {
     if (!form) return;
-    setSaving(true);
-    try {
-      const body = {
-        accountingMethod: form.accountingMethod,
-        separationOfDuties: form.separationOfDuties,
-        defaultCashAccountId: form.defaultCashAccountId,
-        defaultApAccountId: form.defaultApAccountId,
-        defaultArAccountId: form.defaultArAccountId,
-        defaultExpenseClearingAccountId:
-          form.defaultExpenseClearingAccountId,
-        defaultRoundingAccountId: form.defaultRoundingAccountId,
-        receiptRequiredOverCents: form.receiptRequiredOverCents,
-        periodCloseRequiresAdmin: form.periodCloseRequiresAdmin,
-      };
-      const res = await apiJson<{ settings: Settings }>(
-        "/accounting/settings",
-        { method: "PATCH", body },
-      );
-      setSettings(res.settings);
-      setForm(res.settings);
-      toast({ title: "Settings saved" });
-    } catch (err) {
-      toast({
-        variant: "destructive",
-        title: "Save failed",
-        description: String((err as Error)?.message ?? err),
-      });
-    } finally {
-      setSaving(false);
-    }
+    const body: UpdateAccountingSettingsBody = {
+      accountingMethod: form.accountingMethod,
+      separationOfDuties: form.separationOfDuties,
+      defaultCashAccountId: form.defaultCashAccountId,
+      defaultApAccountId: form.defaultApAccountId,
+      defaultArAccountId: form.defaultArAccountId,
+      defaultExpenseClearingAccountId: form.defaultExpenseClearingAccountId,
+      defaultRoundingAccountId: form.defaultRoundingAccountId,
+      receiptRequiredOverCents: form.receiptRequiredOverCents,
+      periodCloseRequiresAdmin: form.periodCloseRequiresAdmin,
+    };
+    updateMutation.mutate({ data: body });
   }
 
   function AccountPicker({
@@ -138,7 +122,7 @@ export default function AccountingSettingsPage() {
     types,
   }: {
     label: string;
-    value: number | null;
+    value: number | null | undefined;
     onChange: (id: number | null) => void;
     types: string[];
   }) {
@@ -147,7 +131,7 @@ export default function AccountingSettingsPage() {
       <div>
         <label className="text-xs font-medium">{label}</label>
         <Select
-          value={value === null ? NULL_ID : String(value)}
+          value={value == null ? NULL_ID : String(value)}
           onValueChange={(v) =>
             onChange(v === NULL_ID ? null : Number(v))
           }
@@ -168,6 +152,9 @@ export default function AccountingSettingsPage() {
       </div>
     );
   }
+
+  const loading = settingsLoading || accountsLoading;
+  const saving = updateMutation.isPending;
 
   if (loading || !form) {
     return <div className="p-6">Loading…</div>;
@@ -202,7 +189,7 @@ export default function AccountingSettingsPage() {
                 onValueChange={(v) =>
                   setForm({
                     ...form,
-                    accountingMethod: v as Settings["accountingMethod"],
+                    accountingMethod: v as AccountingSettings["accountingMethod"],
                   })
                 }
                 disabled={!isAdmin}
@@ -310,7 +297,7 @@ export default function AccountingSettingsPage() {
       <div className="flex justify-end gap-2">
         <Button
           variant="outline"
-          onClick={() => setForm(settings)}
+          onClick={() => settings && setForm(settings)}
           disabled={saving || !dirty}
         >
           Reset

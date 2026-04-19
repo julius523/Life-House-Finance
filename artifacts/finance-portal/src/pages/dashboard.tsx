@@ -4,6 +4,7 @@ import {
   useGetSpendingByProgram,
   useGetRecentActivity,
   useListBills,
+  useGetAccountingDashboardStatus,
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -348,50 +349,9 @@ type CreditSummary = {
   byStatus: { status: CreditStatus; amount: number; count: number }[];
 };
 
-type AccountingDashboardStatus = {
-  openPeriod: {
-    id: number;
-    label: string;
-    startDate: string;
-    endDate: string;
-  } | null;
-  unpostedDrafts: { count: number };
-  trialBalanceStatus: {
-    debitsCents: number;
-    creditsCents: number;
-    inBalance: boolean;
-  };
-  lastClosedPeriod: {
-    id: number;
-    label: string;
-    endDate: string;
-    closedAt: string | null;
-  } | null;
-};
-
 function AccountingStatusCard() {
-  const [status, setStatus] = useState<AccountingDashboardStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await apiJson<AccountingDashboardStatus>(
-          `/accounting/dashboard-status`,
-        );
-        if (!cancelled) setStatus(data);
-      } catch (err) {
-        if (!cancelled) setError(String((err as Error)?.message ?? err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: status, isLoading: loading, error } =
+    useGetAccountingDashboardStatus();
 
   const fmtUsd = (cents: number) =>
     `$${(cents / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -422,7 +382,9 @@ function AccountingStatusCard() {
         {loading ? (
           <Skeleton className="h-16 w-full" />
         ) : error ? (
-          <div className="text-sm text-muted-foreground">{error}</div>
+          <div className="text-sm text-muted-foreground">
+            {String((error as Error)?.message ?? error)}
+          </div>
         ) : status ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Link href="/accounting">
