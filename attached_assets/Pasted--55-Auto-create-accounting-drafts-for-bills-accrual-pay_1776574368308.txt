@@ -1,0 +1,355 @@
+#55 - Auto-create accounting drafts for bills (accrual + payment)
+
+What & Why
+
+Bills need to enter accounting through the same controlled draft journal-entry workflow already used for manual journal entries and approved expenses. But bills are not a one-event source like expenses. They create two distinct accounting events:
+
+Accrual when the bill is approved
+Dr Expense
+Cr Accounts Payable
+Payment when the bill is actually paid via linked bank transaction
+Dr Accounts Payable
+Cr Cash/Bank
+
+This task extends the existing accounting bridge using the shared accounting_source_links table so bills can generate accounting draft JEs with full provenance, idempotency, blocked-state handling, retry, and later posting through the existing hardened manual JE workflow.
+
+Bills must never post directly to the ledger. This task creates drafts only. Bookkeepers and approvers still control submit → approve → post through the existing manual JE approval workflow.
+
+Done looks like
+Approving a bill generates exactly one accrual manual journal-entry draft.
+Paying a bill through a linked bank transaction generates exactly one payment manual journal-entry draft.
+Both generated drafts are standard manual_journal_entry_drafts rows, not a separate workflow type.
+Both bill accounting events use the shared accounting_source_links table as the canonical provenance bridge.
+accounting_source_links gains an eventType field so one bill can have two distinct accounting links:
+accrual
+payment
+Existing expense links are backfilled to eventType='primary'.
+Database uniqueness is enforced on (sourceType, sourceId, eventType) so repeated approvals, repeated payment triggers, retries, and concurrency storms cannot create duplicates.
+Bills gain split accounting state fields so accrual and payment remain independently trackable:
+accrualAccountingStatus
+accrualAccountingBlockReason
+accrualAccountingGeneratedAt
+paymentAccountingStatus
+paymentAccountingBlockReason
+paymentAccountingGeneratedAt
+Bills gain categoryId so the debit side of accrual can resolve from the existing expense category → CoA mapping foundation.
+accounting_settings contains:
+defaultApAccountId
+defaultCashAccountId
+Accrual draft generation uses:
+debit = bill category’s mapped debit account
+credit = defaultApAccountId
+Payment draft generation uses:
+debit = defaultApAccountId
+credit = linked transaction’s CoA account if available, else defaultCashAccountId
+If accounting generation cannot resolve valid mappings/accounts, the operational bill transition still succeeds, but the accounting side is marked blocked with a stable reason code and no draft is created.
+Admins/approvers can manually retry either event:
+POST /bills/:id/regenerate-accounting-draft?eventType=accrual|payment
+Admins/approvers can mark either event as not applicable with a required note:
+POST /bills/:id/mark-accounting-not-applicable?eventType=accrual|payment
+Bill detail shows both event tracks with statuses, linked draft/JE summaries, block reasons, and action links.
+Draft detail and posted JE detail show an Originating bill card when a bill source link exists.
+JE list distinguishes:
+Manual
+Expense #N
+Bill #N (Accrual)
+Bill #N (Payment)
+The blocked accounting queue is generalized so blocked bill events appear alongside blocked expenses.
+All bill accounting generation, block, retry, and not-applicable actions write stable audit-log rows.
+Out of scope
+Direct posting from bill workflows
+Copilot reconciliation
+Reporting polish / report drilldowns / CSV work
+Vendor-specific smart rules beyond one category per bill
+Full A/P sub-ledger redesign
+Multi-currency or multi-entity support
+Backfill of already-approved or already-paid legacy bills
+Splitting one bill across multiple accounting categories
+Auto-posting generated bill drafts
+Steps
+1. Schema
+
+Update the accounting bridge and bill model.
+
+Extend accounting_source_links:
+add eventType
+allowed values for this phase:
+primary
+accrual
+payment
+backfill existing expense links to primary
+replace uniqueness with:
+UNIQUE (sourceType, sourceId, eventType)
+Add split accounting fields to bills:
+accrualAccountingStatus
+accrualAccountingBlockReason
+accrualAccountingGeneratedAt
+paymentAccountingStatus
+paymentAccountingBlockReason
+paymentAccountingGeneratedAt
+Add categoryId to bills as FK to expense_categories
+Add to accounting_settings:
+defaultApAccountId
+defaultCashAccountId
+Keep migrations idempotent and compatible with the current schema boot/constraint flow
+2. Bill draft generation service
+
+Create billDraftService.ts with two entry points:
+
+generateAccrualDraftFromBill(billId, actor)
+generatePaymentDraftFromBill(billId, actor, options?)
+
+The service must:
+
+resolve mappings/accounts server-side only
+validate accounts are active and postable
+build deterministic memo text
+create exactly one draft per bill/event type
+update the correct bill accounting fields
+write/update accounting_source_links
+write activity-log rows for created and blocked outcomes
+return structured results suitable for API responses
+
+Use deterministic idempotency keys:
+
+bill-accrual-draft-{billId}
+bill-payment-draft-{billId}
+
+But the real duplicate fence must remain the database uniqueness on:
+
+(sourceType, sourceId, eventType)
+3. Accrual generation on bill approval
+
+At the end of the bill approval flow:
+
+attempt to generate the accrual draft
+use:
+debit = bill category’s mapped debit account
+credit = defaultApAccountId
+entry date = bill’s accounting-relevant date in the current bill model
+memo format:
+<vendorName> — <description> (bill #<id>)
+
+If generation fails:
+
+bill approval still succeeds
+set:
+accrualAccountingStatus='blocked'
+accrualAccountingBlockReason=<stable code>
+do not create a draft
+
+Accrual block reason codes:
+
+missing_category
+missing_mapping
+archived_account
+non_postable_account
+missing_ap_account
+other
+4. Payment generation on paid transition
+
+Trigger payment draft generation only when the bill actually transitions to paid because it is linked to a bank transaction.
+
+Hook:
+
+POST /transactions/:id/link-bill
+and any convert-to-bill flow that also marks the bill paid
+
+Do not run payment generation on every bill PATCH.
+
+When payment generation runs:
+
+debit = defaultApAccountId
+credit = linked transaction’s CoA account if present, else defaultCashAccountId
+
+If generation fails:
+
+operational paid transition still succeeds
+set:
+paymentAccountingStatus='blocked'
+paymentAccountingBlockReason=<stable code>
+do not create a draft
+
+Payment block reason codes:
+
+missing_ap_account
+missing_cash_account
+archived_account
+non_postable_account
+other
+5. API
+
+Add or revise the following endpoints.
+
+A. Retry draft generation
+
+POST /bills/:id/regenerate-accounting-draft?eventType=accrual|payment
+
+admin/approver only
+reruns the corresponding generator
+idempotent
+if a draft already exists, return it rather than duplicating
+B. Mark accounting not applicable
+
+POST /bills/:id/mark-accounting-not-applicable?eventType=accrual|payment
+
+admin/approver only
+note required
+enforce atomic state guard
+write audit log entry
+C. Bill detail accounting response
+
+Extend bill detail read API so it returns enough for both event tracks:
+
+accrual status
+accrual block reason
+accrual linked draft summary
+accrual linked posted JE summary
+payment status
+payment block reason
+payment linked draft summary
+payment linked posted JE summary
+D. Generalized blocked queue
+
+Extend the blocked accounting queue so it covers both expenses and bills.
+
+Requirements:
+
+source-type filter
+reason filter
+list rows for both expenses and bills
+bulk retry supports both source types
+nav count includes blocked bill events as well as blocked expenses
+6. Bill detail UI
+
+Add a full Accounting section to bill detail.
+
+It must always render and show both event tracks:
+
+Accrual accounting status badge
+Payment accounting status badge
+linked draft summary for each event when present
+linked posted JE summary for each event when present
+human-readable block reason for each event when blocked
+action links/buttons for each event:
+retry generation
+mark not applicable
+edit category mapping
+
+Include one-click links to:
+
+related draft
+related posted JE
+relevant category mapping page
+7. Draft detail / JE detail / JE list UI
+Draft detail
+
+If a draft is bill-sourced, show an Originating bill card with:
+
+vendor
+amount
+category/program if available
+approval date
+link back to bill
+event type badge:
+Accrual
+Payment
+Posted JE detail
+
+Show the same Originating bill card using accounting_source_links provenance.
+
+JE list
+
+Extend source display/filter to distinguish:
+
+Manual
+Expense #N
+Bill #N (Accrual)
+Bill #N (Payment)
+8. Blocked queue UI
+
+Generalize the blocked queue page to include bill events.
+
+Requirements:
+
+source-type filter
+reason filter
+source badge per row
+bulk retry across visible results
+per-row actions for retry / mark not applicable / edit mapping
+nav badge counts both blocked expenses and blocked bill events
+
+Do not ship the bills bridge without the operator surface for blocked bill events.
+
+9. Admin/settings UI
+Bill form
+
+Add categoryId picker to bill create/edit.
+
+Accounting settings
+
+Add admin-only pickers for:
+
+defaultApAccountId
+defaultCashAccountId
+10. Activity log
+
+Write stable bill-side activity log events:
+
+bill_accounting_blocked
+bill_accounting_draft_created
+bill_accounting_not_applicable
+
+Do not delete provenance rows or weaken traceability.
+
+Relevant files
+lib/db/src/schema/bills.ts
+lib/db/src/schema/accounting_source_links.ts
+lib/db/src/schema/accounting_settings.ts
+lib/db/src/schema/expense_categories.ts
+artifacts/api-server/src/lib/billDraftService.ts
+artifacts/api-server/src/routes/bills.ts
+artifacts/api-server/src/routes/transactions.ts
+artifacts/api-server/src/routes/accounting.ts
+artifacts/finance-portal/src/pages/bills/detail.tsx
+artifacts/finance-portal/src/pages/bills/new.tsx
+artifacts/finance-portal/src/pages/bills/edit.tsx
+artifacts/finance-portal/src/pages/accounting-blocked-expenses.tsx or renamed equivalent
+artifacts/finance-portal/src/pages/accounting-settings.tsx
+artifacts/finance-portal/src/pages/journal-entry-draft-detail.tsx
+artifacts/finance-portal/src/pages/journal-entries-detail.tsx
+artifacts/finance-portal/src/pages/journal-entries-list.tsx
+artifacts/finance-portal/src/components/layout.tsx
+lib/api-spec/openapi.yaml
+Dependencies
+Expense category → CoA mapping foundation
+Auto-create accounting draft when an expense is approved
+Two-way traceability between expenses and journal entries
+Blocked accounting review queue
+Manual JE approval workflow
+Hardened manual JE posting path
+Locked constraints
+Use shared accounting_source_links as the canonical bridge
+Never direct-post from bill workflows
+Posting must reuse the existing hardened manual JE posting flow unchanged
+Server is the source of truth for validations
+DB-level uniqueness is the real idempotency fence
+Never delete provenance rows
+Do not redesign the manual JE workflow for this task
+Minimum validation
+first bill approval creates exactly one accrual draft
+repeated approval does not duplicate accrual draft
+concurrent approval attempts converge on one accrual draft
+paid transition creates exactly one payment draft
+repeated payment-trigger calls do not duplicate payment draft
+blocked accrual writes correct status/reason and still approves bill
+blocked payment writes correct status/reason and still marks bill paid
+retry after fixing mapping creates draft from blocked state
+mark-not-applicable requires note and respects state guard
+blocked queue shows both expenses and bills
+JE list source labels distinguish bill accrual vs bill payment
+draft detail shows originating bill correctly
+posted JE detail shows originating bill correctly
+legacy expense links remain readable after eventType='primary' backfill
+
+The one thing I’d tighten even further when this gets handed off: explicitly say “do not invent a bill-only posting shortcut under transactions.” That’s the most likely place somebody will try to get cute.
