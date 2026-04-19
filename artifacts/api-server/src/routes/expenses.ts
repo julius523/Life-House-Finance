@@ -377,8 +377,9 @@ router.post("/expenses/:id/approve", requireRole("admin", "approver"), async (re
   // Task #52 — bridge into accounting. Approval succeeds even if draft
   // generation blocks; we surface the result on the response so the UI
   // can show success / blocked / mapping issues without a second call.
+  // The route is gated by requireRole, so req.authUser is guaranteed.
   const accountingResult = await generateDraftFromExpense(expense.id, {
-    id: req.authUser?.id ?? null,
+    id: req.authUser!.id,
     display: bodyParsed.data.approvedBy,
   });
 
@@ -440,12 +441,11 @@ router.post(
       });
       return;
     }
-    const actorDisplay = req.authUser
-      ? `${req.authUser.firstName} ${req.authUser.lastName}`.trim() ||
-        req.authUser.email
-      : "system";
+    const u = req.authUser!;
+    const actorDisplay =
+      `${u.firstName} ${u.lastName}`.trim() || u.email;
     const result = await generateDraftFromExpense(id, {
-      id: req.authUser?.id ?? null,
+      id: u.id,
       display: actorDisplay,
     });
     if (result.ok) {

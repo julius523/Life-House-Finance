@@ -42,6 +42,14 @@ export const accountingSourceLinksTable = pgTable(
     id: serial("id").primaryKey(),
     sourceType: text("source_type").notNull(),
     sourceId: integer("source_id").notNull(),
+    /**
+     * Deterministic per-source idempotency key. Format:
+     *   "<sourceType>-draft-<sourceId>"   e.g. "expense-draft-42"
+     * Required by Task #52 in addition to UNIQUE(sourceType,sourceId)
+     * so callers can also assert idempotency by key (e.g. for retry
+     * tooling and audits) without knowing the underlying composite.
+     */
+    idempotencyKey: text("idempotency_key").notNull(),
     manualJournalEntryDraftId: integer(
       "manual_journal_entry_draft_id",
     ).references((): AnyPgColumn => manualJournalEntryDraftsTable.id, {
@@ -63,6 +71,7 @@ export const accountingSourceLinksTable = pgTable(
       table.sourceType,
       table.sourceId,
     ),
+    uniqueIndex("accounting_source_links_idem_key_uniq").on(table.idempotencyKey),
     index("accounting_source_links_draft_idx").on(
       table.manualJournalEntryDraftId,
     ),
