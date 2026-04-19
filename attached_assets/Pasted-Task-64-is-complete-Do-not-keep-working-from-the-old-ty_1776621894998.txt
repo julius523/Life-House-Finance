@@ -1,0 +1,56 @@
+Task #64 is complete. Do not keep working from the old typed-hook migration brief.
+
+Next task: run a focused post-migration closeout audit, then prepare the next implementation slice.
+
+Phase 1 — typed-client closeout audit
+Goal:
+- Confirm the finance portal is actually clean after Task #64.
+- Find any remaining untyped API surfaces, stale helper code, invalidation gaps, or regression risks.
+
+Do this:
+1. Inventory the finance portal for any remaining:
+   - raw fetch calls
+   - apiJson / custom request helpers
+   - hand-written response typing where generated types/hooks already exist
+   - manual query-string building for endpoints already covered by the typed client
+2. Check mutation flows for correct invalidation/refetch behavior:
+   - expenses
+   - bills
+   - blocked queue
+   - journal entries
+   - journal entry drafts
+   - admin email/notification/settings pages
+   - reports-related actions
+3. Check for dead code introduced by the migration:
+   - unused helper functions
+   - obsolete local DTO/interface types
+   - duplicate error-extraction helpers
+   - now-unused request wrappers/imports
+4. Run a regression sweep on the migrated pages and record any failures:
+   - accounting-blocked-expenses
+   - bills/detail
+   - transactions auto-match
+   - accounting copilot send
+   - admin restore/email-settings/notifications
+5. Produce a tight gap list:
+   - blocker
+   - should-fix
+   - cleanup-only
+
+Acceptance for Phase 1:
+- No remaining untyped API access on the migrated surfaces.
+- No dead migration scaffolding left behind.
+- All critical mutation flows refresh the right data.
+- Any remaining untyped surfaces elsewhere are explicitly listed with file paths and severity.
+
+Phase 2 — next implementation recommendation
+After the audit, recommend the next build slice in this order:
+1. Copilot reconciliation hardening follow-ups already sitting in backlog
+2. Per-entry JE integrity checks
+3. Unmapped-lines remediation/admin flow
+4. Stronger independent net-income/equity movement validation
+
+Important:
+- Do not start new feature work until the closeout audit is done.
+- If you find regressions, fix them first and give complete revision instructions in one message, not fragments.
+- If no regressions are found, return a concise “clean bill of health” plus the exact next task you recommend building.
