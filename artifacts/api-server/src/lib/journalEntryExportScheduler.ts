@@ -133,6 +133,9 @@ export type ScheduleCsvConfig = {
   cadence: string;
   filterStatus: string | null;
   filterSource: string | null;
+  /** Task #71 — optional user filters mirrored from the on-demand CSV. */
+  filterPostedByUserId: number | null;
+  filterApproverUserId: number | null;
   includeLines: boolean;
 };
 
@@ -180,6 +183,8 @@ export async function buildScheduleCsv(
     source: filterSource,
     from: range.from,
     to: range.to,
+    postedByUserId: config.filterPostedByUserId,
+    approverUserId: config.filterApproverUserId,
     includeLines: config.includeLines,
   });
   if (!result.ok) {
@@ -252,6 +257,8 @@ export async function runSchedule(
         cadence: schedule.cadence,
         filterStatus,
         filterSource,
+        filterPostedByUserId: schedule.filterPostedByUserId ?? null,
+        filterApproverUserId: schedule.filterApproverUserId ?? null,
         includeLines: schedule.includeLines,
       },
       runAt,
@@ -282,6 +289,8 @@ export async function runSchedule(
       `Date range: ${range.from} → ${range.to}\n` +
       `Status filter: ${filterStatus ?? "all"}\n` +
       `Source filter: ${filterSource ?? "all"}\n` +
+      `Posted by filter: ${schedule.filterPostedByUserId ?? "anyone"}\n` +
+      `Approver filter: ${schedule.filterApproverUserId ?? "anyone"}\n` +
       `Include lines: ${schedule.includeLines ? "yes" : "no"}\n` +
       `Entries in export: ${rowCount}\n\n` +
       (rowCount === 0

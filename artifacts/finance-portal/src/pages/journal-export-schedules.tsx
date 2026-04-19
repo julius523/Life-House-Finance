@@ -47,10 +47,12 @@ import {
   useDeleteJournalEntryExportSchedule,
   useRunJournalEntryExportScheduleNow,
   useGetJournalEntryExportScheduleLog,
+  useListJournalEntryActors,
   getListJournalEntryExportSchedulesQueryKey,
   getGetJournalEntryExportScheduleLogQueryKey,
   type JournalEntryExportSchedule,
   type JournalEntryExportScheduleBody,
+  type AuthUser,
   JournalEntryExportScheduleBodyCadence,
   JournalEntryExportScheduleBodyFilterStatus,
   JournalEntryExportScheduleBodyFilterSource,
@@ -70,6 +72,9 @@ interface FormState {
   recipientsText: string;
   filterStatus: FilterStatus;
   filterSource: FilterSource;
+  /** Task #71 — "any" or stringified user id, mirrors journal-entries-list. */
+  postedByFilter: string;
+  approverFilter: string;
   includeLines: boolean;
 }
 
@@ -81,8 +86,20 @@ const EMPTY_FORM: FormState = {
   recipientsText: "",
   filterStatus: "all",
   filterSource: "all",
+  postedByFilter: "any",
+  approverFilter: "any",
   includeLines: false,
 };
+
+function actorName(a: {
+  id: number;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+}): string {
+  const name = [a.firstName, a.lastName].filter(Boolean).join(" ").trim();
+  return name || a.email || `User #${a.id}`;
+}
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -116,6 +133,15 @@ export default function JournalExportSchedulesPage() {
   );
 
   const { data, isLoading, error } = useListJournalEntryExportSchedules();
+  // Task #71 — pickers for "Posted by" / "Approver" reuse the same actors
+  // endpoint the journal-entries list uses, so the dropdown shows only
+  // people who have actually touched a journal entry. Admin-only page, so
+  // always enabled.
+  const { data: actorsData } = useListJournalEntryActors({
+    query: { enabled: isAdmin },
+  });
+  const posters = (actorsData?.posters ?? []) as AuthUser[];
+  const approvers = (actorsData?.approvers ?? []) as AuthUser[];
   const schedules = useMemo<JournalEntryExportSchedule[]>(
     () => data?.schedules ?? [],
     [data],
@@ -232,6 +258,10 @@ export default function JournalExportSchedulesPage() {
       recipientsText: (s.recipients ?? []).join(", "),
       filterStatus: (s.filterStatus ?? "all") as FilterStatus,
       filterSource: (s.filterSource ?? "all") as FilterSource,
+      postedByFilter:
+        s.filterPostedByUserId != null ? String(s.filterPostedByUserId) : "any",
+      approverFilter:
+        s.filterApproverUserId != null ? String(s.filterApproverUserId) : "any",
       includeLines: s.includeLines,
     });
   }
@@ -253,6 +283,14 @@ export default function JournalExportSchedulesPage() {
       toast({ title: "Name required", variant: "destructive" });
       return null;
     }
+    const postedByUserId =
+      form.postedByFilter !== "any" && /^\d+$/.test(form.postedByFilter)
+        ? Number(form.postedByFilter)
+        : null;
+    const approverUserId =
+      form.approverFilter !== "any" && /^\d+$/.test(form.approverFilter)
+        ? Number(form.approverFilter)
+        : null;
     return {
       name: form.name.trim(),
       enabled: form.enabled,
@@ -266,6 +304,8 @@ export default function JournalExportSchedulesPage() {
         form.filterSource === "all"
           ? null
           : (form.filterSource as JournalEntryExportScheduleBodyFilterSource),
+      filterPostedByUserId: postedByUserId,
+      filterApproverUserId: approverUserId,
       includeLines: form.includeLines,
     };
   }
@@ -279,12 +319,22 @@ export default function JournalExportSchedulesPage() {
     if (previewing) return;
     setPreviewing(true);
     try {
+      const postedByUserId =
+        editing.postedByFilter !== "any" && /^\d+$/.test(editing.postedByFilter)
+          ? Number(editing.postedByFilter)
+          : null;
+      const approverUserId =
+        editing.approverFilter !== "any" && /^\d+$/.test(editing.approverFilter)
+          ? Number(editing.approverFilter)
+          : null;
       const body = {
         cadence: editing.cadence,
         filterStatus:
           editing.filterStatus === "all" ? null : editing.filterStatus,
         filterSource:
           editing.filterSource === "all" ? null : editing.filterSource,
+        filterPostedByUserId: postedByUserId,
+        filterApproverUserId: approverUserId,
         includeLines: editing.includeLines,
       };
       const res = await fetch("/api/journal-entry-export-schedules/preview", {
@@ -482,6 +532,42 @@ export default function JournalExportSchedulesPage() {
                         <span className="mr-2">
                           {s.filterSource ?? "any source"}
                         </span>
+                        {s.filterPostedByUserId != null ? (
+                          <Badge variant="outline" className="mr-1">
+                            posted:{" "}
+                            {(() => {
+                              const u = posters.find(
+                                (p) => p.id === s.filterPostedByUserId,
+                              );
+                              return u
+                                ? actorName({
+                                    id: u.id,
+                                    firstName: u.firstName ?? null,
+                                    lastName: u.lastName ?? null,
+                                    email: u.email ?? null,
+                                  })
+                                : `#${s.filterPostedByUserId}`;
+                            })()}
+                          </Badge>
+                        ) : null}
+                        {s.filterApproverUserId != null ? (
+                          <Badge variant="outline" className="mr-1">
+                            approver:{" "}
+                            {(() => {
+                              const u = approvers.find(
+                                (a) => a.id === s.filterApproverUserId,
+                              );
+                              return u
+                                ? actorName({
+                                    id: u.id,
+                                    firstName: u.firstName ?? null,
+                                    lastName: u.lastName ?? null,
+                                    email: u.email ?? null,
+                                  })
+                                : `#${s.filterApproverUserId}`;
+                            })()}
+                          </Badge>
+                        ) : null}
                         {s.includeLines ? (
                           <Badge variant="outline">+ lines</Badge>
                         ) : null}
@@ -742,6 +828,74 @@ export default function JournalExportSchedulesPage() {
                       <SelectItem value="manual">Manual</SelectItem>
                       <SelectItem value="expense">From expenses</SelectItem>
                       <SelectItem value="bill">From bills</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Posted by</Label>
+                  <Select
+                    value={editing.postedByFilter}
+                    onValueChange={(v) =>
+                      setEditing({ ...editing, postedByFilter: v })
+                    }
+                  >
+                    <SelectTrigger data-testid="select-posted-by">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="any">Anyone</SelectItem>
+                      {posters.map((u) => (
+                        <SelectItem
+                          key={u.id}
+                          value={String(u.id)}
+                          data-testid={`option-posted-by-${u.id}`}
+                        >
+                          {actorName({
+                            id: u.id,
+                            firstName: u.firstName ?? null,
+                            lastName: u.lastName ?? null,
+                            email: u.email ?? null,
+                          })}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Approver</Label>
+                  <Select
+                    value={editing.approverFilter}
+                    onValueChange={(v) =>
+                      setEditing({ ...editing, approverFilter: v })
+                    }
+                  >
+                    <SelectTrigger data-testid="select-approver">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="any">Anyone</SelectItem>
+                      {approvers.length === 0 ? (
+                        <SelectItem value="__none__" disabled>
+                          No copilot approvals yet
+                        </SelectItem>
+                      ) : (
+                        approvers.map((u) => (
+                          <SelectItem
+                            key={u.id}
+                            value={String(u.id)}
+                            data-testid={`option-approver-${u.id}`}
+                          >
+                            {actorName({
+                              id: u.id,
+                              firstName: u.firstName ?? null,
+                              lastName: u.lastName ?? null,
+                              email: u.email ?? null,
+                            })}
+                          </SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
                 </div>

@@ -53,6 +53,21 @@ export const journalEntryExportSchedulesTable = pgTable(
     recipients: text("recipients").array().notNull(),
     filterStatus: text("filter_status"),
     filterSource: text("filter_source"),
+    /**
+     * Task #71 — optional "Posted by" / "Approver" user filters that the
+     * scheduler passes through to `generateJournalEntryCsv`. Mirror the
+     * on-demand CSV download, so an admin can email "Brittney's approvals
+     * every Monday" without first having to run a one-off export.
+     * `set null` on user delete so a removed user doesn't break the row.
+     */
+    filterPostedByUserId: integer("filter_posted_by_user_id").references(
+      () => usersTable.id,
+      { onDelete: "set null" },
+    ),
+    filterApproverUserId: integer("filter_approver_user_id").references(
+      () => usersTable.id,
+      { onDelete: "set null" },
+    ),
     includeLines: boolean("include_lines").notNull().default(false),
     createdByUserId: integer("created_by_user_id").references(
       () => usersTable.id,

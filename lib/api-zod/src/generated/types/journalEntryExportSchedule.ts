@@ -17,6 +17,8 @@ export interface JournalEntryExportSchedule {
   recipients: string[];
   filterStatus?: JournalEntryExportScheduleFilterStatus;
   filterSource?: JournalEntryExportScheduleFilterSource;
+  filterPostedByUserId?: number | null;
+  filterApproverUserId?: number | null;
   includeLines: boolean;
   createdByUserId?: number | null;
   createdAt: string;

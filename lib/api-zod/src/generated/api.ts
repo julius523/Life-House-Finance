@@ -5152,6 +5152,8 @@ export const ListJournalEntryExportSchedulesResponse = zod.object({
       filterSource: zod
         .enum(["copilot", "manual", "expense", "bill"])
         .nullish(),
+      filterPostedByUserId: zod.number().nullish(),
+      filterApproverUserId: zod.number().nullish(),
       includeLines: zod.boolean(),
       createdByUserId: zod.number().nullish(),
       createdAt: zod.string(),
@@ -5177,6 +5179,8 @@ export const CreateJournalEntryExportScheduleBody = zod.object({
   recipients: zod.array(zod.string()),
   filterStatus: zod.enum(["posted", "reversed"]).nullish(),
   filterSource: zod.enum(["copilot", "manual", "expense", "bill"]).nullish(),
+  filterPostedByUserId: zod.number().nullish(),
+  filterApproverUserId: zod.number().nullish(),
   includeLines: zod.boolean().optional(),
 });
 
@@ -5194,6 +5198,8 @@ export const UpdateJournalEntryExportScheduleBody = zod.object({
   recipients: zod.array(zod.string()).optional(),
   filterStatus: zod.enum(["posted", "reversed"]).nullish(),
   filterSource: zod.enum(["copilot", "manual", "expense", "bill"]).nullish(),
+  filterPostedByUserId: zod.number().nullish(),
+  filterApproverUserId: zod.number().nullish(),
   includeLines: zod.boolean().optional(),
 });
 
@@ -5206,6 +5212,8 @@ export const UpdateJournalEntryExportScheduleResponse = zod.object({
     recipients: zod.array(zod.string()),
     filterStatus: zod.enum(["posted", "reversed"]).nullish(),
     filterSource: zod.enum(["copilot", "manual", "expense", "bill"]).nullish(),
+    filterPostedByUserId: zod.number().nullish(),
+    filterApproverUserId: zod.number().nullish(),
     includeLines: zod.boolean(),
     createdByUserId: zod.number().nullish(),
     createdAt: zod.string(),

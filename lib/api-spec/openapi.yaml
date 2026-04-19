@@ -7124,6 +7124,12 @@ components:
           type: string
           enum: [copilot, manual, expense, bill]
           nullable: true
+        filterPostedByUserId:
+          type: integer
+          nullable: true
+        filterApproverUserId:
+          type: integer
+          nullable: true
         includeLines:
           type: boolean
         createdByUserId:
@@ -7202,6 +7208,12 @@ components:
           type: string
           enum: [copilot, manual, expense, bill]
           nullable: true
+        filterPostedByUserId:
+          type: integer
+          nullable: true
+        filterApproverUserId:
+          type: integer
+          nullable: true
         includeLines:
           type: boolean
       required:
@@ -7230,6 +7242,12 @@ components:
         filterSource:
           type: string
           enum: [copilot, manual, expense, bill]
+          nullable: true
+        filterPostedByUserId:
+          type: integer
+          nullable: true
+        filterApproverUserId:
+          type: integer
           nullable: true
         includeLines:
           type: boolean

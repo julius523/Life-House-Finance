@@ -2190,6 +2190,8 @@ export interface JournalEntryExportSchedule {
   recipients: string[];
   filterStatus?: JournalEntryExportScheduleFilterStatus;
   filterSource?: JournalEntryExportScheduleFilterSource;
+  filterPostedByUserId?: number | null;
+  filterApproverUserId?: number | null;
   includeLines: boolean;
   createdByUserId?: number | null;
   createdAt: string;
@@ -2247,6 +2249,8 @@ export interface JournalEntryExportScheduleBody {
   recipients: string[];
   filterStatus?: JournalEntryExportScheduleBodyFilterStatus;
   filterSource?: JournalEntryExportScheduleBodyFilterSource;
+  filterPostedByUserId?: number | null;
+  filterApproverUserId?: number | null;
   includeLines?: boolean;
 }
 
@@ -2286,6 +2290,8 @@ export interface JournalEntryExportSchedulePatchBody {
   recipients?: string[];
   filterStatus?: JournalEntryExportSchedulePatchBodyFilterStatus;
   filterSource?: JournalEntryExportSchedulePatchBodyFilterSource;
+  filterPostedByUserId?: number | null;
+  filterApproverUserId?: number | null;
   includeLines?: boolean;
 }
 

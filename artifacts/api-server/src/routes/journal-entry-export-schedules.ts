@@ -48,6 +48,11 @@ const upsertSchema = z.object({
     .max(MAX_RECIPIENTS, `At most ${MAX_RECIPIENTS} recipients per schedule`),
   filterStatus: z.enum(EXPORT_FILTER_STATUSES).nullable().optional(),
   filterSource: z.enum(EXPORT_FILTER_SOURCES).nullable().optional(),
+  // Task #71 — optional user filters (mirror the on-demand CSV download).
+  // Reject 0 / negatives so the "Anyone" option must be expressed as
+  // explicit null and the scheduler never tries to match user_id <= 0.
+  filterPostedByUserId: z.number().int().positive().nullable().optional(),
+  filterApproverUserId: z.number().int().positive().nullable().optional(),
   includeLines: z.boolean().default(false),
 });
 
@@ -94,6 +99,8 @@ router.post(
         recipients: dedupeRecipients(data.recipients),
         filterStatus: data.filterStatus ?? null,
         filterSource: data.filterSource ?? null,
+        filterPostedByUserId: data.filterPostedByUserId ?? null,
+        filterApproverUserId: data.filterApproverUserId ?? null,
         includeLines: data.includeLines,
         createdByUserId: req.authUser?.id ?? null,
         nextRunAt,
@@ -137,6 +144,10 @@ router.patch(
       next["filterStatus"] = data.filterStatus ?? null;
     if (data.filterSource !== undefined)
       next["filterSource"] = data.filterSource ?? null;
+    if (data.filterPostedByUserId !== undefined)
+      next["filterPostedByUserId"] = data.filterPostedByUserId ?? null;
+    if (data.filterApproverUserId !== undefined)
+      next["filterApproverUserId"] = data.filterApproverUserId ?? null;
     if (data.includeLines !== undefined)
       next["includeLines"] = data.includeLines;
 
@@ -202,6 +213,8 @@ const previewSchema = z.object({
   cadence: z.enum(EXPORT_CADENCES),
   filterStatus: z.enum(EXPORT_FILTER_STATUSES).nullable().optional(),
   filterSource: z.enum(EXPORT_FILTER_SOURCES).nullable().optional(),
+  filterPostedByUserId: z.number().int().positive().nullable().optional(),
+  filterApproverUserId: z.number().int().positive().nullable().optional(),
   includeLines: z.boolean().default(false),
 });
 
@@ -232,6 +245,8 @@ router.post(
           cadence: data.cadence,
           filterStatus: data.filterStatus ?? null,
           filterSource: data.filterSource ?? null,
+          filterPostedByUserId: data.filterPostedByUserId ?? null,
+          filterApproverUserId: data.filterApproverUserId ?? null,
           includeLines: data.includeLines,
         },
         nextRunAt,
