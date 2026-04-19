@@ -23,6 +23,7 @@ import {
   csvMoney,
   csvPercent,
   csvSafeDateRange,
+  csvFilenameSlug,
   type CsvCell,
 } from "@/lib/csv-export";
 
@@ -1940,7 +1941,7 @@ function PLAccountDrillDownRow({
       csvMoney(data.totals.credits),
     ]);
     downloadCsv(
-      `account-activity_${account.code}_${csvSafeDateRange(fromDate, toDate)}.csv`,
+      `account-${account.code}-${csvFilenameSlug(account.name)}_${csvSafeDateRange(fromDate, toDate)}.csv`,
       rows,
     );
   };
@@ -1979,20 +1980,6 @@ function PLAccountDrillDownRow({
           data-testid={`pl-row-activity-${parentSlug}-${account.accountId}`}
         >
           <td colSpan={2} className="bg-muted/20 px-3 py-2">
-            {data && data.lines.length > 0 && (
-              <div className="flex justify-end mb-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={downloadActivityCsv}
-                  className="h-7 px-2 text-xs no-print"
-                  data-testid={`export-csv-pl-activity-${account.accountId}`}
-                >
-                  Export CSV
-                </Button>
-              </div>
-            )}
             {isLoading && (
               <div className="py-1 text-xs text-muted-foreground">
                 Loading journal-entry activity…
@@ -2047,7 +2034,19 @@ function PLAccountDrillDownRow({
                   ))}
                   <tr className="border-t-2">
                     <td className="py-1 pr-2 font-semibold" colSpan={2}>
-                      Totals
+                      <div className="flex items-center gap-2">
+                        <span>Totals</span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={downloadActivityCsv}
+                          className="h-6 px-2 text-xs no-print"
+                          data-testid={`export-csv-pl-activity-${account.accountId}`}
+                        >
+                          Download CSV
+                        </Button>
+                      </div>
                     </td>
                     <td className="py-1 pr-2 text-right tabular-nums font-semibold">
                       {fmtMoney(data.totals.debits)}
@@ -2131,7 +2130,7 @@ function AccountDrillDownRow({
       csvMoney(data.totals.credits),
     ]);
     downloadCsv(
-      `account-activity_${account.code}_${csvSafeDateRange(fromDate, toDate)}.csv`,
+      `account-${account.code}-${csvFilenameSlug(account.name)}_${csvSafeDateRange(fromDate, toDate)}.csv`,
       rows,
     );
   };
@@ -2162,20 +2161,6 @@ function AccountDrillDownRow({
           className="mt-1 mb-2 ml-5 border-l pl-3"
           data-testid={`bs-account-activity-${account.accountId}`}
         >
-          {data && data.lines.length > 0 && (
-            <div className="flex justify-end mb-1">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={downloadActivityCsv}
-                className="h-7 px-2 text-xs no-print"
-                data-testid={`export-csv-bs-activity-${account.accountId}`}
-              >
-                Export CSV
-              </Button>
-            </div>
-          )}
           {isLoading && (
             <div className="py-1 text-muted-foreground">Loading activity…</div>
           )}
@@ -2228,7 +2213,19 @@ function AccountDrillDownRow({
                 ))}
                 <tr className="border-t-2">
                   <td className="py-1 pr-2 font-semibold" colSpan={2}>
-                    Totals
+                    <div className="flex items-center gap-2">
+                      <span>Totals</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={downloadActivityCsv}
+                        className="h-6 px-2 text-xs no-print"
+                        data-testid={`export-csv-bs-activity-${account.accountId}`}
+                      >
+                        Download CSV
+                      </Button>
+                    </div>
                   </td>
                   <td className="py-1 pr-2 text-right tabular-nums font-semibold">
                     {fmt(data.totals.debits)}
