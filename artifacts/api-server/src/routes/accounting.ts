@@ -2171,6 +2171,12 @@ const DraftPayloadSchema = z.object({
 
 const SaveDraftBody = z.object({
   payload: DraftPayloadSchema,
+  /**
+   * Task #44 — last-seen draft version for optimistic locking on PATCH.
+   * Ignored on POST (creating a new draft). Optional for backward compat
+   * during deploy windows; once the UI is updated this is always sent.
+   */
+  expectedVersion: z.number().int().nonnegative().optional(),
 });
 
 function canAccessDraft(
@@ -2197,9 +2203,48 @@ function serializeDraft(d: ManualJournalEntryDraftRow) {
     rejectedAt: d.rejectedAt,
     rejectionReason: d.rejectionReason,
     postedJournalEntryId: d.postedJournalEntryId,
+    // Task #44 — optimistic-lock token. Clients echo this back on every
+    // mutation; mismatches return 409 DRAFT_VERSION_CONFLICT.
+    version: d.version,
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
   };
+}
+
+/**
+ * Task #44 — parse a client-supplied expectedVersion off a request body
+ * or query string. Returns:
+ *   - { ok: true, value: number }   when present and valid (>= 0)
+ *   - { ok: true, value: null }     when absent (legacy clients, no check)
+ *   - { ok: false }                 when present but malformed
+ *
+ * Absent is intentionally allowed so a deploy that lands the server change
+ * before the client change does not start rejecting in-flight requests.
+ * Once all clients are sending the version, mismatches still surface as
+ * 409 from the conditional UPDATE.
+ */
+function parseExpectedVersion(raw: unknown):
+  | { ok: true; value: number | null }
+  | { ok: false } {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  const n = typeof raw === "string" ? Number(raw) : raw;
+  if (typeof n !== "number" || !Number.isInteger(n) || n < 0) {
+    return { ok: false };
+  }
+  return { ok: true, value: n };
+}
+
+function versionConflictResponse(
+  res: Response,
+  current: ManualJournalEntryDraftRow,
+): void {
+  res.status(409).json({
+    error:
+      "This draft was changed by someone else. Refresh to see the latest version.",
+    code: "DRAFT_VERSION_CONFLICT",
+    currentVersion: current.version,
+    currentStatus: current.status,
+  });
 }
 
 /**
@@ -2449,16 +2494,32 @@ router.patch(
       return;
     }
     const summary = summarizeDraftHeader(payload);
-    const [updated] = await db
+    // Task #44 — atomic conditional update guarded by version. If the
+    // expected version was supplied and no longer matches, the UPDATE
+    // returns zero rows and we surface 409 with the live version so the
+    // client can refetch and rebase.
+    const conds = [eq(manualJournalEntryDraftsTable.id, id)];
+    if (parsed.data.expectedVersion !== undefined) {
+      conds.push(
+        eq(manualJournalEntryDraftsTable.version, parsed.data.expectedVersion),
+      );
+    }
+    const updateResult = await db
       .update(manualJournalEntryDraftsTable)
       .set({
         payload,
         entryDate: summary.entryDate,
         memo: summary.memo,
+        version: sql`${manualJournalEntryDraftsTable.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(eq(manualJournalEntryDraftsTable.id, id))
+      .where(and(...conds))
       .returning();
+    if (updateResult.length === 0) {
+      versionConflictResponse(res, existing);
+      return;
+    }
+    const updated = updateResult[0]!;
     await logDraftActivity(
       "manual_je_draft_edited",
       updated!.id,
@@ -2506,9 +2567,32 @@ router.delete(
       });
       return;
     }
-    await db
+    // Task #44 — version on DELETE travels via query string (?expectedVersion=N)
+    // because DELETE bodies are awkward across our fetch helpers. Same
+    // semantics as the other write paths: missing = legacy/no-check,
+    // present-but-stale = 409.
+    const expected = parseExpectedVersion(req.query["expectedVersion"]);
+    if (!expected.ok) {
+      res.status(400).json({
+        error: "Invalid expectedVersion",
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    const delConds = [eq(manualJournalEntryDraftsTable.id, id)];
+    if (expected.value !== null) {
+      delConds.push(
+        eq(manualJournalEntryDraftsTable.version, expected.value),
+      );
+    }
+    const deleted = await db
       .delete(manualJournalEntryDraftsTable)
-      .where(eq(manualJournalEntryDraftsTable.id, id));
+      .where(and(...delConds))
+      .returning({ id: manualJournalEntryDraftsTable.id });
+    if (deleted.length === 0) {
+      versionConflictResponse(res, existing);
+      return;
+    }
     res.status(204).end();
   },
 );
@@ -2608,6 +2692,18 @@ router.post(
       });
       return;
     }
+    // Task #44 — optimistic-lock check, parsed off the (currently empty)
+    // submit body. Same semantics as PATCH/DELETE: missing = legacy/no-check.
+    const submitExpected = parseExpectedVersion(
+      (req.body ?? {})["expectedVersion"],
+    );
+    if (!submitExpected.ok) {
+      res.status(400).json({
+        error: "Invalid expectedVersion",
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
     const validation = await validateManualJournalEntryForSubmit(
       {
         entryDate: submitParsed.data.entryDate,
@@ -2658,7 +2754,13 @@ router.post(
         });
         return;
     }
-    const [updated] = await db
+    const submitConds = [eq(manualJournalEntryDraftsTable.id, id)];
+    if (submitExpected.value !== null) {
+      submitConds.push(
+        eq(manualJournalEntryDraftsTable.version, submitExpected.value),
+      );
+    }
+    const submitResult = await db
       .update(manualJournalEntryDraftsTable)
       .set({
         status: "submitted",
@@ -2670,10 +2772,16 @@ router.post(
         rejectedByUserId: null,
         rejectedAt: null,
         rejectionReason: null,
+        version: sql`${manualJournalEntryDraftsTable.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(eq(manualJournalEntryDraftsTable.id, id))
+      .where(and(...submitConds))
       .returning();
+    if (submitResult.length === 0) {
+      versionConflictResponse(res, existing);
+      return;
+    }
+    const updated = submitResult[0]!;
     await logDraftActivity(
       "manual_je_draft_submitted",
       updated!.id,
@@ -2726,16 +2834,38 @@ router.post(
       });
       return;
     }
-    const [updated] = await db
+    const approveExpected = parseExpectedVersion(
+      (req.body ?? {})["expectedVersion"],
+    );
+    if (!approveExpected.ok) {
+      res.status(400).json({
+        error: "Invalid expectedVersion",
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    const approveConds = [eq(manualJournalEntryDraftsTable.id, id)];
+    if (approveExpected.value !== null) {
+      approveConds.push(
+        eq(manualJournalEntryDraftsTable.version, approveExpected.value),
+      );
+    }
+    const approveResult = await db
       .update(manualJournalEntryDraftsTable)
       .set({
         status: "approved",
         approvedByUserId: user.id,
         approvedAt: new Date(),
+        version: sql`${manualJournalEntryDraftsTable.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(eq(manualJournalEntryDraftsTable.id, id))
+      .where(and(...approveConds))
       .returning();
+    if (approveResult.length === 0) {
+      versionConflictResponse(res, existing);
+      return;
+    }
+    const updated = approveResult[0]!;
     await logDraftActivity(
       "manual_je_draft_approved",
       updated!.id,
@@ -2748,6 +2878,8 @@ router.post(
 
 const RejectDraftBody = z.object({
   reason: z.string().trim().min(5).max(500),
+  /** Task #44 — last-seen draft version for optimistic locking. */
+  expectedVersion: z.number().int().nonnegative().optional(),
 });
 
 router.post(
@@ -2789,17 +2921,32 @@ router.post(
       });
       return;
     }
-    const [updated] = await db
+    const rejectConds = [eq(manualJournalEntryDraftsTable.id, id)];
+    if (parsed.data.expectedVersion !== undefined) {
+      rejectConds.push(
+        eq(
+          manualJournalEntryDraftsTable.version,
+          parsed.data.expectedVersion,
+        ),
+      );
+    }
+    const rejectResult = await db
       .update(manualJournalEntryDraftsTable)
       .set({
         status: "rejected",
         rejectedByUserId: user.id,
         rejectedAt: new Date(),
         rejectionReason: parsed.data.reason,
+        version: sql`${manualJournalEntryDraftsTable.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(eq(manualJournalEntryDraftsTable.id, id))
+      .where(and(...rejectConds))
       .returning();
+    if (rejectResult.length === 0) {
+      versionConflictResponse(res, existing);
+      return;
+    }
+    const updated = rejectResult[0]!;
     await logDraftActivity(
       "manual_je_draft_rejected",
       updated!.id,
@@ -2864,6 +3011,29 @@ router.post(
         code: "INVALID_STATE_TRANSITION",
         status: existing.status,
       });
+      return;
+    }
+    // Task #44 — version pre-check. We do this BEFORE the heavy posting
+    // service call so a stale post attempt fails fast and does not waste
+    // a JE insert. The final mark-posted update below is unconditional
+    // because by this point we own the draft (it was 'approved', the
+    // version matched, and concurrent /post calls are deduped by the
+    // service-level idempotency key derived from the draft id).
+    const postExpected = parseExpectedVersion(
+      (req.body ?? {})["expectedVersion"],
+    );
+    if (!postExpected.ok) {
+      res.status(400).json({
+        error: "Invalid expectedVersion",
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    if (
+      postExpected.value !== null &&
+      postExpected.value !== existing.version
+    ) {
+      versionConflictResponse(res, existing);
       return;
     }
     // Belt-and-braces: even though the approve route already enforces
@@ -2963,6 +3133,10 @@ router.post(
           .set({
             status: "posted",
             postedJournalEntryId: result.journalEntry.id,
+            // Task #44 — bump the version on the terminal transition too,
+            // so any client still holding the pre-post version sees a
+            // 409 if it tries to act on the now-posted draft.
+            version: sql`${manualJournalEntryDraftsTable.version} + 1`,
             updatedAt: new Date(),
           })
           .where(eq(manualJournalEntryDraftsTable.id, existing.id))

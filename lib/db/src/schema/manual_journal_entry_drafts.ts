@@ -124,6 +124,15 @@ export const manualJournalEntryDraftsTable = pgTable(
       { onDelete: "set null" },
     ),
 
+    /**
+     * Task #44 — optimistic-lock token. Bumped by every server-side
+     * mutation (PATCH/DELETE/submit/approve/reject/post). Clients send
+     * the version they last observed; mismatched versions are rejected
+     * with 409 DRAFT_VERSION_CONFLICT so two reviewers cannot silently
+     * overwrite each other.
+     */
+    version: integer("version").notNull().default(0),
+
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

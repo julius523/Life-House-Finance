@@ -89,6 +89,8 @@ type DraftRecord = {
   entryDate: string | null;
   memo: string | null;
   payload: DraftPayload;
+  /** Task #44 — optimistic-lock token sent back on PATCH/DELETE. */
+  version: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -137,6 +139,10 @@ export default function JournalEntriesNewPage() {
   const [savingDraft, setSavingDraft] = useState(false);
   const [discardingDraft, setDiscardingDraft] = useState(false);
   const [draftId, setDraftId] = useState<number | null>(null);
+  // Task #44 — last-seen draft version for optimistic locking. Sent on
+  // PATCH/DELETE; updated from every server response so subsequent saves
+  // do not collide with themselves.
+  const [draftVersion, setDraftVersion] = useState<number | null>(null);
   const [draftLoading, setDraftLoading] = useState(false);
   const [draftLoadError, setDraftLoadError] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -182,6 +188,7 @@ export default function JournalEntriesNewPage() {
       .then(({ draft }) => {
         if (cancelled) return;
         setDraftId(draft.id);
+        setDraftVersion(draft.version);
         setLastSavedAt(draft.updatedAt);
         const p = draft.payload ?? { entryDate: "", memo: "", lines: [] };
         // Restore exactly what was saved — including blank values — so
@@ -316,8 +323,19 @@ export default function JournalEntriesNewPage() {
       if (draftId !== null) {
         const data = await apiJson<{ draft: DraftRecord }>(
           `/accounting/journal-entry-drafts/${draftId}`,
-          { method: "PATCH", body: { payload } },
+          {
+            method: "PATCH",
+            body: {
+              payload,
+              // Task #44 — echo last-seen version so the server can reject
+              // a save that would clobber another reviewer's edit.
+              ...(draftVersion !== null
+                ? { expectedVersion: draftVersion }
+                : {}),
+            },
+          },
         );
+        setDraftVersion(data.draft.version);
         setLastSavedAt(data.draft.updatedAt);
         toast({
           title: "Draft saved",
@@ -329,6 +347,7 @@ export default function JournalEntriesNewPage() {
           { method: "POST", body: { payload } },
         );
         setDraftId(data.draft.id);
+        setDraftVersion(data.draft.version);
         setLastSavedAt(data.draft.updatedAt);
         // Reflect the draft id in the URL so a refresh resumes correctly.
         setLocation(`/accounting/journal-entries/new?draft=${data.draft.id}`, {
@@ -360,9 +379,12 @@ export default function JournalEntriesNewPage() {
     }
     setDiscardingDraft(true);
     try {
-      await apiJson<null>(`/accounting/journal-entry-drafts/${draftId}`, {
-        method: "DELETE",
-      });
+      // Task #44 — version goes on the query string for DELETE.
+      const path =
+        draftVersion !== null
+          ? `/accounting/journal-entry-drafts/${draftId}?expectedVersion=${draftVersion}`
+          : `/accounting/journal-entry-drafts/${draftId}`;
+      await apiJson<null>(path, { method: "DELETE" });
       toast({ title: "Draft discarded" });
       setLocation("/accounting/journal-entries");
     } catch (e) {
@@ -403,12 +425,17 @@ export default function JournalEntriesNewPage() {
         body: payload,
       });
       // Clean up the draft (if any) now that the entry is posted.
+      // Task #44 — pass the last-seen version so a concurrent edit on the
+      // draft row is respected (server returns 409 instead of silently
+      // wiping a newer revision). Failure here is non-fatal because the
+      // ledger post itself already succeeded.
       if (draftId !== null) {
         try {
-          await apiJson<null>(
-            `/accounting/journal-entry-drafts/${draftId}`,
-            { method: "DELETE" },
-          );
+          const cleanupPath =
+            draftVersion !== null
+              ? `/accounting/journal-entry-drafts/${draftId}?expectedVersion=${draftVersion}`
+              : `/accounting/journal-entry-drafts/${draftId}`;
+          await apiJson<null>(cleanupPath, { method: "DELETE" });
         } catch {
           // Non-fatal: the post succeeded; a stale draft can be removed
           // from the drafts list.

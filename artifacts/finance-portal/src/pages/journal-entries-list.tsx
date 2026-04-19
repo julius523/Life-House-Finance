@@ -78,6 +78,8 @@ type DraftSummary = {
   rejectedByUserId: number | null;
   rejectionReason: string | null;
   postedJournalEntryId: number | null;
+  /** Task #44 — optimistic-lock token, sent on discard. */
+  version: number;
   createdAt: string;
   updatedAt: string;
   createdBy: {
@@ -174,7 +176,7 @@ export default function JournalEntriesListPage() {
     };
   }, [canView, draftScope, draftStatusFilter, draftRefreshKey]);
 
-  const discardDraft = async (id: number) => {
+  const discardDraft = async (id: number, version: number) => {
     if (
       typeof window !== "undefined" &&
       !window.confirm("Discard this draft? This cannot be undone.")
@@ -182,9 +184,12 @@ export default function JournalEntriesListPage() {
       return;
     }
     try {
-      await apiJson<null>(`/accounting/journal-entry-drafts/${id}`, {
-        method: "DELETE",
-      });
+      // Task #44 — send last-seen version so we don't blow away a draft
+      // that someone else just edited.
+      await apiJson<null>(
+        `/accounting/journal-entry-drafts/${id}?expectedVersion=${version}`,
+        { method: "DELETE" },
+      );
       toast({ title: "Draft discarded" });
       setDraftRefreshKey((k) => k + 1);
     } catch (e) {
@@ -493,7 +498,7 @@ export default function JournalEntriesListPage() {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => discardDraft(d.id)}
+                                onClick={() => discardDraft(d.id, d.version)}
                                 data-testid={`button-discard-draft-${d.id}`}
                                 title="Discard draft"
                               >

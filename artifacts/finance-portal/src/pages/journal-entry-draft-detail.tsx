@@ -72,6 +72,12 @@ type DraftRecord = {
   rejectedAt: string | null;
   rejectionReason: string | null;
   postedJournalEntryId: number | null;
+  /**
+   * Task #44 — server-issued optimistic-lock token. Echoed back on every
+   * mutation; if it has moved on the server, the request fails with 409
+   * DRAFT_VERSION_CONFLICT and the UI refetches.
+   */
+  version: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -262,10 +268,17 @@ export default function JournalEntryDraftDetailPage() {
     setActionError(null);
     try {
       const path = `/accounting/journal-entry-drafts/${draft.id}/${action}`;
-      const init: { method: string; body?: unknown } = { method: "POST" };
+      // Task #44 — every workflow transition carries the last-seen draft
+      // version so the server can reject a stale action with 409
+      // DRAFT_VERSION_CONFLICT instead of silently overwriting.
+      const body: Record<string, unknown> = { expectedVersion: draft.version };
       if (action === "reject") {
-        init.body = { reason: rejectReason.trim() };
+        body["reason"] = rejectReason.trim();
       }
+      const init: { method: string; body?: unknown } = {
+        method: "POST",
+        body,
+      };
       const data = await apiJson<{
         draft: DraftRecord;
         journalEntry?: { id: number; entryNo: string };
@@ -300,6 +313,10 @@ export default function JournalEntryDraftDetailPage() {
         FORBIDDEN: "Not allowed",
         INVALID_PAYLOAD: "Invalid input",
         IDEMPOTENCY_CONFLICT: "Posting key conflict",
+        // Task #44 — another reviewer changed the draft between our last
+        // load and this action. We refetch below so the buttons reflect
+        // reality.
+        DRAFT_VERSION_CONFLICT: "Draft was changed by someone else",
       };
       setActionError({
         title: code ? (titleByCode[code] ?? "Action failed") : "Action failed",
@@ -314,7 +331,10 @@ export default function JournalEntryDraftDetailPage() {
         code === "INVALID_STATE_TRANSITION" ||
         code === "DRAFT_NOT_EDITABLE" ||
         code === "DRAFT_NOT_DELETABLE" ||
-        code === "IDEMPOTENCY_CONFLICT"
+        code === "IDEMPOTENCY_CONFLICT" ||
+        // Task #44 — version conflict means our local copy is stale;
+        // refetch so the next attempt uses the new version.
+        code === "DRAFT_VERSION_CONFLICT"
       ) {
         setRefreshKey((k) => k + 1);
       }
