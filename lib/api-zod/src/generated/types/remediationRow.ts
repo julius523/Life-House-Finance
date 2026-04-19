@@ -31,5 +31,12 @@ export interface RemediationRow {
   sourceType?: RemediationRowSourceType;
   sourceRecordId?: number | null;
   sourceRecordLink?: string | null;
+  /** True when the accounting period covering `entryDate` is closed.
+Posted corrective actions cannot complete while the period is
+locked; the dialog uses this to warn operators up front.
+ */
+  periodLocked: boolean;
+  /** Label of the period covering `entryDate`, when one exists. */
+  periodLabel?: string | null;
   shortMessage: string;
 }

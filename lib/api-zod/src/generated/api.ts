@@ -5565,6 +5565,15 @@ export const ListRemediationQueueResponse = zod.object({
       sourceType: zod.enum(["expense", "bill"]).nullish(),
       sourceRecordId: zod.number().nullish(),
       sourceRecordLink: zod.string().nullish(),
+      periodLocked: zod
+        .boolean()
+        .describe(
+          "True when the accounting period covering `entryDate` is closed.\nPosted corrective actions cannot complete while the period is\nlocked; the dialog uses this to warn operators up front.\n",
+        ),
+      periodLabel: zod
+        .string()
+        .nullish()
+        .describe("Label of the period covering `entryDate`, when one exists."),
       shortMessage: zod.string(),
     }),
   ),

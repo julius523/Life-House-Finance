@@ -5839,6 +5839,16 @@ components:
         sourceRecordLink:
           type: string
           nullable: true
+        periodLocked:
+          type: boolean
+          description: |
+            True when the accounting period covering `entryDate` is closed.
+            Posted corrective actions cannot complete while the period is
+            locked; the dialog uses this to warn operators up front.
+        periodLabel:
+          type: string
+          nullable: true
+          description: Label of the period covering `entryDate`, when one exists.
         shortMessage: { type: string }
       required:
         - id
@@ -5850,6 +5860,7 @@ components:
         - lineId
         - debitCents
         - creditCents
+        - periodLocked
         - shortMessage
 
     RemediationListResponse:

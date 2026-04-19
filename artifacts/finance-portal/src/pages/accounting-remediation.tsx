@@ -27,6 +27,8 @@ import {
   useRemediatePostedJournalEntry,
   useListChartOfAccounts,
   useGetJournalEntry,
+  useGetExpense,
+  useGetBill,
   getListRemediationQueueQueryKey,
   getGetRemediationCountsQueryKey,
   getGetReconciliationReportQueryKey,
@@ -73,7 +75,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { AlertTriangle, ChevronDown } from "lucide-react";
+import { AlertTriangle, ChevronDown, Lock } from "lucide-react";
 
 type FailureCode =
   | "missing_account"
@@ -819,6 +821,42 @@ function PostedRemediationDialog({
   const original = (
     originalQuery.data as { journalEntry?: Record<string, unknown> } | undefined
   )?.journalEntry;
+
+  // Pull the upstream expense / bill summary so the operator can see what
+  // source record produced this JE without a second tab. We lean on the
+  // generated useGetExpense / useGetBill hooks (same hooks the expense /
+  // bill detail pages use) rather than inventing a third source-lookup
+  // path. The query stays disabled when the row has no source link, so
+  // manual-only JEs don't pay for a needless round-trip.
+  const sourceExpenseQuery = useGetExpense(row.sourceRecordId ?? 0, {
+    query: {
+      enabled:
+        row.sourceType === "expense" &&
+        typeof row.sourceRecordId === "number" &&
+        row.sourceRecordId > 0,
+      staleTime: 30_000,
+    },
+  });
+  const sourceBillQuery = useGetBill(row.sourceRecordId ?? 0, {
+    query: {
+      enabled:
+        row.sourceType === "bill" &&
+        typeof row.sourceRecordId === "number" &&
+        row.sourceRecordId > 0,
+      staleTime: 30_000,
+    },
+  });
+  // Both useGetExpense and useGetBill return the entity directly (Expense /
+  // Bill), not wrapped under an `{ expense }` / `{ bill }` envelope — see
+  // lib/api-client-react/src/generated/api.ts (getExpense returns
+  // Promise<Expense>). Reading from the wrong shape silently disables the
+  // inline summary, which is exactly what we're trying to surface here.
+  const sourceExpense = sourceExpenseQuery.data as
+    | { merchant?: string; amount?: number; expenseDate?: string; description?: string }
+    | undefined;
+  const sourceBill = sourceBillQuery.data as
+    | { vendorName?: string; amount?: number; invoiceNumber?: string; dueDate?: string; description?: string }
+    | undefined;
   const originalLines = (original?.lines as
     | Array<{
         lineNo: number;
@@ -933,15 +971,29 @@ function PostedRemediationDialog({
       const e = err as RemediationError;
       const status = e.status;
       const code = e.data?.code;
+      const reason = e.data?.reason;
       let title = "Could not apply corrective action";
       let description: string | undefined =
         e.data?.message ?? e.message ?? undefined;
 
-      if (status === 403 || code === "FORBIDDEN") {
+      // The adjusting-entry path wraps every postingService failure in
+      // ADJUSTING_POST_FAILED with a `reason` discriminator. Without
+      // unpacking that here, period_locked / forbidden silently fall back
+      // to the generic toast and the operator can't tell why the submit
+      // bounced. The reverse-and-replace path uses dedicated codes
+      // (REPLACEMENT_POST_FAILED, PERIOD_LOCKED) and is handled below.
+      if (
+        status === 403 ||
+        code === "FORBIDDEN" ||
+        (code === "ADJUSTING_POST_FAILED" && reason === "forbidden")
+      ) {
         title = "Not allowed";
         description =
           "Your role can't apply corrective actions to posted journal entries.";
-      } else if (code === "PERIOD_LOCKED") {
+      } else if (
+        code === "PERIOD_LOCKED" ||
+        (code === "ADJUSTING_POST_FAILED" && reason === "period_locked")
+      ) {
         title = "Period is locked";
         description =
           "The accounting period containing this entry is closed. Reopen it before applying corrections.";
@@ -1000,7 +1052,10 @@ function PostedRemediationDialog({
             </div>
             <div className="text-xs">{row.shortMessage}</div>
             {row.sourceRecordLink ? (
-              <div className="text-xs">
+              <div
+                className="text-xs"
+                data-testid="remediation-posted-source-chip"
+              >
                 <span className="text-muted-foreground">Source:</span>{" "}
                 <Link
                   href={row.sourceRecordLink}
@@ -1008,6 +1063,57 @@ function PostedRemediationDialog({
                 >
                   {row.sourceType} #{row.sourceRecordId}
                 </Link>
+                {row.sourceType === "expense" && sourceExpense ? (
+                  <span className="ml-2 text-muted-foreground">
+                    {sourceExpense.merchant ?? "(unknown merchant)"} •{" "}
+                    {typeof sourceExpense.amount === "number"
+                      ? `$${sourceExpense.amount.toFixed(2)}`
+                      : "—"}
+                    {sourceExpense.expenseDate
+                      ? ` • ${sourceExpense.expenseDate}`
+                      : ""}
+                    {sourceExpense.description
+                      ? ` — ${sourceExpense.description}`
+                      : ""}
+                  </span>
+                ) : null}
+                {row.sourceType === "bill" && sourceBill ? (
+                  <span className="ml-2 text-muted-foreground">
+                    {sourceBill.vendorName ?? "(unknown vendor)"} •{" "}
+                    {typeof sourceBill.amount === "number"
+                      ? `$${sourceBill.amount.toFixed(2)}`
+                      : "—"}
+                    {sourceBill.invoiceNumber
+                      ? ` • Invoice ${sourceBill.invoiceNumber}`
+                      : ""}
+                    {sourceBill.dueDate ? ` • due ${sourceBill.dueDate}` : ""}
+                    {sourceBill.description
+                      ? ` — ${sourceBill.description}`
+                      : ""}
+                  </span>
+                ) : null}
+              </div>
+            ) : (
+              <div
+                className="text-xs text-muted-foreground"
+                data-testid="remediation-posted-source-chip"
+              >
+                Source: manual entry (no upstream expense or bill).
+              </div>
+            )}
+            {row.periodLocked ? (
+              <div
+                className="mt-1 inline-flex items-center gap-1 rounded border border-red-300 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-900"
+                data-testid="remediation-posted-period-locked-badge"
+              >
+                <Lock className="h-3 w-3" />
+                Period locked{row.periodLabel ? ` — ${row.periodLabel}` : ""}.
+                Reopen the period before submitting; this corrective action
+                will be rejected otherwise.
+              </div>
+            ) : row.periodLabel ? (
+              <div className="text-xs text-muted-foreground">
+                Period: {row.periodLabel} (open).
               </div>
             ) : null}
             {originalLines.length > 0 ? (
@@ -1114,6 +1220,33 @@ function PostedRemediationDialog({
           </div>
         </div>
 
+        {/* Explicit "this will create…" preview so the operator knows
+            exactly what hits the books before they click submit. */}
+        <div
+          className="rounded-md border border-blue-200 bg-blue-50/40 p-2 text-xs text-blue-900"
+          data-testid="remediation-posted-action-preview"
+        >
+          <span className="font-semibold">This will:</span>{" "}
+          {isReverseReplace ? (
+            <>
+              post a reversal of{" "}
+              <span className="font-mono">
+                {row.jeNumber ?? `JE #${row.entryId}`}
+              </span>{" "}
+              and create a brand-new replacement journal entry from the
+              lines above.
+            </>
+          ) : (
+            <>
+              post a new adjusting journal entry that references{" "}
+              <span className="font-mono">
+                {row.jeNumber ?? `JE #${row.entryId}`}
+              </span>{" "}
+              from the lines above. The original stays in the books.
+            </>
+          )}
+        </div>
+
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
             Cancel
@@ -1126,8 +1259,8 @@ function PostedRemediationDialog({
             {mutation.isPending
               ? "Submitting…"
               : isReverseReplace
-                ? "Reverse and post replacement"
-                : "Post adjusting entry"}
+                ? "Reverse and create replacement entry"
+                : "Create adjusting entry"}
           </Button>
         </DialogFooter>
       </DialogContent>

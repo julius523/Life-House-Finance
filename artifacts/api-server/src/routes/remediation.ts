@@ -32,6 +32,7 @@ import {
   manualJournalEntryDraftsTable,
   chartOfAccountsTable,
   accountingSourceLinksTable,
+  accountingPeriodsTable,
   activityLogTable,
 } from "@workspace/db";
 import { requireAuth, requireRole } from "../lib/auth";
@@ -112,6 +113,18 @@ type RemediationRow = {
   sourceType: SourceType | null;
   sourceRecordId: number | null;
   sourceRecordLink: string | null;
+  /**
+   * True when the accounting period covering `entryDate` is closed. Posted
+   * corrective actions (reverse_and_replace / adjusting_entry) cannot
+   * complete while the period is locked, so the dialog uses this to warn
+   * the operator up front instead of after a failed submit.
+   *
+   * Null `entryDate` (only possible for some draft rows) yields false —
+   * there's no period to lock yet.
+   */
+  periodLocked: boolean;
+  /** Label of the period covering `entryDate`, when one exists. */
+  periodLabel: string | null;
   shortMessage: string;
 };
 
@@ -145,8 +158,39 @@ function sourceLink(
  * in-process merge, and the queue size is naturally small (only
  * failing rows survive).
  */
+/**
+ * Pre-load every accounting period once so we can stamp `periodLocked` /
+ * `periodLabel` onto each queue row without an N+1 query. Period count
+ * stays small (one per closed month or so), and the queue itself only
+ * holds failing rows, so resolving the covering period in JS via a
+ * date-range scan is cheap and simple.
+ */
+async function loadPeriodResolver(): Promise<
+  (entryDate: string | null) => { locked: boolean; label: string | null }
+> {
+  const periods = await db
+    .select({
+      label: accountingPeriodsTable.label,
+      periodStart: accountingPeriodsTable.periodStart,
+      periodEnd: accountingPeriodsTable.periodEnd,
+      status: accountingPeriodsTable.status,
+    })
+    .from(accountingPeriodsTable);
+  return (entryDate) => {
+    if (!entryDate) return { locked: false, label: null };
+    // Period dates are stored as `YYYY-MM-DD`, so lexical compare is safe.
+    for (const p of periods) {
+      if (entryDate >= p.periodStart && entryDate <= p.periodEnd) {
+        return { locked: p.status === "closed", label: p.label };
+      }
+    }
+    return { locked: false, label: null };
+  };
+}
+
 async function loadAllRows(): Promise<RemediationRow[]> {
   const rows: RemediationRow[] = [];
+  const resolvePeriod = await loadPeriodResolver();
 
   // ----- Posted side -------------------------------------------------------
   // One row per failing line. A single posted line can fail multiple checks
@@ -224,6 +268,10 @@ async function loadAllRows(): Promise<RemediationRow[]> {
         (r.sourceType as SourceType | null) ?? null,
         r.sourceId ?? null,
       ),
+      ...(() => {
+        const p = resolvePeriod(r.entryDate);
+        return { periodLocked: p.locked, periodLabel: p.label };
+      })(),
     };
 
     const codes: FailureCode[] = [];
@@ -304,6 +352,10 @@ async function loadAllRows(): Promise<RemediationRow[]> {
       sourceType: sType,
       sourceRecordId: r.sourceId ?? null,
       sourceRecordLink: sourceLink(sType, r.sourceId ?? null),
+      ...(() => {
+        const p = resolvePeriod(r.entryDate);
+        return { periodLocked: p.locked, periodLabel: p.label };
+      })(),
       shortMessage: `Debits ${(r.debits / 100).toFixed(2)} ≠ credits ${(r.credits / 100).toFixed(2)}.`,
     });
   }
@@ -423,6 +475,10 @@ async function loadAllRows(): Promise<RemediationRow[]> {
           link?.sourceType ?? null,
           link?.sourceId ?? null,
         ),
+        ...(() => {
+          const p = resolvePeriod(d.entryDate ?? null);
+          return { periodLocked: p.locked, periodLabel: p.label };
+        })(),
       };
 
       const codes: FailureCode[] = [];
@@ -482,6 +538,10 @@ async function loadAllRows(): Promise<RemediationRow[]> {
           link?.sourceType ?? null,
           link?.sourceId ?? null,
         ),
+        ...(() => {
+          const p = resolvePeriod(d.entryDate ?? null);
+          return { periodLocked: p.locked, periodLabel: p.label };
+        })(),
         shortMessage: `Debits ${(totalDebits / 100).toFixed(2)} ≠ credits ${(totalCredits / 100).toFixed(2)}.`,
       });
     }
