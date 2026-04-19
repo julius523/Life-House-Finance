@@ -444,7 +444,7 @@ export default function JournalEntriesListPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="drafts" className="scroll-mt-20">
         <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2">
           <div>
             <CardTitle className="text-base flex items-center gap-2">

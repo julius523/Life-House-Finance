@@ -13,6 +13,30 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, CalendarCheck, CheckCircle2 } from "lucide-react";
+import { PeriodDraftsBanner } from "@/components/period-drafts-banner";
+
+function monthRange(month: string | null | undefined): {
+  from: string;
+  to: string;
+  label: string;
+} | null {
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) return null;
+  const [yearStr, monthStr] = month.split("-");
+  const year = Number(yearStr);
+  const m = Number(monthStr);
+  if (!Number.isInteger(year) || !Number.isInteger(m) || m < 1 || m > 12) {
+    return null;
+  }
+  const from = `${month}-01`;
+  const lastDay = new Date(Date.UTC(year, m, 0)).getUTCDate();
+  const to = `${month}-${String(lastDay).padStart(2, "0")}`;
+  const label = new Date(Date.UTC(year, m - 1, 1)).toLocaleString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  return { from, to, label };
+}
 
 export default function MonthEndDetail() {
   const [, params] = useRoute("/month-end/:id");
@@ -74,6 +98,8 @@ export default function MonthEndDetail() {
     return <div>Checklist not found</div>;
   }
 
+  const range = monthRange(checklist.month);
+
   const percentComplete = checklist.totalCount > 0 
     ? Math.round((checklist.completedCount / checklist.totalCount) * 100) 
     : 0;
@@ -107,6 +133,14 @@ export default function MonthEndDetail() {
           </div>
         </div>
       </div>
+
+      {range && (
+        <PeriodDraftsBanner
+          fromDate={range.from}
+          toDate={range.to}
+          periodLabel={range.label}
+        />
+      )}
 
       <Card>
         <CardContent className="p-6">

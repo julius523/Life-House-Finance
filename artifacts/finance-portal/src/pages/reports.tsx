@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Printer, BarChart3 } from "lucide-react";
 import { format } from "date-fns";
 import { Checkbox } from "@/components/ui/checkbox";
+import { PeriodDraftsBanner } from "@/components/period-drafts-banner";
 
 const fmtMoney = (n: number) =>
   new Intl.NumberFormat("en-US", {
@@ -666,6 +667,16 @@ export default function ReportsPage() {
           )}
 
           {selected.trialBalance && <div className="print-page-break" />}
+
+          {selected.trialBalance && (
+            <div className="no-print">
+              <PeriodDraftsBanner
+                fromDate={fromDate}
+                toDate={toDate}
+                periodLabel={`${format(new Date(fromDate), "MMM d, yyyy")} – ${format(new Date(toDate), "MMM d, yyyy")}`}
+              />
+            </div>
+          )}
 
           {selected.trialBalance && (
             <Card>

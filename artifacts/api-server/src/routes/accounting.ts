@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import OpenAI from "openai";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import {
   db,
   copilotThreadsTable,
@@ -2932,6 +2932,39 @@ router.get(
     const conds = [];
     if (scope !== "all") {
       conds.push(eq(manualJournalEntryDraftsTable.createdByUserId, user.id));
+    }
+    // Task #36 — let close/Trial Balance pages filter drafts by entryDate so
+    // they can warn reviewers about open drafts whose entry date falls in the
+    // period being closed. Format must be YYYY-MM-DD; bad values are ignored
+    // (treated as "no filter") rather than 400ing the list.
+    const isYmd = (s: unknown): s is string =>
+      typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const entryDateFrom = req.query["entryDateFrom"];
+    const entryDateTo = req.query["entryDateTo"];
+    if (isYmd(entryDateFrom)) {
+      conds.push(gte(manualJournalEntryDraftsTable.entryDate, entryDateFrom));
+    }
+    if (isYmd(entryDateTo)) {
+      conds.push(lte(manualJournalEntryDraftsTable.entryDate, entryDateTo));
+    }
+    // Optional comma-separated status filter so callers can narrow to "open"
+    // (non-terminal) drafts. Unknown statuses are dropped silently.
+    const allowedStatuses = new Set([
+      "draft",
+      "submitted",
+      "approved",
+      "rejected",
+      "posted",
+    ]);
+    const statusesRaw = req.query["statuses"];
+    if (typeof statusesRaw === "string" && statusesRaw.trim() !== "") {
+      const list = statusesRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => allowedStatuses.has(s));
+      if (list.length > 0) {
+        conds.push(inArray(manualJournalEntryDraftsTable.status, list));
+      }
     }
     const rows = await db
       .select({
