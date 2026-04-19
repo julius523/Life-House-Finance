@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useLocation } from "wouter";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useSearch } from "wouter";
 import {
   Card,
   CardContent,
@@ -203,22 +203,114 @@ function parseDateOnly(iso: string): Date {
   return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1);
 }
 
+// Task #72 — keep filter state shareable via URL query string. Reading the
+// initial state from the URL on mount means a link like
+// `/accounting/journal-entries?approver=12&status=posted` restores those
+// dropdowns; writing the state back on every change makes the URL the
+// source of truth so browser back/forward replays the filter history.
+function readFiltersFromSearch(search: string): {
+  status: StatusFilter;
+  source: SourceFilter;
+  from: string;
+  to: string;
+  postedBy: string;
+  approver: string;
+} {
+  const p = new URLSearchParams(search);
+  const rawStatus = p.get("status");
+  const rawSource = p.get("source");
+  const rawPostedBy = p.get("postedBy");
+  const rawApprover = p.get("approver");
+  const status: StatusFilter =
+    rawStatus === "posted" || rawStatus === "reversed" ? rawStatus : "all";
+  const source: SourceFilter =
+    rawSource === "manual" ||
+    rawSource === "copilot" ||
+    rawSource === "expense" ||
+    rawSource === "bill"
+      ? rawSource
+      : "all";
+  return {
+    status,
+    source,
+    from: p.get("from") ?? "",
+    to: p.get("to") ?? "",
+    postedBy: rawPostedBy && /^\d+$/.test(rawPostedBy) ? rawPostedBy : "any",
+    approver: rawApprover && /^\d+$/.test(rawApprover) ? rawApprover : "any",
+  };
+}
+
+function buildFiltersSearch(f: {
+  status: StatusFilter;
+  source: SourceFilter;
+  from: string;
+  to: string;
+  postedBy: string;
+  approver: string;
+}): string {
+  const p = new URLSearchParams();
+  if (f.status !== "all") p.set("status", f.status);
+  if (f.source !== "all") p.set("source", f.source);
+  if (f.from) p.set("from", f.from);
+  if (f.to) p.set("to", f.to);
+  if (f.postedBy !== "any") p.set("postedBy", f.postedBy);
+  if (f.approver !== "any") p.set("approver", f.approver);
+  return p.toString();
+}
+
 export default function JournalEntriesListPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+  const search = useSearch();
   const canView = user?.role === "admin" || user?.role === "approver";
 
-  const [status, setStatus] = useState<StatusFilter>("all");
-  const [source, setSource] = useState<SourceFilter>("all");
-  const [from, setFrom] = useState<string>("");
-  const [to, setTo] = useState<string>("");
-  // Task #50 — "any" means "no filter" (the default). Otherwise we hold
-  // a user id as a string to keep the Select component happy (it requires
-  // string values).
-  const [postedByFilter, setPostedByFilter] = useState<string>("any");
-  const [approverFilter, setApproverFilter] = useState<string>("any");
+  // Task #72 — the URL query string is the single source of truth for the
+  // filters. Reading derived state on every render means browser back/forward
+  // (which fires popstate → useSearch update) just works without effect
+  // ping-pong, and a shared link hydrates the controls on first render.
+  const filters = useMemo(() => readFiltersFromSearch(search), [search]);
+  const { status, source, from, to, postedBy: postedByFilter, approver: approverFilter } = filters;
   const [page, setPage] = useState(0);
+
+  const updateFilters = useCallback(
+    (
+      patch: Partial<ReturnType<typeof readFiltersFromSearch>>,
+      opts: { replace?: boolean } = {},
+    ) => {
+      const next = buildFiltersSearch({ ...filters, ...patch });
+      const path = window.location.pathname;
+      setLocation(next ? `${path}?${next}` : path, { replace: opts.replace });
+    },
+    [filters, setLocation],
+  );
+
+  const setStatus = useCallback(
+    (v: StatusFilter) => updateFilters({ status: v }),
+    [updateFilters],
+  );
+  const setSource = useCallback(
+    (v: SourceFilter) => updateFilters({ source: v }),
+    [updateFilters],
+  );
+  // Date inputs fire onChange on every keystroke, so use replace to keep the
+  // history stack readable. The shared link still captures the final value.
+  const setFrom = useCallback(
+    (v: string) => updateFilters({ from: v }, { replace: true }),
+    [updateFilters],
+  );
+  const setTo = useCallback(
+    (v: string) => updateFilters({ to: v }, { replace: true }),
+    [updateFilters],
+  );
+  const setPostedByFilter = useCallback(
+    (v: string) => updateFilters({ postedBy: v }),
+    [updateFilters],
+  );
+  const setApproverFilter = useCallback(
+    (v: string) => updateFilters({ approver: v }),
+    [updateFilters],
+  );
 
   const queryClient = useQueryClient();
   const deleteDraftMut = useDeleteJournalEntryDraft();
@@ -487,12 +579,15 @@ export default function JournalEntriesListPage() {
   const hasPrev = page > 0;
 
   const clearFilters = () => {
-    setStatus("all");
-    setSource("all");
-    setFrom("");
-    setTo("");
-    setPostedByFilter("any");
-    setApproverFilter("any");
+    // Single update so the cleared state is one history entry, not six.
+    updateFilters({
+      status: "all",
+      source: "all",
+      from: "",
+      to: "",
+      postedBy: "any",
+      approver: "any",
+    });
   };
 
   const filtersActive =
