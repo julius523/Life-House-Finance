@@ -149,6 +149,15 @@ export async function generateDraftFromExpense(
       if (!expense) {
         throw new BlockInTxError("other", `Expense ${expenseId} not found`);
       }
+      // Defense-in-depth: only approved expenses generate accounting drafts.
+      // Both call sites already enforce this, but reasserting here keeps
+      // the service-level invariant explicit if a future caller is added.
+      if (expense.status !== "approved") {
+        throw new BlockInTxError(
+          "other",
+          `Expense #${expenseId} is not in 'approved' state (status=${expense.status})`,
+        );
+      }
       if (!expense.categoryId) {
         throw new BlockInTxError(
           "missing_category",
