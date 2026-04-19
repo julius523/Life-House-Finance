@@ -17,6 +17,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { PeriodDraftsBanner } from "@/components/period-drafts-banner";
 import { PanelErrorBoundary } from "@/components/error-boundary";
 import { isValidYmd, isValidRange, safeFormatDate } from "@/lib/safe-date";
+import {
+  downloadCsv,
+  csvMoney,
+  csvPercent,
+  csvSafeDateRange,
+  type CsvCell,
+} from "@/lib/csv-export";
 
 const fmtMoney = (n: number) =>
   new Intl.NumberFormat("en-US", {
@@ -254,52 +261,309 @@ export default function ReportsPage() {
   }, [tb, tbSort]);
   const downloadTrialBalanceCsv = () => {
     if (!tb) return;
-    const header = [
-      "code",
-      "name",
-      "type",
-      "subtype",
-      "normal_balance",
-      "debits",
-      "credits",
-      "balance",
+    const rows: CsvCell[][] = [
+      [
+        "code",
+        "name",
+        "type",
+        "subtype",
+        "normal_balance",
+        "debits",
+        "credits",
+        "balance",
+      ],
     ];
-    const escape = (v: string | number | null) => {
-      if (v === null || v === undefined) return "";
-      const s = String(v);
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const lines = [header.join(",")];
     for (const r of tb.rows) {
-      lines.push(
-        [
-          r.code,
-          r.name,
-          r.type ?? "",
-          r.subtype ?? "",
-          r.normalBalance ?? "",
-          r.debits,
-          r.credits,
-          r.balance,
-        ]
-          .map(escape)
-          .join(","),
-      );
+      rows.push([
+        r.code,
+        r.name,
+        r.type ?? "",
+        r.subtype ?? "",
+        r.normalBalance ?? "",
+        r.debits,
+        r.credits,
+        r.balance,
+      ]);
     }
-    lines.push(
-      ["TOTALS", "", "", "", "", tb.totals.debits, tb.totals.credits, ""]
-        .map(escape)
-        .join(","),
+    rows.push([
+      "TOTALS",
+      "",
+      "",
+      "",
+      "",
+      tb.totals.debits,
+      tb.totals.credits,
+      "",
+    ]);
+    downloadCsv(
+      `trial-balance_${csvSafeDateRange(fromDate, toDate)}.csv`,
+      rows,
     );
-    const blob = new Blob([lines.join("\n")], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `trial-balance_${fromDate}_to_${toDate}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  };
+
+  const downloadProfitAndLossCsv = () => {
+    if (!data) return;
+    const pl = data.profitAndLoss;
+    const rows: CsvCell[][] = [
+      ["section", "code", "name", "amount"],
+    ];
+    const incomeAccounts = source === "ledger" ? pl.incomeByAccount ?? [] : [];
+    const expenseAccounts =
+      source === "ledger" ? pl.expensesByAccount ?? [] : [];
+    if (incomeAccounts.length > 0) {
+      for (const a of incomeAccounts) {
+        rows.push(["Income", a.code, a.name, csvMoney(a.amount)]);
+      }
+    } else {
+      for (const r of pl.incomeByProgram) {
+        rows.push(["Income", "", r.programName, csvMoney(r.amount)]);
+      }
+      if (pl.uncategorizedIncome) {
+        rows.push([
+          "Income",
+          "",
+          "Unallocated deposits",
+          csvMoney(pl.uncategorizedIncome),
+        ]);
+      }
+    }
+    rows.push(["Income", "", "TOTAL INCOME", csvMoney(pl.totalIncome)]);
+    if (expenseAccounts.length > 0) {
+      for (const a of expenseAccounts) {
+        rows.push(["Expense", a.code, a.name, csvMoney(a.amount)]);
+      }
+    } else {
+      for (const r of pl.expensesByProgram) {
+        rows.push(["Expense", "", r.programName, csvMoney(r.amount)]);
+      }
+      if (pl.uncategorizedExpenses) {
+        rows.push([
+          "Expense",
+          "",
+          "Unallocated",
+          csvMoney(pl.uncategorizedExpenses),
+        ]);
+      }
+    }
+    rows.push(["Expense", "", "TOTAL EXPENSES", csvMoney(pl.totalExpenses)]);
+    rows.push(["Net", "", "NET INCOME", csvMoney(pl.netIncome)]);
+    downloadCsv(
+      `profit-and-loss_${source}_${csvSafeDateRange(fromDate, toDate)}.csv`,
+      rows,
+    );
+  };
+
+  const downloadBalanceSheetCsv = () => {
+    if (!data) return;
+    const bs = data.balanceSheet;
+    const rows: CsvCell[][] = [
+      ["section", "code", "name", "amount"],
+    ];
+    if (source === "ledger") {
+      for (const a of bs.cashAccounts ?? []) {
+        rows.push(["Assets:Cash", a.code, a.name, csvMoney(a.balance)]);
+      }
+      rows.push(["Assets:Cash", "", "Cash subtotal", csvMoney(bs.cash)]);
+      for (const a of bs.accountsReceivableAccounts ?? []) {
+        rows.push([
+          "Assets:Receivable",
+          a.code,
+          a.name,
+          csvMoney(a.balance),
+        ]);
+      }
+      rows.push([
+        "Assets:Receivable",
+        "",
+        "Accounts receivable subtotal",
+        csvMoney(bs.accountsReceivable),
+      ]);
+      for (const a of bs.otherAssetAccounts ?? []) {
+        rows.push(["Assets:Other", a.code, a.name, csvMoney(a.balance)]);
+      }
+      rows.push([
+        "Assets:Other",
+        "",
+        "Other assets subtotal",
+        csvMoney(bs.otherAssets),
+      ]);
+    } else {
+      rows.push(["Assets", "", "Cash on hand", csvMoney(bs.cashOnHand)]);
+      rows.push([
+        "Assets",
+        "",
+        "Outstanding receivables",
+        csvMoney(bs.outstandingReceivables),
+      ]);
+    }
+    rows.push(["Assets", "", "TOTAL ASSETS", csvMoney(bs.totalAssets)]);
+    if (source === "ledger") {
+      for (const a of bs.accountsPayableAccounts ?? []) {
+        rows.push([
+          "Liabilities:Payable",
+          a.code,
+          a.name,
+          csvMoney(a.balance),
+        ]);
+      }
+      rows.push([
+        "Liabilities:Payable",
+        "",
+        "Accounts payable subtotal",
+        csvMoney(bs.accountsPayable),
+      ]);
+      for (const a of bs.otherLiabilityAccounts ?? []) {
+        rows.push([
+          "Liabilities:Other",
+          a.code,
+          a.name,
+          csvMoney(a.balance),
+        ]);
+      }
+      rows.push([
+        "Liabilities:Other",
+        "",
+        "Other liabilities subtotal",
+        csvMoney(bs.otherLiabilities),
+      ]);
+    } else {
+      rows.push(["Liabilities", "", "Unpaid bills", csvMoney(bs.unpaidBills)]);
+      rows.push([
+        "Liabilities",
+        "",
+        "Unreimbursed expenses",
+        csvMoney(bs.unreimbursedExpenses),
+      ]);
+    }
+    rows.push([
+      "Liabilities",
+      "",
+      "TOTAL LIABILITIES",
+      csvMoney(bs.totalLiabilities),
+    ]);
+    rows.push([
+      "Equity",
+      "",
+      "Opening net assets",
+      csvMoney(bs.openingNetAssets),
+    ]);
+    rows.push([
+      "Equity",
+      "",
+      "Current period net income",
+      csvMoney(bs.currentPeriodNetIncome),
+    ]);
+    rows.push([
+      "Equity",
+      "",
+      "TOTAL EQUITY (Assets − Liabilities)",
+      csvMoney(bs.equity),
+    ]);
+    downloadCsv(
+      `balance-sheet_${source}_as-of_${toDate}.csv`,
+      rows,
+    );
+  };
+
+  const downloadStatusCsv = (
+    kind: "expenses" | "bills",
+    rowsIn: { status: string; count: number; amount: number }[],
+  ) => {
+    const rows: CsvCell[][] = [["status", "count", "amount"]];
+    for (const r of rowsIn) {
+      rows.push([titleCase(r.status), r.count, csvMoney(r.amount)]);
+    }
+    downloadCsv(
+      `${kind}-by-status_${csvSafeDateRange(fromDate, toDate)}.csv`,
+      rows,
+    );
+  };
+
+  const downloadSpendByProgramCsv = () => {
+    if (!data) return;
+    const rows: CsvCell[][] = [
+      ["program", "expenses", "bills", "total", "budget", "percent_used"],
+    ];
+    for (const r of data.spendByProgram) {
+      rows.push([
+        r.programName,
+        csvMoney(r.expenseAmount),
+        csvMoney(r.billAmount),
+        csvMoney(r.totalAmount),
+        r.budgetAmount ? csvMoney(r.budgetAmount) : "",
+        csvPercent(r.percentUsed),
+      ]);
+    }
+    downloadCsv(
+      `spend-by-program_${csvSafeDateRange(fromDate, toDate)}.csv`,
+      rows,
+    );
+  };
+
+  const downloadMissingReceiptsCsv = () => {
+    if (!data) return;
+    const rows: CsvCell[][] = [
+      [
+        "expense_id",
+        "merchant",
+        "submitted_by",
+        "expense_date",
+        "days_open",
+        "amount",
+      ],
+    ];
+    for (const r of data.missingReceipts) {
+      rows.push([
+        r.expenseId,
+        r.merchant,
+        r.submittedBy,
+        r.expenseDate,
+        r.daysSinceSubmission,
+        csvMoney(r.amount),
+      ]);
+    }
+    downloadCsv(
+      `missing-receipts_${csvSafeDateRange(fromDate, toDate)}.csv`,
+      rows,
+    );
+  };
+
+  const downloadTopVendorsCsv = () => {
+    if (!data) return;
+    const rows: CsvCell[][] = [
+      ["vendor", "bills", "expenses", "total"],
+    ];
+    for (const v of data.topVendors) {
+      rows.push([
+        v.vendorName,
+        csvMoney(v.billAmount),
+        csvMoney(v.expenseAmount),
+        csvMoney(v.totalAmount),
+      ]);
+    }
+    downloadCsv(
+      `top-vendors_${csvSafeDateRange(fromDate, toDate)}.csv`,
+      rows,
+    );
+  };
+
+  const downloadBankReconciliationCsv = () => {
+    if (!data) return;
+    const b = data.bankReconciliation;
+    const rows: CsvCell[][] = [
+      ["metric", "value"],
+      ["Total transactions", b.totalTransactions],
+      ["Reconciled", b.reconciled],
+      ["Matched", b.matched],
+      ["Unmatched", b.unmatched],
+      ["Total credits (in)", csvMoney(b.totalCredits)],
+      ["Total debits (out)", csvMoney(b.totalDebits)],
+      ["Net cash flow", csvMoney(b.netCashFlow)],
+    ];
+    downloadCsv(
+      `bank-reconciliation_${csvSafeDateRange(fromDate, toDate)}.csv`,
+      rows,
+    );
   };
 
   const handlePrint = () => window.print();
@@ -542,15 +806,29 @@ export default function ReportsPage() {
           <PanelErrorBoundary label="Profit & Loss">
           <Card className="print-page-break">
             <CardHeader>
-              <CardTitle className="text-base">
-                Profit &amp; Loss Statement
-              </CardTitle>
-              <CardDescription>
-                Cash-basis income vs. committed spend for the selected period.
-                {source === "ledger"
-                  ? " Click a row to see the posted journal entries behind it."
-                  : " Switch to the Ledger source above to drill into the posted journal entries behind each row."}
-              </CardDescription>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-base">
+                    Profit &amp; Loss Statement
+                  </CardTitle>
+                  <CardDescription>
+                    Cash-basis income vs. committed spend for the selected period.
+                    {source === "ledger"
+                      ? " Click a row to see the posted journal entries behind it."
+                      : " Switch to the Ledger source above to drill into the posted journal entries behind each row."}
+                  </CardDescription>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={downloadProfitAndLossCsv}
+                  className="no-print"
+                  data-testid="export-csv-pl"
+                >
+                  Export CSV
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-6">
@@ -616,12 +894,26 @@ export default function ReportsPage() {
           <PanelErrorBoundary label="Balance Sheet">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Balance Sheet</CardTitle>
-              <CardDescription>
-                Snapshot as of {safeFormatDate(toDate, "MMM d, yyyy")}.
-                {source === "ledger" &&
-                  " Click a row to see the underlying accounts."}
-              </CardDescription>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-base">Balance Sheet</CardTitle>
+                  <CardDescription>
+                    Snapshot as of {safeFormatDate(toDate, "MMM d, yyyy")}.
+                    {source === "ledger" &&
+                      " Click a row to see the underlying accounts."}
+                  </CardDescription>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={downloadBalanceSheetCsv}
+                  className="no-print"
+                  data-testid="export-csv-balance-sheet"
+                >
+                  Export CSV
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="grid gap-6 md:grid-cols-2">
@@ -905,9 +1197,23 @@ export default function ReportsPage() {
           <div className="grid gap-6 md:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4" /> Expense Claims by Status
-                </CardTitle>
+                <div className="flex items-start justify-between gap-4">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <BarChart3 className="h-4 w-4" /> Expense Claims by Status
+                  </CardTitle>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      downloadStatusCsv("expenses", data.expenseTotalsByStatus)
+                    }
+                    className="no-print"
+                    data-testid="export-csv-expenses-by-status"
+                  >
+                    Export CSV
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 <table className="w-full text-sm">
@@ -942,9 +1248,23 @@ export default function ReportsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4" /> Vendor Bills by Status
-                </CardTitle>
+                <div className="flex items-start justify-between gap-4">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <BarChart3 className="h-4 w-4" /> Vendor Bills by Status
+                  </CardTitle>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      downloadStatusCsv("bills", data.billTotalsByStatus)
+                    }
+                    className="no-print"
+                    data-testid="export-csv-bills-by-status"
+                  >
+                    Export CSV
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 <table className="w-full text-sm">
@@ -984,10 +1304,24 @@ export default function ReportsPage() {
           <PanelErrorBoundary label="Spend by Program">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Spend by Program / Grant</CardTitle>
-              <CardDescription>
-                Combined expense + bill spend, with budget utilisation when defined.
-              </CardDescription>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-base">Spend by Program / Grant</CardTitle>
+                  <CardDescription>
+                    Combined expense + bill spend, with budget utilisation when defined.
+                  </CardDescription>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={downloadSpendByProgramCsv}
+                  className="no-print"
+                  data-testid="export-csv-spend-by-program"
+                >
+                  Export CSV
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <table className="w-full text-sm">
@@ -1034,16 +1368,31 @@ export default function ReportsPage() {
           <PanelErrorBoundary label="Missing Receipts">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Expenses Missing Receipts</CardTitle>
-              <CardDescription>
-                {data.missingReceipts.length === 0
-                  ? "All submitted expenses have receipts attached."
-                  : `${data.missingReceipts.length} expense${
-                      data.missingReceipts.length === 1 ? "" : "s"
-                    } awaiting documentation (totals ${fmtMoney(
-                      data.missingReceiptAmount,
-                    )}).`}
-              </CardDescription>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-base">Expenses Missing Receipts</CardTitle>
+                  <CardDescription>
+                    {data.missingReceipts.length === 0
+                      ? "All submitted expenses have receipts attached."
+                      : `${data.missingReceipts.length} expense${
+                          data.missingReceipts.length === 1 ? "" : "s"
+                        } awaiting documentation (totals ${fmtMoney(
+                          data.missingReceiptAmount,
+                        )}).`}
+                  </CardDescription>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={downloadMissingReceiptsCsv}
+                  disabled={data.missingReceipts.length === 0}
+                  className="no-print"
+                  data-testid="export-csv-missing-receipts"
+                >
+                  Export CSV
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <table className="w-full text-sm">
@@ -1095,8 +1444,23 @@ export default function ReportsPage() {
             {selected.topVendors && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Top Vendors</CardTitle>
-                <CardDescription>By total spend in this period.</CardDescription>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <CardTitle className="text-base">Top Vendors</CardTitle>
+                    <CardDescription>By total spend in this period.</CardDescription>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={downloadTopVendorsCsv}
+                    disabled={data.topVendors.length === 0}
+                    className="no-print"
+                    data-testid="export-csv-top-vendors"
+                  >
+                    Export CSV
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 <table className="w-full text-sm">
@@ -1135,7 +1499,19 @@ export default function ReportsPage() {
             {selected.bank && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Bank Reconciliation</CardTitle>
+                <div className="flex items-start justify-between gap-4">
+                  <CardTitle className="text-base">Bank Reconciliation</CardTitle>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={downloadBankReconciliationCsv}
+                    className="no-print"
+                    data-testid="export-csv-bank-reconciliation"
+                  >
+                    Export CSV
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 <dl className="text-sm divide-y">
@@ -1408,6 +1784,47 @@ function PLAccountDrillDownRow({
     { query: { enabled: open && rangeOk } },
   );
   const errMsg = error ? errorMessage(error) : null;
+  const downloadActivityCsv = () => {
+    if (!data) return;
+    const rows: CsvCell[][] = [
+      [
+        "entry_date",
+        "entry_no",
+        "entry_memo",
+        "line_memo",
+        "program",
+        "fund",
+        "debit",
+        "credit",
+      ],
+    ];
+    for (const l of data.lines) {
+      rows.push([
+        l.entryDate,
+        l.entryNo,
+        l.entryMemo ?? "",
+        l.lineMemo ?? "",
+        l.program ?? "",
+        l.fund ?? "",
+        csvMoney(l.debit),
+        csvMoney(l.credit),
+      ]);
+    }
+    rows.push([
+      "TOTALS",
+      "",
+      "",
+      "",
+      "",
+      "",
+      csvMoney(data.totals.debits),
+      csvMoney(data.totals.credits),
+    ]);
+    downloadCsv(
+      `account-activity_${account.code}_${csvSafeDateRange(fromDate, toDate)}.csv`,
+      rows,
+    );
+  };
   return (
     <>
       <tr
@@ -1443,6 +1860,20 @@ function PLAccountDrillDownRow({
           data-testid={`pl-row-activity-${parentSlug}-${account.accountId}`}
         >
           <td colSpan={2} className="bg-muted/20 px-3 py-2">
+            {data && data.lines.length > 0 && (
+              <div className="flex justify-end mb-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={downloadActivityCsv}
+                  className="h-7 px-2 text-xs no-print"
+                  data-testid={`export-csv-pl-activity-${account.accountId}`}
+                >
+                  Export CSV
+                </Button>
+              </div>
+            )}
             {isLoading && (
               <div className="py-1 text-xs text-muted-foreground">
                 Loading journal-entry activity…
@@ -1540,6 +1971,47 @@ function AccountDrillDownRow({
       currency: "USD",
       minimumFractionDigits: 2,
     }).format(n);
+  const downloadActivityCsv = () => {
+    if (!data) return;
+    const rows: CsvCell[][] = [
+      [
+        "entry_date",
+        "entry_no",
+        "entry_memo",
+        "line_memo",
+        "program",
+        "fund",
+        "debit",
+        "credit",
+      ],
+    ];
+    for (const l of data.lines) {
+      rows.push([
+        l.entryDate,
+        l.entryNo,
+        l.entryMemo ?? "",
+        l.lineMemo ?? "",
+        l.program ?? "",
+        l.fund ?? "",
+        csvMoney(l.debit),
+        csvMoney(l.credit),
+      ]);
+    }
+    rows.push([
+      "TOTALS",
+      "",
+      "",
+      "",
+      "",
+      "",
+      csvMoney(data.totals.debits),
+      csvMoney(data.totals.credits),
+    ]);
+    downloadCsv(
+      `account-activity_${account.code}_${csvSafeDateRange(fromDate, toDate)}.csv`,
+      rows,
+    );
+  };
   return (
     <li data-testid={`bs-account-${parentSlug}-${account.accountId}`}>
       <button
@@ -1567,6 +2039,20 @@ function AccountDrillDownRow({
           className="mt-1 mb-2 ml-5 border-l pl-3"
           data-testid={`bs-account-activity-${account.accountId}`}
         >
+          {data && data.lines.length > 0 && (
+            <div className="flex justify-end mb-1">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={downloadActivityCsv}
+                className="h-7 px-2 text-xs no-print"
+                data-testid={`export-csv-bs-activity-${account.accountId}`}
+              >
+                Export CSV
+              </Button>
+            </div>
+          )}
           {isLoading && (
             <div className="py-1 text-muted-foreground">Loading activity…</div>
           )}
