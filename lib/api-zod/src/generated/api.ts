@@ -4257,6 +4257,15 @@ export const CloseAccountingPeriodParams = zod.object({
   id: zod.coerce.number(),
 });
 
+export const CloseAccountingPeriodBody = zod.object({
+  acknowledgeOpenDrafts: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Set to true to confirm closing the period even though open journal-entry drafts (status draft\/submitted\/approved) fall within it. If omitted or false and any such drafts exist, the request is rejected with 409 OPEN_DRAFTS_EXIST.",
+    ),
+});
+
 export const CloseAccountingPeriodResponse = zod.object({
   period: zod.object({
     id: zod.number(),

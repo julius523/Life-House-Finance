@@ -4206,6 +4206,22 @@ router.post(
       res.status(400).json({ error: "Invalid id" });
       return;
     }
+    // Task #66 — body may explicitly acknowledge that closing the period
+    // will strand any open drafts within it. Without this acknowledgement,
+    // the server hard-blocks the close so the API can't be used to silently
+    // make drafts un-postable.
+    const CloseBody = z
+      .object({ acknowledgeOpenDrafts: z.boolean().optional() })
+      .strict();
+    const parsedBody = CloseBody.safeParse(req.body ?? {});
+    if (!parsedBody.success) {
+      res.status(400).json({
+        error: parsedBody.error.issues[0]?.message ?? "Invalid body",
+      });
+      return;
+    }
+    const acknowledgeOpenDrafts =
+      parsedBody.data.acknowledgeOpenDrafts === true;
     // Take the same row lock that postingService.findCoveringPeriod takes
     // (FOR UPDATE inside the posting tx). This guarantees that any in-flight
     // posting transaction either commits before this UPDATE runs (in which
@@ -4214,11 +4230,102 @@ router.post(
     // findCoveringPeriod check on retry. Without this lock the close could
     // commit while a posting tx is mid-flight and still allow the post to
     // commit — i.e., a closed-period bypass.
-    const closedRow = await db.transaction(async (tx) => {
+    type OpenDraft = {
+      id: number;
+      status: "draft" | "submitted" | "approved";
+      entryDate: string | null;
+      memo: string | null;
+    };
+    type CloseResult =
+      | { kind: "not_found" }
+      | { kind: "open_drafts"; drafts: OpenDraft[]; totalCount: number }
+      | { kind: "closed"; row: typeof accountingPeriodsTable.$inferSelect };
+    const result: CloseResult = await db.transaction(async (tx) => {
       const lockResult = (await tx.execute(sql`
-        SELECT id FROM accounting_periods WHERE id = ${id} FOR UPDATE
-      `)) as unknown as { rows: Array<{ id: number }> };
-      if (lockResult.rows.length === 0) return null;
+        SELECT id, period_start, period_end
+          FROM accounting_periods
+         WHERE id = ${id}
+         FOR UPDATE
+      `)) as unknown as {
+        rows: Array<{
+          id: number;
+          period_start: string;
+          period_end: string;
+        }>;
+      };
+      const lockedPeriod = lockResult.rows[0];
+      if (!lockedPeriod) return { kind: "not_found" } as const;
+
+      // Task #66 — block the close if any in-flight drafts (draft /
+      // submitted / approved) are dated within the period. Closing would
+      // silently make them un-postable, so the admin must explicitly
+      // acknowledge.
+      if (!acknowledgeOpenDrafts) {
+        const SAMPLE_LIMIT = 50;
+        const draftRows = await tx
+          .select({
+            id: manualJournalEntryDraftsTable.id,
+            status: manualJournalEntryDraftsTable.status,
+            entryDate: manualJournalEntryDraftsTable.entryDate,
+            memo: manualJournalEntryDraftsTable.memo,
+          })
+          .from(manualJournalEntryDraftsTable)
+          .where(
+            and(
+              inArray(manualJournalEntryDraftsTable.status, [
+                "draft",
+                "submitted",
+                "approved",
+              ]),
+              gte(
+                manualJournalEntryDraftsTable.entryDate,
+                lockedPeriod.period_start,
+              ),
+              lte(
+                manualJournalEntryDraftsTable.entryDate,
+                lockedPeriod.period_end,
+              ),
+            ),
+          )
+          .orderBy(
+            asc(manualJournalEntryDraftsTable.entryDate),
+            asc(manualJournalEntryDraftsTable.id),
+          )
+          .limit(SAMPLE_LIMIT + 1);
+        if (draftRows.length > 0) {
+          const [{ value: total }] = (await tx
+            .select({ value: sql<number>`count(*)::int` })
+            .from(manualJournalEntryDraftsTable)
+            .where(
+              and(
+                inArray(manualJournalEntryDraftsTable.status, [
+                  "draft",
+                  "submitted",
+                  "approved",
+                ]),
+                gte(
+                  manualJournalEntryDraftsTable.entryDate,
+                  lockedPeriod.period_start,
+                ),
+                lte(
+                  manualJournalEntryDraftsTable.entryDate,
+                  lockedPeriod.period_end,
+                ),
+              ),
+            )) as Array<{ value: number }>;
+          return {
+            kind: "open_drafts",
+            totalCount: Number(total ?? draftRows.length),
+            drafts: draftRows.slice(0, SAMPLE_LIMIT).map((r) => ({
+              id: r.id,
+              status: r.status as "draft" | "submitted" | "approved",
+              entryDate: r.entryDate,
+              memo: r.memo,
+            })),
+          } as const;
+        }
+      }
+
       const [updated] = await tx
         .update(accountingPeriodsTable)
         .set({
@@ -4228,13 +4335,27 @@ router.post(
         })
         .where(eq(accountingPeriodsTable.id, id))
         .returning();
-      return updated ?? null;
+      if (!updated) return { kind: "not_found" } as const;
+      return { kind: "closed", row: updated } as const;
     });
-    if (!closedRow) {
+    if (result.kind === "not_found") {
       res.status(404).json({ error: "Period not found" });
       return;
     }
-    res.json({ period: closedRow });
+    if (result.kind === "open_drafts") {
+      res.status(409).json({
+        error:
+          `Cannot close: ${result.totalCount} open draft${
+            result.totalCount === 1 ? "" : "s"
+          } (draft/submitted/approved) fall within this period. ` +
+          "Resolve or post them first, or re-submit with acknowledgeOpenDrafts=true to override.",
+        code: "OPEN_DRAFTS_EXIST",
+        openDraftsCount: result.totalCount,
+        openDrafts: result.drafts,
+      });
+      return;
+    }
+    res.json({ period: result.row });
   },
 );
 

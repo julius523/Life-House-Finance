@@ -2740,6 +2740,20 @@ paths:
           required: true
           schema:
             type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                acknowledgeOpenDrafts:
+                  type: boolean
+                  description: >-
+                    Set to true to confirm closing the period even though
+                    open journal-entry drafts (status draft/submitted/approved)
+                    fall within it. If omitted or false and any such drafts
+                    exist, the request is rejected with 409 OPEN_DRAFTS_EXIST.
       responses:
         "200":
           description: Closed
@@ -2751,6 +2765,42 @@ paths:
                   period:
                     $ref: "#/components/schemas/AccountingPeriod"
                 required: [period]
+        "409":
+          description: >-
+            Open drafts exist within the period. The response includes the
+            count and a sample of affected drafts so the caller can warn the
+            user. Re-issue the request with acknowledgeOpenDrafts=true to
+            override.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, code, openDraftsCount, openDrafts]
+                properties:
+                  error:
+                    type: string
+                  code:
+                    type: string
+                    enum: [OPEN_DRAFTS_EXIST]
+                  openDraftsCount:
+                    type: integer
+                  openDrafts:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, status, entryDate, memo]
+                      properties:
+                        id:
+                          type: integer
+                        status:
+                          type: string
+                          enum: [draft, submitted, approved]
+                        entryDate:
+                          type: string
+                          nullable: true
+                        memo:
+                          type: string
+                          nullable: true
 
   /accounting/journal-entries:
     post:

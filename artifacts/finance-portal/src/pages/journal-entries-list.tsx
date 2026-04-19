@@ -28,6 +28,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Empty } from "@/components/ui/empty";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import {
@@ -258,26 +268,89 @@ export default function JournalEntriesListPage() {
     }
   };
 
-  const closePeriod = async (id: number, label: string) => {
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        `Close period "${label}"? Posts dated within this period will be rejected.`,
-      )
-    ) {
-      return;
-    }
+  // Task #66 — closing a period that contains in-flight drafts (status
+  // draft/submitted/approved) would silently make those drafts un-postable.
+  // The server is the source of truth: we always attempt the close without
+  // acknowledgement first; if drafts exist, the server returns a 409 with
+  // the authoritative list. We surface that list in a dialog and only
+  // re-send the close with acknowledgeOpenDrafts=true after the admin
+  // explicitly confirms.
+  type OpenDraftRow = {
+    id: number;
+    status: "draft" | "submitted" | "approved";
+    entryDate: string | null;
+    memo: string | null;
+  };
+  type OpenDraftsConflict = {
+    period: AccountingPeriod;
+    openDraftsCount: number;
+    openDrafts: OpenDraftRow[];
+  };
+  const [closeConflict, setCloseConflict] =
+    useState<OpenDraftsConflict | null>(null);
+  const [closingPeriodId, setClosingPeriodId] = useState<number | null>(null);
+
+  const isOpenDraftsConflict = (
+    err: unknown,
+  ): err is { status: 409; data: { code: string; openDraftsCount?: number; openDrafts?: OpenDraftRow[] } } => {
+    if (!err || typeof err !== "object") return false;
+    const e = err as { status?: unknown; data?: unknown };
+    if (e.status !== 409) return false;
+    const data = e.data as { code?: unknown } | null | undefined;
+    return !!data && data.code === "OPEN_DRAFTS_EXIST";
+  };
+
+  const closePeriodWithAck = async (
+    period: AccountingPeriod,
+    acknowledgeOpenDrafts: boolean,
+  ) => {
+    setClosingPeriodId(period.id);
     try {
-      await closePeriodMut.mutateAsync({ id });
+      await closePeriodMut.mutateAsync({
+        id: period.id,
+        data: acknowledgeOpenDrafts ? { acknowledgeOpenDrafts: true } : {},
+      });
       toast({ title: "Period closed" });
       refreshPeriods();
-    } catch (e) {
-      toast({
-        title: "Could not close period",
-        description: e instanceof Error ? e.message : "Unknown error",
-        variant: "destructive",
-      });
+      setCloseConflict(null);
+    } catch (err) {
+      if (isOpenDraftsConflict(err)) {
+        const data = err.data;
+        setCloseConflict({
+          period,
+          openDraftsCount:
+            typeof data.openDraftsCount === "number"
+              ? data.openDraftsCount
+              : Array.isArray(data.openDrafts)
+                ? data.openDrafts.length
+                : 0,
+          openDrafts: Array.isArray(data.openDrafts) ? data.openDrafts : [],
+        });
+      } else {
+        toast({
+          title: "Could not close period",
+          description: err instanceof Error ? err.message : "Unknown error",
+          variant: "destructive",
+        });
+        setCloseConflict(null);
+      }
+    } finally {
+      setClosingPeriodId(null);
     }
+  };
+
+  const requestClosePeriod = (period: AccountingPeriod) => {
+    void closePeriodWithAck(period, false);
+  };
+
+  const confirmClosePeriod = () => {
+    if (!closeConflict) return;
+    void closePeriodWithAck(closeConflict.period, true);
+  };
+
+  const cancelClosePeriod = () => {
+    if (closePeriodMut.isPending) return;
+    setCloseConflict(null);
   };
 
   const [includeLines, setIncludeLines] = useState(false);
@@ -758,8 +831,11 @@ export default function JournalEntriesListPage() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => closePeriod(p.id, p.label)}
-                            disabled={closePeriodMut.isPending}
+                            onClick={() => requestClosePeriod(p)}
+                            disabled={
+                              closePeriodMut.isPending &&
+                              closingPeriodId === p.id
+                            }
                             data-testid={`button-close-period-${p.id}`}
                           >
                             <Lock className="h-4 w-4 mr-1" />
@@ -775,6 +851,138 @@ export default function JournalEntriesListPage() {
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog
+        open={closeConflict !== null}
+        onOpenChange={(open) => {
+          if (!open) cancelClosePeriod();
+        }}
+      >
+        <AlertDialogContent
+          className="max-w-2xl"
+          data-testid="dialog-close-period-confirm"
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Close period &ldquo;{closeConflict?.period.label}&rdquo;?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Once closed, no journal entries dated between{" "}
+              {closeConflict
+                ? format(
+                    parseDateOnly(closeConflict.period.periodStart),
+                    "MMM d, yyyy",
+                  )
+                : ""}{" "}
+              and{" "}
+              {closeConflict
+                ? format(
+                    parseDateOnly(closeConflict.period.periodEnd),
+                    "MMM d, yyyy",
+                  )
+                : ""}{" "}
+              can be posted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {closeConflict && (
+            <div
+              className="space-y-2"
+              data-testid="warning-close-period-open-drafts"
+            >
+              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+                <div
+                  className="font-medium text-destructive"
+                  data-testid="text-close-period-open-drafts-count"
+                >
+                  {closeConflict.openDraftsCount} open draft
+                  {closeConflict.openDraftsCount === 1 ? "" : "s"} fall within
+                  this period and will become un-postable if you close it.
+                </div>
+                <div className="mt-1 text-muted-foreground">
+                  Resolve them first (post, reject, or delete), or proceed
+                  knowing they will be stranded.
+                  {closeConflict.openDrafts.length <
+                    closeConflict.openDraftsCount && (
+                    <>
+                      {" "}
+                      Showing the first {closeConflict.openDrafts.length} of{" "}
+                      {closeConflict.openDraftsCount}.
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="max-h-56 overflow-y-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[100px]">Draft</TableHead>
+                      <TableHead className="w-[120px]">Status</TableHead>
+                      <TableHead className="w-[120px]">Date</TableHead>
+                      <TableHead>Memo</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {closeConflict.openDrafts.map((d) => (
+                      <TableRow
+                        key={d.id}
+                        data-testid={`row-close-period-open-draft-${d.id}`}
+                      >
+                        <TableCell>
+                          <Link
+                            href={`/accounting/journal-entry-drafts/${d.id}`}
+                            className="text-primary underline-offset-2 hover:underline"
+                            data-testid={`link-close-period-open-draft-${d.id}`}
+                          >
+                            #{d.id}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="capitalize">
+                            {d.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {d.entryDate
+                            ? format(
+                                parseDateOnly(d.entryDate),
+                                "MMM d, yyyy",
+                              )
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground truncate max-w-[260px]">
+                          {d.memo ?? "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={closePeriodMut.isPending}
+              data-testid="button-close-period-cancel"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                confirmClosePeriod();
+              }}
+              disabled={closePeriodMut.isPending}
+              data-testid="button-close-period-confirm"
+            >
+              {closeConflict
+                ? `Close anyway (${closeConflict.openDraftsCount} draft${
+                    closeConflict.openDraftsCount === 1 ? "" : "s"
+                  } stranded)`
+                : "Close period"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Card id="drafts" className="scroll-mt-20">
         <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2">

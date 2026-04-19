@@ -39,6 +39,8 @@ import type {
   ChartOfAccountListResponse,
   ChartOfAccountResponse,
   CloseAccountingPeriod200,
+  CloseAccountingPeriod409,
+  CloseAccountingPeriodBody,
   ContactBody,
   ConvertTransactionToBill200,
   ConvertTransactionToBillBody,
@@ -10434,6 +10436,7 @@ export const getCloseAccountingPeriodUrl = (id: number) => {
 
 export const closeAccountingPeriod = async (
   id: number,
+  closeAccountingPeriodBody?: CloseAccountingPeriodBody,
   options?: RequestInit,
 ): Promise<CloseAccountingPeriod200> => {
   return customFetch<CloseAccountingPeriod200>(
@@ -10441,25 +10444,27 @@ export const closeAccountingPeriod = async (
     {
       ...options,
       method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(closeAccountingPeriodBody),
     },
   );
 };
 
 export const getCloseAccountingPeriodMutationOptions = <
-  TError = ErrorType<unknown>,
+  TError = ErrorType<CloseAccountingPeriod409>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof closeAccountingPeriod>>,
     TError,
-    { id: number },
+    { id: number; data: BodyType<CloseAccountingPeriodBody> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof closeAccountingPeriod>>,
   TError,
-  { id: number },
+  { id: number; data: BodyType<CloseAccountingPeriodBody> },
   TContext
 > => {
   const mutationKey = ["closeAccountingPeriod"];
@@ -10473,11 +10478,11 @@ export const getCloseAccountingPeriodMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof closeAccountingPeriod>>,
-    { id: number }
+    { id: number; data: BodyType<CloseAccountingPeriodBody> }
   > = (props) => {
-    const { id } = props ?? {};
+    const { id, data } = props ?? {};
 
-    return closeAccountingPeriod(id, requestOptions);
+    return closeAccountingPeriod(id, data, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -10486,27 +10491,29 @@ export const getCloseAccountingPeriodMutationOptions = <
 export type CloseAccountingPeriodMutationResult = NonNullable<
   Awaited<ReturnType<typeof closeAccountingPeriod>>
 >;
-
-export type CloseAccountingPeriodMutationError = ErrorType<unknown>;
+export type CloseAccountingPeriodMutationBody =
+  BodyType<CloseAccountingPeriodBody>;
+export type CloseAccountingPeriodMutationError =
+  ErrorType<CloseAccountingPeriod409>;
 
 /**
  * @summary Close an accounting period (admin only)
  */
 export const useCloseAccountingPeriod = <
-  TError = ErrorType<unknown>,
+  TError = ErrorType<CloseAccountingPeriod409>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof closeAccountingPeriod>>,
     TError,
-    { id: number },
+    { id: number; data: BodyType<CloseAccountingPeriodBody> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof closeAccountingPeriod>>,
   TError,
-  { id: number },
+  { id: number; data: BodyType<CloseAccountingPeriodBody> },
   TContext
 > => {
   return useMutation(getCloseAccountingPeriodMutationOptions(options));

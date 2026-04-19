@@ -2832,8 +2832,43 @@ export type CreateAccountingPeriod201 = {
   period: AccountingPeriod;
 };
 
+export type CloseAccountingPeriodBody = {
+  /** Set to true to confirm closing the period even though open journal-entry drafts (status draft/submitted/approved) fall within it. If omitted or false and any such drafts exist, the request is rejected with 409 OPEN_DRAFTS_EXIST. */
+  acknowledgeOpenDrafts?: boolean;
+};
+
 export type CloseAccountingPeriod200 = {
   period: AccountingPeriod;
+};
+
+export type CloseAccountingPeriod409Code =
+  (typeof CloseAccountingPeriod409Code)[keyof typeof CloseAccountingPeriod409Code];
+
+export const CloseAccountingPeriod409Code = {
+  OPEN_DRAFTS_EXIST: "OPEN_DRAFTS_EXIST",
+} as const;
+
+export type CloseAccountingPeriod409OpenDraftsItemStatus =
+  (typeof CloseAccountingPeriod409OpenDraftsItemStatus)[keyof typeof CloseAccountingPeriod409OpenDraftsItemStatus];
+
+export const CloseAccountingPeriod409OpenDraftsItemStatus = {
+  draft: "draft",
+  submitted: "submitted",
+  approved: "approved",
+} as const;
+
+export type CloseAccountingPeriod409OpenDraftsItem = {
+  id: number;
+  status: CloseAccountingPeriod409OpenDraftsItemStatus;
+  entryDate: string | null;
+  memo: string | null;
+};
+
+export type CloseAccountingPeriod409 = {
+  error: string;
+  code: CloseAccountingPeriod409Code;
+  openDraftsCount: number;
+  openDrafts: CloseAccountingPeriod409OpenDraftsItem[];
 };
 
 export type ListJournalEntriesParams = {
