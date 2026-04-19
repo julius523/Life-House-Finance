@@ -1614,9 +1614,50 @@ function toPostingActor(req: Request): PostingActor {
   };
 }
 
+type JournalEntryActor = {
+  id: number;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+};
+
+function pickActor(
+  users: Map<number, typeof usersTable.$inferSelect> | undefined,
+  userId: number | null,
+): JournalEntryActor | null {
+  if (userId === null || userId === undefined || !users) return null;
+  const u = users.get(userId);
+  if (!u) return null;
+  return {
+    id: u.id,
+    firstName: u.firstName ?? null,
+    lastName: u.lastName ?? null,
+    email: u.email ?? null,
+  };
+}
+
+async function loadJournalEntryActors(
+  entries: Array<typeof journalEntriesTable.$inferSelect>,
+): Promise<Map<number, typeof usersTable.$inferSelect>> {
+  const ids = new Set<number>();
+  for (const e of entries) {
+    if (e.postedByUserId) ids.add(e.postedByUserId);
+    if (e.approverUserId) ids.add(e.approverUserId);
+  }
+  if (ids.size === 0) return new Map();
+  const rows = await db
+    .select()
+    .from(usersTable)
+    .where(inArray(usersTable.id, Array.from(ids)));
+  const map = new Map<number, typeof usersTable.$inferSelect>();
+  for (const r of rows) map.set(r.id, r);
+  return map;
+}
+
 function serializeJournalEntry(
   je: typeof journalEntriesTable.$inferSelect,
   lines?: Array<typeof journalEntryLinesTable.$inferSelect>,
+  users?: Map<number, typeof usersTable.$inferSelect>,
 ) {
   return {
     id: je.id,
@@ -1628,10 +1669,12 @@ function serializeJournalEntry(
     totalsCreditsCents: je.totalsCreditsCents,
     postedAt: je.postedAt,
     postedByUserId: je.postedByUserId,
+    postedBy: pickActor(users, je.postedByUserId),
     agentActionId: je.agentActionId,
     threadId: je.threadId,
     assistantMessageId: je.assistantMessageId,
     approverUserId: je.approverUserId,
+    approver: pickActor(users, je.approverUserId),
     evidenceSnapshot: je.evidenceSnapshot,
     reversesJournalEntryId: je.reversesJournalEntryId,
     reversedByJournalEntryId: je.reversedByJournalEntryId,
@@ -2034,8 +2077,9 @@ router.get(
         .from(journalEntriesTable)
         .where(whereExpr),
     ]);
+    const users = await loadJournalEntryActors(rows);
     res.json({
-      entries: rows.map((r) => serializeJournalEntry(r)),
+      entries: rows.map((r) => serializeJournalEntry(r, undefined, users)),
       total: totalRow[0]?.count ?? 0,
       limit,
       offset,
@@ -2278,7 +2322,8 @@ router.get(
       .from(journalEntryLinesTable)
       .where(eq(journalEntryLinesTable.journalEntryId, je.id))
       .orderBy(asc(journalEntryLinesTable.lineNo));
-    res.json({ journalEntry: serializeJournalEntry(je, lines) });
+    const users = await loadJournalEntryActors([je]);
+    res.json({ journalEntry: serializeJournalEntry(je, lines, users) });
   },
 );
 

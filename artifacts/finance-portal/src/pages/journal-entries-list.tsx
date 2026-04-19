@@ -45,6 +45,13 @@ import {
   User,
 } from "lucide-react";
 
+type EntryActor = {
+  id: number;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+};
+
 type JournalEntry = {
   id: number;
   entryNo: string;
@@ -56,7 +63,15 @@ type JournalEntry = {
   postedAt: string;
   agentActionId: number | null;
   reversesJournalEntryId: number | null;
+  postedBy: EntryActor | null;
+  approver: EntryActor | null;
 };
+
+function actorName(a: EntryActor | null): string {
+  if (!a) return "—";
+  const name = [a.firstName, a.lastName].filter(Boolean).join(" ").trim();
+  return name || a.email || `User #${a.id}`;
+}
 
 type StatusFilter = "all" | "posted" | "reversed";
 type SourceFilter = "all" | "manual" | "copilot";
@@ -636,6 +651,7 @@ export default function JournalEntriesListPage() {
                     <TableHead className="w-[110px]">Source</TableHead>
                     <TableHead className="w-[110px]">Status</TableHead>
                     <TableHead className="w-[160px]">Posted</TableHead>
+                    <TableHead className="w-[180px]">Posted by</TableHead>
                     <TableHead className="w-[100px]" />
                   </TableRow>
                 </TableHeader>
@@ -692,6 +708,26 @@ export default function JournalEntriesListPage() {
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {format(new Date(e.postedAt), "MMM d, p")}
+                        </TableCell>
+                        <TableCell
+                          className="text-sm"
+                          data-testid={`text-posted-by-${e.id}`}
+                        >
+                          <div
+                            className="truncate"
+                            title={e.postedBy?.email ?? undefined}
+                          >
+                            {actorName(e.postedBy)}
+                          </div>
+                          {src === "copilot" && e.approver && (
+                            <div
+                              className="text-xs text-muted-foreground truncate"
+                              title={e.approver.email ?? undefined}
+                              data-testid={`text-approver-${e.id}`}
+                            >
+                              Approved by {actorName(e.approver)}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell
                           className="text-right"

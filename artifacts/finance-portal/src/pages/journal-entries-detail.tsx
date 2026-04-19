@@ -36,6 +36,13 @@ type JournalEntryLine = {
   memo: string | null;
 };
 
+type EntryActor = {
+  id: number;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+};
+
 type JournalEntry = {
   id: number;
   entryNo: string;
@@ -46,10 +53,12 @@ type JournalEntry = {
   totalsCreditsCents: number;
   postedAt: string;
   postedByUserId: number;
+  postedBy: EntryActor | null;
   agentActionId: number | null;
   threadId: number | null;
   assistantMessageId: number | null;
   approverUserId: number | null;
+  approver: EntryActor | null;
   evidenceSnapshot: unknown;
   reversesJournalEntryId: number | null;
   reversedByJournalEntryId: number | null;
@@ -58,6 +67,12 @@ type JournalEntry = {
   createdAt: string;
   lines: JournalEntryLine[];
 };
+
+function actorName(a: EntryActor | null): string {
+  if (!a) return "—";
+  const name = [a.firstName, a.lastName].filter(Boolean).join(" ").trim();
+  return name || a.email || `User #${a.id}`;
+}
 
 type ApprovalEvent = {
   id: number;
@@ -304,6 +319,30 @@ export default function JournalEntryDetailPage() {
               )}
             </div>
           </div>
+          <div data-testid="text-posted-by">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Posted by
+            </div>
+            <div
+              className="font-medium"
+              title={entry.postedBy?.email ?? undefined}
+            >
+              {actorName(entry.postedBy)}
+            </div>
+          </div>
+          {source === "copilot" && (
+            <div data-testid="text-approver">
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Approver
+              </div>
+              <div
+                className="font-medium"
+                title={entry.approver?.email ?? undefined}
+              >
+                {actorName(entry.approver)}
+              </div>
+            </div>
+          )}
           {entry.reversesJournalEntryId && (
             <div className="md:col-span-2">
               <div className="text-xs uppercase tracking-wide text-muted-foreground">
