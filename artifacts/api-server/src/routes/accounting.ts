@@ -21,6 +21,8 @@ import {
   accountingPeriodsTable,
   accountingSettingsTable,
   chartOfAccountsTable,
+  expenseCategoriesTable,
+  expenseCategoryPaymentMethodRulesTable,
   type ManualJournalEntryDraftRow,
   type CopilotMessageRow,
   type CopilotThreadRow,
@@ -3861,5 +3863,754 @@ router.post("/accounting/diagnostics/ping", async (req, res): Promise<void> => {
     res.json({ status: key, detail: message });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Task #51 — Expense Categories & per-payment-method credit rules.
+//
+// These routes are admin-only for writes and authenticated for reads. They
+// drive Task #52's auto-draft generation by giving every expense a deliberate
+// debit (category) and credit (payment-method rule). Validation rejects CoA
+// accounts that are inactive or marked allow_manual_posting=false so we never
+// stage drafts that the posting service would later refuse.
+// ---------------------------------------------------------------------------
+
+const PAYMENT_METHOD_VALUES = [
+  "cash",
+  "check",
+  "credit_card",
+  "debit_card",
+  "bank_transfer",
+  "other",
+] as const;
+const PaymentMethodEnum = z.enum(PAYMENT_METHOD_VALUES);
+
+const CreateExpenseCategoryBodyZ = z.object({
+  name: z.string().trim().min(1, "name is required").max(80),
+  debitAccountId: z.number().int().positive(),
+  isActive: z.boolean().optional(),
+});
+const UpdateExpenseCategoryBodyZ = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  debitAccountId: z.number().int().positive().optional(),
+  isActive: z.boolean().optional(),
+});
+const CreateRuleBodyZ = z.object({
+  paymentMethod: PaymentMethodEnum,
+  creditAccountId: z.number().int().positive(),
+  isDefault: z.boolean().optional(),
+});
+const UpdateRuleBodyZ = z.object({
+  paymentMethod: PaymentMethodEnum.optional(),
+  creditAccountId: z.number().int().positive().optional(),
+  isDefault: z.boolean().optional(),
+});
+
+type ExpenseCategoryRow = typeof expenseCategoriesTable.$inferSelect;
+type ExpenseCategoryRuleRow =
+  typeof expenseCategoryPaymentMethodRulesTable.$inferSelect;
+type CoaRow = typeof chartOfAccountsTable.$inferSelect;
+
+function requireAdmin(req: Request, res: Response): boolean {
+  const user = req.authUser!;
+  if (user.role !== "admin") {
+    res.status(403).json({ error: "Admins only" });
+    return false;
+  }
+  return true;
+}
+
+async function loadPostableAccount(
+  id: number,
+): Promise<{ ok: true; row: CoaRow } | { ok: false; status: number; error: string; code: string }> {
+  if (!Number.isInteger(id) || id <= 0) {
+    return { ok: false, status: 400, error: "Invalid account id", code: "INVALID_ACCOUNT" };
+  }
+  const [row] = await db
+    .select()
+    .from(chartOfAccountsTable)
+    .where(eq(chartOfAccountsTable.id, id))
+    .limit(1);
+  if (!row) {
+    return { ok: false, status: 404, error: "Chart-of-accounts row not found", code: "ACCOUNT_NOT_FOUND" };
+  }
+  if (!row.isActive) {
+    return {
+      ok: false,
+      status: 400,
+      error: `Account ${row.code} is archived; choose an active account.`,
+      code: "ACCOUNT_ARCHIVED",
+    };
+  }
+  if (!row.allowManualPosting) {
+    return {
+      ok: false,
+      status: 400,
+      error: `Account ${row.code} is not configured for manual postings.`,
+      code: "ACCOUNT_NOT_POSTABLE",
+    };
+  }
+  return { ok: true, row };
+}
+
+function serializeRule(
+  rule: ExpenseCategoryRuleRow,
+  coa: CoaRow | undefined,
+): Record<string, unknown> {
+  return {
+    id: rule.id,
+    categoryId: rule.categoryId,
+    paymentMethod: rule.paymentMethod,
+    creditAccountId: rule.creditAccountId,
+    isDefault: rule.isDefault,
+    creditAccountCode: coa?.code ?? null,
+    creditAccountName: coa?.name ?? null,
+    creditAccountIsActive: coa?.isActive ?? null,
+    creditAccountAllowManualPosting: coa?.allowManualPosting ?? null,
+    createdAt: rule.createdAt.toISOString(),
+    updatedAt: rule.updatedAt.toISOString(),
+  };
+}
+
+function computeHasCompleteMapping(
+  category: ExpenseCategoryRow,
+  debit: CoaRow | undefined,
+  rules: Array<{ rule: ExpenseCategoryRuleRow; coa: CoaRow | undefined }>,
+): boolean {
+  if (!debit || !debit.isActive || !debit.allowManualPosting) return false;
+  const defaultRule = rules.find(({ rule }) => rule.isDefault);
+  if (!defaultRule) return false;
+  if (
+    !defaultRule.coa ||
+    !defaultRule.coa.isActive ||
+    !defaultRule.coa.allowManualPosting
+  ) {
+    return false;
+  }
+  void category;
+  return true;
+}
+
+function serializeCategory(
+  category: ExpenseCategoryRow,
+  debit: CoaRow | undefined,
+  rules: Array<{ rule: ExpenseCategoryRuleRow; coa: CoaRow | undefined }>,
+): Record<string, unknown> {
+  return {
+    id: category.id,
+    name: category.name,
+    debitAccountId: category.debitAccountId,
+    isActive: category.isActive,
+    isSystem: category.isSystem,
+    debitAccountCode: debit?.code ?? null,
+    debitAccountName: debit?.name ?? null,
+    debitAccountIsActive: debit?.isActive ?? null,
+    debitAccountAllowManualPosting: debit?.allowManualPosting ?? null,
+    rules: rules.map(({ rule, coa }) => serializeRule(rule, coa)),
+    hasCompleteMapping: computeHasCompleteMapping(category, debit, rules),
+    createdAt: category.createdAt.toISOString(),
+    updatedAt: category.updatedAt.toISOString(),
+  };
+}
+
+async function loadCategoriesWithDetails(
+  categories: ExpenseCategoryRow[],
+): Promise<Array<Record<string, unknown>>> {
+  if (categories.length === 0) return [];
+  const accountIds = new Set<number>();
+  for (const c of categories) accountIds.add(c.debitAccountId);
+  const categoryIds = categories.map((c) => c.id);
+  const rules =
+    categoryIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(expenseCategoryPaymentMethodRulesTable)
+          .where(
+            inArray(expenseCategoryPaymentMethodRulesTable.categoryId, categoryIds),
+          );
+  for (const r of rules) accountIds.add(r.creditAccountId);
+  const coaRows =
+    accountIds.size === 0
+      ? []
+      : await db
+          .select()
+          .from(chartOfAccountsTable)
+          .where(inArray(chartOfAccountsTable.id, Array.from(accountIds)));
+  const coaById = new Map<number, CoaRow>();
+  for (const c of coaRows) coaById.set(c.id, c);
+  return categories.map((cat) => {
+    const catRules = rules
+      .filter((r) => r.categoryId === cat.id)
+      .map((r) => ({ rule: r, coa: coaById.get(r.creditAccountId) }));
+    return serializeCategory(cat, coaById.get(cat.debitAccountId), catRules);
+  });
+}
+
+async function loadCategoryById(
+  id: number,
+): Promise<Record<string, unknown> | null> {
+  const [cat] = await db
+    .select()
+    .from(expenseCategoriesTable)
+    .where(eq(expenseCategoriesTable.id, id))
+    .limit(1);
+  if (!cat) return null;
+  const [serialized] = await loadCategoriesWithDetails([cat]);
+  return serialized ?? null;
+}
+
+router.get(
+  "/accounting/expense-categories",
+  async (req, res): Promise<void> => {
+    const includeInactive = req.query["includeInactive"] === "true";
+    const rows = includeInactive
+      ? await db
+          .select()
+          .from(expenseCategoriesTable)
+          .orderBy(asc(expenseCategoriesTable.name))
+      : await db
+          .select()
+          .from(expenseCategoriesTable)
+          .where(eq(expenseCategoriesTable.isActive, true))
+          .orderBy(asc(expenseCategoriesTable.name));
+    const categories = await loadCategoriesWithDetails(rows);
+    res.json({ categories });
+  },
+);
+
+router.get(
+  "/accounting/expense-categories/missing-mapping",
+  async (_req, res): Promise<void> => {
+    const cats = await db
+      .select()
+      .from(expenseCategoriesTable)
+      .orderBy(asc(expenseCategoriesTable.name));
+    const detailed = await loadCategoriesWithDetails(cats);
+    const result = detailed
+      .map((d) => {
+        const rules = d["rules"] as Array<Record<string, unknown>>;
+        const archivedCreditRules = rules.filter(
+          (r) => r["creditAccountIsActive"] === false,
+        ).length;
+        const nonPostableCreditRules = rules.filter(
+          (r) => r["creditAccountAllowManualPosting"] === false,
+        ).length;
+        const defaultRule = rules.find((r) => r["isDefault"] === true);
+        return {
+          id: d["id"] as number,
+          name: d["name"] as string,
+          isActive: d["isActive"] as boolean,
+          missingDebit: d["debitAccountIsActive"] === null,
+          missingDefaultCredit: !defaultRule,
+          archivedDebit: d["debitAccountIsActive"] === false,
+          nonPostableDebit: d["debitAccountAllowManualPosting"] === false,
+          archivedCreditRules,
+          nonPostableCreditRules,
+        };
+      })
+      .filter(
+        (c) =>
+          c.missingDebit ||
+          c.missingDefaultCredit ||
+          c.archivedDebit ||
+          c.nonPostableDebit ||
+          c.archivedCreditRules > 0 ||
+          c.nonPostableCreditRules > 0,
+      );
+    res.json({ categories: result });
+  },
+);
+
+router.get(
+  "/accounting/expense-categories/:id",
+  async (req, res): Promise<void> => {
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const category = await loadCategoryById(id);
+    if (!category) {
+      res.status(404).json({ error: "Category not found" });
+      return;
+    }
+    res.json({ category });
+  },
+);
+
+router.post(
+  "/accounting/expense-categories",
+  async (req, res): Promise<void> => {
+    if (!requireAdmin(req, res)) return;
+    const parsed = CreateExpenseCategoryBodyZ.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: parsed.error.issues[0]?.message ?? "Invalid body",
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    const debit = await loadPostableAccount(parsed.data.debitAccountId);
+    if (!debit.ok) {
+      res.status(debit.status).json({ error: debit.error, code: debit.code });
+      return;
+    }
+    // UNIQUE(name) — surface 409 instead of crashing on PG error.
+    const [dupe] = await db
+      .select({ id: expenseCategoriesTable.id })
+      .from(expenseCategoriesTable)
+      .where(eq(expenseCategoriesTable.name, parsed.data.name))
+      .limit(1);
+    if (dupe) {
+      res.status(409).json({
+        error: `A category named "${parsed.data.name}" already exists.`,
+        code: "DUPLICATE_NAME",
+      });
+      return;
+    }
+    const [row] = await db
+      .insert(expenseCategoriesTable)
+      .values({
+        name: parsed.data.name,
+        debitAccountId: parsed.data.debitAccountId,
+        isActive: parsed.data.isActive ?? true,
+        isSystem: false,
+      })
+      .returning();
+    const serialized = await loadCategoryById(row!.id);
+    res.status(201).json({ category: serialized });
+  },
+);
+
+router.patch(
+  "/accounting/expense-categories/:id",
+  async (req, res): Promise<void> => {
+    if (!requireAdmin(req, res)) return;
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const parsed = UpdateExpenseCategoryBodyZ.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: parsed.error.issues[0]?.message ?? "Invalid body",
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    const [existing] = await db
+      .select()
+      .from(expenseCategoriesTable)
+      .where(eq(expenseCategoriesTable.id, id))
+      .limit(1);
+    if (!existing) {
+      res.status(404).json({ error: "Category not found" });
+      return;
+    }
+    // Protect the seeded "Uncategorized" row: cannot be renamed or
+    // deactivated, but its debit account may be re-pointed.
+    if (existing.isSystem) {
+      if (parsed.data.name && parsed.data.name !== existing.name) {
+        res.status(400).json({
+          error: "System categories cannot be renamed.",
+          code: "SYSTEM_CATEGORY_LOCKED",
+        });
+        return;
+      }
+      if (parsed.data.isActive === false) {
+        res.status(400).json({
+          error: "System categories cannot be deactivated.",
+          code: "SYSTEM_CATEGORY_LOCKED",
+        });
+        return;
+      }
+    }
+    const update: Partial<typeof expenseCategoriesTable.$inferInsert> = {
+      updatedAt: new Date(),
+    };
+    if (parsed.data.name && parsed.data.name !== existing.name) {
+      const [dupe] = await db
+        .select({ id: expenseCategoriesTable.id })
+        .from(expenseCategoriesTable)
+        .where(eq(expenseCategoriesTable.name, parsed.data.name))
+        .limit(1);
+      if (dupe && dupe.id !== id) {
+        res.status(409).json({
+          error: `A category named "${parsed.data.name}" already exists.`,
+          code: "DUPLICATE_NAME",
+        });
+        return;
+      }
+      update.name = parsed.data.name;
+    }
+    if (parsed.data.debitAccountId !== undefined) {
+      const debit = await loadPostableAccount(parsed.data.debitAccountId);
+      if (!debit.ok) {
+        res.status(debit.status).json({ error: debit.error, code: debit.code });
+        return;
+      }
+      update.debitAccountId = parsed.data.debitAccountId;
+    }
+    if (parsed.data.isActive !== undefined) {
+      update.isActive = parsed.data.isActive;
+    }
+    await db
+      .update(expenseCategoriesTable)
+      .set(update)
+      .where(eq(expenseCategoriesTable.id, id));
+    const serialized = await loadCategoryById(id);
+    res.json({ category: serialized });
+  },
+);
+
+router.post(
+  "/accounting/expense-categories/:id/deactivate",
+  async (req, res): Promise<void> => {
+    if (!requireAdmin(req, res)) return;
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [existing] = await db
+      .select()
+      .from(expenseCategoriesTable)
+      .where(eq(expenseCategoriesTable.id, id))
+      .limit(1);
+    if (!existing) {
+      res.status(404).json({ error: "Category not found" });
+      return;
+    }
+    if (existing.isSystem) {
+      res.status(400).json({
+        error: "System categories cannot be deactivated.",
+        code: "SYSTEM_CATEGORY_LOCKED",
+      });
+      return;
+    }
+    await db
+      .update(expenseCategoriesTable)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(expenseCategoriesTable.id, id));
+    const serialized = await loadCategoryById(id);
+    res.json({ category: serialized });
+  },
+);
+
+router.get(
+  "/accounting/expense-categories/:id/payment-method-rules",
+  async (req, res): Promise<void> => {
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [cat] = await db
+      .select({ id: expenseCategoriesTable.id })
+      .from(expenseCategoriesTable)
+      .where(eq(expenseCategoriesTable.id, id))
+      .limit(1);
+    if (!cat) {
+      res.status(404).json({ error: "Category not found" });
+      return;
+    }
+    const rules = await db
+      .select()
+      .from(expenseCategoryPaymentMethodRulesTable)
+      .where(eq(expenseCategoryPaymentMethodRulesTable.categoryId, id))
+      .orderBy(asc(expenseCategoryPaymentMethodRulesTable.paymentMethod));
+    const accountIds = Array.from(new Set(rules.map((r) => r.creditAccountId)));
+    const coaRows =
+      accountIds.length === 0
+        ? []
+        : await db
+            .select()
+            .from(chartOfAccountsTable)
+            .where(inArray(chartOfAccountsTable.id, accountIds));
+    const coaById = new Map<number, CoaRow>();
+    for (const c of coaRows) coaById.set(c.id, c);
+    res.json({
+      rules: rules.map((r) => serializeRule(r, coaById.get(r.creditAccountId))),
+    });
+  },
+);
+
+router.post(
+  "/accounting/expense-categories/:id/payment-method-rules",
+  async (req, res): Promise<void> => {
+    if (!requireAdmin(req, res)) return;
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const parsed = CreateRuleBodyZ.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: parsed.error.issues[0]?.message ?? "Invalid body",
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    const [cat] = await db
+      .select()
+      .from(expenseCategoriesTable)
+      .where(eq(expenseCategoriesTable.id, id))
+      .limit(1);
+    if (!cat) {
+      res.status(404).json({ error: "Category not found" });
+      return;
+    }
+    const credit = await loadPostableAccount(parsed.data.creditAccountId);
+    if (!credit.ok) {
+      res.status(credit.status).json({ error: credit.error, code: credit.code });
+      return;
+    }
+    const [dupe] = await db
+      .select({ id: expenseCategoryPaymentMethodRulesTable.id })
+      .from(expenseCategoryPaymentMethodRulesTable)
+      .where(
+        and(
+          eq(expenseCategoryPaymentMethodRulesTable.categoryId, id),
+          eq(
+            expenseCategoryPaymentMethodRulesTable.paymentMethod,
+            parsed.data.paymentMethod,
+          ),
+        ),
+      )
+      .limit(1);
+    if (dupe) {
+      res.status(409).json({
+        error: `A rule for payment method "${parsed.data.paymentMethod}" already exists for this category.`,
+        code: "DUPLICATE_PAYMENT_METHOD",
+      });
+      return;
+    }
+    const wantDefault = parsed.data.isDefault ?? false;
+    const created = await db.transaction(async (tx) => {
+      if (wantDefault) {
+        await tx
+          .update(expenseCategoryPaymentMethodRulesTable)
+          .set({ isDefault: false, updatedAt: new Date() })
+          .where(
+            and(
+              eq(expenseCategoryPaymentMethodRulesTable.categoryId, id),
+              eq(expenseCategoryPaymentMethodRulesTable.isDefault, true),
+            ),
+          );
+      } else {
+        // If no default exists yet, force this first rule to be the default
+        // — every category MUST have at least one default rule.
+        const [anyDefault] = await tx
+          .select({ id: expenseCategoryPaymentMethodRulesTable.id })
+          .from(expenseCategoryPaymentMethodRulesTable)
+          .where(
+            and(
+              eq(expenseCategoryPaymentMethodRulesTable.categoryId, id),
+              eq(expenseCategoryPaymentMethodRulesTable.isDefault, true),
+            ),
+          )
+          .limit(1);
+        if (!anyDefault) {
+          parsed.data.isDefault = true;
+        }
+      }
+      const [row] = await tx
+        .insert(expenseCategoryPaymentMethodRulesTable)
+        .values({
+          categoryId: id,
+          paymentMethod: parsed.data.paymentMethod,
+          creditAccountId: parsed.data.creditAccountId,
+          isDefault: parsed.data.isDefault ?? wantDefault,
+        })
+        .returning();
+      return row!;
+    });
+    res.status(201).json({ rule: serializeRule(created, credit.row) });
+  },
+);
+
+router.patch(
+  "/accounting/expense-categories/:id/payment-method-rules/:ruleId",
+  async (req, res): Promise<void> => {
+    if (!requireAdmin(req, res)) return;
+    const id = Number(req.params["id"]);
+    const ruleId = Number(req.params["ruleId"]);
+    if (
+      !Number.isInteger(id) ||
+      id <= 0 ||
+      !Number.isInteger(ruleId) ||
+      ruleId <= 0
+    ) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const parsed = UpdateRuleBodyZ.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: parsed.error.issues[0]?.message ?? "Invalid body",
+        code: "INVALID_PAYLOAD",
+      });
+      return;
+    }
+    const [existing] = await db
+      .select()
+      .from(expenseCategoryPaymentMethodRulesTable)
+      .where(
+        and(
+          eq(expenseCategoryPaymentMethodRulesTable.id, ruleId),
+          eq(expenseCategoryPaymentMethodRulesTable.categoryId, id),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      res.status(404).json({ error: "Rule not found" });
+      return;
+    }
+    let creditCoa: CoaRow | undefined;
+    if (parsed.data.creditAccountId !== undefined) {
+      const credit = await loadPostableAccount(parsed.data.creditAccountId);
+      if (!credit.ok) {
+        res.status(credit.status).json({ error: credit.error, code: credit.code });
+        return;
+      }
+      creditCoa = credit.row;
+    }
+    if (parsed.data.paymentMethod && parsed.data.paymentMethod !== existing.paymentMethod) {
+      const [dupe] = await db
+        .select({ id: expenseCategoryPaymentMethodRulesTable.id })
+        .from(expenseCategoryPaymentMethodRulesTable)
+        .where(
+          and(
+            eq(expenseCategoryPaymentMethodRulesTable.categoryId, id),
+            eq(
+              expenseCategoryPaymentMethodRulesTable.paymentMethod,
+              parsed.data.paymentMethod,
+            ),
+          ),
+        )
+        .limit(1);
+      if (dupe && dupe.id !== ruleId) {
+        res.status(409).json({
+          error: `A rule for payment method "${parsed.data.paymentMethod}" already exists for this category.`,
+          code: "DUPLICATE_PAYMENT_METHOD",
+        });
+        return;
+      }
+    }
+    // Refuse to drop the last default — every category needs one.
+    if (parsed.data.isDefault === false && existing.isDefault) {
+      const otherDefaults = await db
+        .select({ id: expenseCategoryPaymentMethodRulesTable.id })
+        .from(expenseCategoryPaymentMethodRulesTable)
+        .where(
+          and(
+            eq(expenseCategoryPaymentMethodRulesTable.categoryId, id),
+            eq(expenseCategoryPaymentMethodRulesTable.isDefault, true),
+          ),
+        );
+      if (otherDefaults.length <= 1) {
+        res.status(400).json({
+          error:
+            "Cannot remove default flag from the only default rule. Promote another rule to default first.",
+          code: "DEFAULT_RULE_REQUIRED",
+        });
+        return;
+      }
+    }
+    const updated = await db.transaction(async (tx) => {
+      if (parsed.data.isDefault === true && !existing.isDefault) {
+        await tx
+          .update(expenseCategoryPaymentMethodRulesTable)
+          .set({ isDefault: false, updatedAt: new Date() })
+          .where(
+            and(
+              eq(expenseCategoryPaymentMethodRulesTable.categoryId, id),
+              eq(expenseCategoryPaymentMethodRulesTable.isDefault, true),
+            ),
+          );
+      }
+      const set: Partial<typeof expenseCategoryPaymentMethodRulesTable.$inferInsert> = {
+        updatedAt: new Date(),
+      };
+      if (parsed.data.paymentMethod) set.paymentMethod = parsed.data.paymentMethod;
+      if (parsed.data.creditAccountId !== undefined)
+        set.creditAccountId = parsed.data.creditAccountId;
+      if (parsed.data.isDefault !== undefined)
+        set.isDefault = parsed.data.isDefault;
+      const [row] = await tx
+        .update(expenseCategoryPaymentMethodRulesTable)
+        .set(set)
+        .where(eq(expenseCategoryPaymentMethodRulesTable.id, ruleId))
+        .returning();
+      return row!;
+    });
+    if (!creditCoa) {
+      const [c] = await db
+        .select()
+        .from(chartOfAccountsTable)
+        .where(eq(chartOfAccountsTable.id, updated.creditAccountId))
+        .limit(1);
+      creditCoa = c;
+    }
+    res.json({ rule: serializeRule(updated, creditCoa) });
+  },
+);
+
+router.delete(
+  "/accounting/expense-categories/:id/payment-method-rules/:ruleId",
+  async (req, res): Promise<void> => {
+    if (!requireAdmin(req, res)) return;
+    const id = Number(req.params["id"]);
+    const ruleId = Number(req.params["ruleId"]);
+    if (
+      !Number.isInteger(id) ||
+      id <= 0 ||
+      !Number.isInteger(ruleId) ||
+      ruleId <= 0
+    ) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [existing] = await db
+      .select()
+      .from(expenseCategoryPaymentMethodRulesTable)
+      .where(
+        and(
+          eq(expenseCategoryPaymentMethodRulesTable.id, ruleId),
+          eq(expenseCategoryPaymentMethodRulesTable.categoryId, id),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      res.status(404).json({ error: "Rule not found" });
+      return;
+    }
+    if (existing.isDefault) {
+      const allRules = await db
+        .select({ id: expenseCategoryPaymentMethodRulesTable.id })
+        .from(expenseCategoryPaymentMethodRulesTable)
+        .where(eq(expenseCategoryPaymentMethodRulesTable.categoryId, id));
+      if (allRules.length <= 1) {
+        res.status(400).json({
+          error: "Cannot delete the only rule on a category.",
+          code: "DEFAULT_RULE_REQUIRED",
+        });
+        return;
+      }
+      res.status(400).json({
+        error:
+          "Cannot delete the default rule. Promote another rule to default first.",
+        code: "DEFAULT_RULE_REQUIRED",
+      });
+      return;
+    }
+    await db
+      .delete(expenseCategoryPaymentMethodRulesTable)
+      .where(eq(expenseCategoryPaymentMethodRulesTable.id, ruleId));
+    res.status(204).send();
+  },
+);
 
 export default router;

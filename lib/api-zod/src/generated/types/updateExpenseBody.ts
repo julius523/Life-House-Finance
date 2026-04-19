@@ -15,6 +15,7 @@ export interface UpdateExpenseBody {
   expenseDate?: Date;
   paymentMethod?: UpdateExpenseBodyPaymentMethod;
   programId?: number;
+  categoryId?: number | null;
   receiptIds?: number[];
   status?: UpdateExpenseBodyStatus;
 }

@@ -19,6 +19,7 @@ export interface Expense {
   paymentMethod: ExpensePaymentMethod;
   programId?: number;
   programName?: string;
+  categoryId?: number | null;
   status: ExpenseStatus;
   managerApprovedBy?: string;
   financeApprovedBy?: string;

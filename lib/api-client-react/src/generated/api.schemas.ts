@@ -98,6 +98,7 @@ export interface Expense {
   paymentMethod: ExpensePaymentMethod;
   programId?: number;
   programName?: string;
+  categoryId?: number | null;
   status: ExpenseStatus;
   managerApprovedBy?: string;
   financeApprovedBy?: string;
@@ -141,6 +142,7 @@ export interface CreateExpenseBody {
   amount: number;
   paymentMethod: CreateExpenseBodyPaymentMethod;
   programId?: number;
+  categoryId?: number | null;
   receiptIds?: number[];
 }
 
@@ -175,6 +177,7 @@ export interface UpdateExpenseBody {
   expenseDate?: string;
   paymentMethod?: UpdateExpenseBodyPaymentMethod;
   programId?: number;
+  categoryId?: number | null;
   receiptIds?: number[];
   status?: UpdateExpenseBodyStatus;
 }
@@ -1005,6 +1008,128 @@ export interface AccountingDashboardStatus {
   lastClosedPeriod: AccountingDashboardLastClosedPeriod | null;
 }
 
+export type ExpenseCategoryPaymentMethodRulePaymentMethod =
+  (typeof ExpenseCategoryPaymentMethodRulePaymentMethod)[keyof typeof ExpenseCategoryPaymentMethodRulePaymentMethod];
+
+export const ExpenseCategoryPaymentMethodRulePaymentMethod = {
+  cash: "cash",
+  check: "check",
+  credit_card: "credit_card",
+  debit_card: "debit_card",
+  bank_transfer: "bank_transfer",
+  other: "other",
+} as const;
+
+export interface ExpenseCategoryPaymentMethodRule {
+  id: number;
+  categoryId: number;
+  paymentMethod: ExpenseCategoryPaymentMethodRulePaymentMethod;
+  creditAccountId: number;
+  isDefault: boolean;
+  creditAccountCode?: string | null;
+  creditAccountName?: string | null;
+  creditAccountIsActive?: boolean | null;
+  creditAccountAllowManualPosting?: boolean | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ExpenseCategory {
+  id: number;
+  name: string;
+  debitAccountId: number;
+  isActive: boolean;
+  isSystem: boolean;
+  debitAccountCode?: string | null;
+  debitAccountName?: string | null;
+  debitAccountIsActive?: boolean | null;
+  debitAccountAllowManualPosting?: boolean | null;
+  rules: ExpenseCategoryPaymentMethodRule[];
+  hasCompleteMapping: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ExpenseCategoryListResponse {
+  categories: ExpenseCategory[];
+}
+
+export interface ExpenseCategoryResponse {
+  category: ExpenseCategory;
+}
+
+export type ExpenseCategoryMissingMappingResponseCategoriesItem = {
+  id: number;
+  name: string;
+  isActive: boolean;
+  missingDebit: boolean;
+  missingDefaultCredit: boolean;
+  archivedDebit: boolean;
+  nonPostableDebit: boolean;
+  archivedCreditRules: number;
+  nonPostableCreditRules: number;
+};
+
+export interface ExpenseCategoryMissingMappingResponse {
+  categories: ExpenseCategoryMissingMappingResponseCategoriesItem[];
+}
+
+export interface CreateExpenseCategoryBody {
+  name: string;
+  debitAccountId: number;
+  isActive?: boolean;
+}
+
+export interface UpdateExpenseCategoryBody {
+  name?: string;
+  debitAccountId?: number;
+  isActive?: boolean;
+}
+
+export interface ExpenseCategoryPaymentMethodRuleListResponse {
+  rules: ExpenseCategoryPaymentMethodRule[];
+}
+
+export interface ExpenseCategoryPaymentMethodRuleResponse {
+  rule: ExpenseCategoryPaymentMethodRule;
+}
+
+export type CreateExpenseCategoryPaymentMethodRuleBodyPaymentMethod =
+  (typeof CreateExpenseCategoryPaymentMethodRuleBodyPaymentMethod)[keyof typeof CreateExpenseCategoryPaymentMethodRuleBodyPaymentMethod];
+
+export const CreateExpenseCategoryPaymentMethodRuleBodyPaymentMethod = {
+  cash: "cash",
+  check: "check",
+  credit_card: "credit_card",
+  debit_card: "debit_card",
+  bank_transfer: "bank_transfer",
+  other: "other",
+} as const;
+
+export interface CreateExpenseCategoryPaymentMethodRuleBody {
+  paymentMethod: CreateExpenseCategoryPaymentMethodRuleBodyPaymentMethod;
+  creditAccountId: number;
+  isDefault?: boolean;
+}
+
+export type UpdateExpenseCategoryPaymentMethodRuleBodyPaymentMethod =
+  (typeof UpdateExpenseCategoryPaymentMethodRuleBodyPaymentMethod)[keyof typeof UpdateExpenseCategoryPaymentMethodRuleBodyPaymentMethod];
+
+export const UpdateExpenseCategoryPaymentMethodRuleBodyPaymentMethod = {
+  cash: "cash",
+  check: "check",
+  credit_card: "credit_card",
+  debit_card: "debit_card",
+  bank_transfer: "bank_transfer",
+  other: "other",
+} as const;
+
+export interface UpdateExpenseCategoryPaymentMethodRuleBody {
+  paymentMethod?: UpdateExpenseCategoryPaymentMethodRuleBodyPaymentMethod;
+  creditAccountId?: number;
+  isDefault?: boolean;
+}
+
 export type GetRecentActivityParams = {
   limit?: number;
 };
@@ -1237,6 +1362,18 @@ export const ListChartOfAccountsIncludeArchived = {
 export type GetChartOfAccountActivityParams = {
   limit?: number;
 };
+
+export type ListExpenseCategoriesParams = {
+  includeInactive?: ListExpenseCategoriesIncludeInactive;
+};
+
+export type ListExpenseCategoriesIncludeInactive =
+  (typeof ListExpenseCategoriesIncludeInactive)[keyof typeof ListExpenseCategoriesIncludeInactive];
+
+export const ListExpenseCategoriesIncludeInactive = {
+  true: "true",
+  false: "false",
+} as const;
 
 export type ListNotificationsParams = {
   unreadOnly?: boolean;

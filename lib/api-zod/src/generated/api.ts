@@ -124,6 +124,7 @@ export const ListExpensesResponse = zod.object({
       ]),
       programId: zod.number().optional(),
       programName: zod.string().optional(),
+      categoryId: zod.number().nullish(),
       status: zod.enum([
         "draft",
         "submitted",
@@ -174,6 +175,7 @@ export const CreateExpenseBody = zod.object({
     "other",
   ]),
   programId: zod.number().optional(),
+  categoryId: zod.number().nullish(),
   receiptIds: zod.array(zod.number()).optional(),
 });
 
@@ -202,6 +204,7 @@ export const GetExpenseResponse = zod.object({
   ]),
   programId: zod.number().optional(),
   programName: zod.string().optional(),
+  categoryId: zod.number().nullish(),
   status: zod.enum([
     "draft",
     "submitted",
@@ -251,6 +254,7 @@ export const UpdateExpenseBody = zod.object({
     ])
     .optional(),
   programId: zod.number().optional(),
+  categoryId: zod.number().nullish(),
   receiptIds: zod.array(zod.number()).optional(),
   status: zod
     .enum([
@@ -282,6 +286,7 @@ export const UpdateExpenseResponse = zod.object({
   ]),
   programId: zod.number().optional(),
   programName: zod.string().optional(),
+  categoryId: zod.number().nullish(),
   status: zod.enum([
     "draft",
     "submitted",
@@ -345,6 +350,7 @@ export const ApproveExpenseResponse = zod.object({
   ]),
   programId: zod.number().optional(),
   programName: zod.string().optional(),
+  categoryId: zod.number().nullish(),
   status: zod.enum([
     "draft",
     "submitted",
@@ -396,6 +402,7 @@ export const DismissExpenseDuplicateResponse = zod.object({
   ]),
   programId: zod.number().optional(),
   programName: zod.string().optional(),
+  categoryId: zod.number().nullish(),
   status: zod.enum([
     "draft",
     "submitted",
@@ -460,6 +467,7 @@ export const RejectExpenseResponse = zod.object({
   ]),
   programId: zod.number().optional(),
   programName: zod.string().optional(),
+  categoryId: zod.number().nullish(),
   status: zod.enum([
     "draft",
     "submitted",
@@ -1069,6 +1077,7 @@ export const ConvertTransactionToExpenseResponse = zod.object({
     ]),
     programId: zod.number().optional(),
     programName: zod.string().optional(),
+    categoryId: zod.number().nullish(),
     status: zod.enum([
       "draft",
       "submitted",
@@ -2120,6 +2129,332 @@ export const UpdateAccountingSettingsResponse = zod.object({
     updatedAt: zod.coerce.date().optional(),
     updatedByUserId: zod.number().nullish(),
   }),
+});
+
+/**
+ * @summary List expense categories with their payment-method credit rules
+ */
+export const ListExpenseCategoriesQueryParams = zod.object({
+  includeInactive: zod.enum(["true", "false"]).optional(),
+});
+
+export const ListExpenseCategoriesResponse = zod.object({
+  categories: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      debitAccountId: zod.number(),
+      isActive: zod.boolean(),
+      isSystem: zod.boolean(),
+      debitAccountCode: zod.string().nullish(),
+      debitAccountName: zod.string().nullish(),
+      debitAccountIsActive: zod.boolean().nullish(),
+      debitAccountAllowManualPosting: zod.boolean().nullish(),
+      rules: zod.array(
+        zod.object({
+          id: zod.number(),
+          categoryId: zod.number(),
+          paymentMethod: zod.enum([
+            "cash",
+            "check",
+            "credit_card",
+            "debit_card",
+            "bank_transfer",
+            "other",
+          ]),
+          creditAccountId: zod.number(),
+          isDefault: zod.boolean(),
+          creditAccountCode: zod.string().nullish(),
+          creditAccountName: zod.string().nullish(),
+          creditAccountIsActive: zod.boolean().nullish(),
+          creditAccountAllowManualPosting: zod.boolean().nullish(),
+          createdAt: zod.coerce.date().optional(),
+          updatedAt: zod.coerce.date().optional(),
+        }),
+      ),
+      hasCompleteMapping: zod.boolean(),
+      createdAt: zod.coerce.date().optional(),
+      updatedAt: zod.coerce.date().optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Create a new expense category (admin only)
+ */
+export const CreateExpenseCategoryBody = zod.object({
+  name: zod.string(),
+  debitAccountId: zod.number(),
+  isActive: zod.boolean().optional(),
+});
+
+/**
+ * @summary Categories that do not have a complete debit/credit mapping
+ */
+export const ListExpenseCategoriesMissingMappingResponse = zod.object({
+  categories: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      isActive: zod.boolean(),
+      missingDebit: zod.boolean(),
+      missingDefaultCredit: zod.boolean(),
+      archivedDebit: zod.boolean(),
+      nonPostableDebit: zod.boolean(),
+      archivedCreditRules: zod.number(),
+      nonPostableCreditRules: zod.number(),
+    }),
+  ),
+});
+
+/**
+ * @summary Get an expense category with its payment-method rules
+ */
+export const GetExpenseCategoryParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetExpenseCategoryResponse = zod.object({
+  category: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    debitAccountId: zod.number(),
+    isActive: zod.boolean(),
+    isSystem: zod.boolean(),
+    debitAccountCode: zod.string().nullish(),
+    debitAccountName: zod.string().nullish(),
+    debitAccountIsActive: zod.boolean().nullish(),
+    debitAccountAllowManualPosting: zod.boolean().nullish(),
+    rules: zod.array(
+      zod.object({
+        id: zod.number(),
+        categoryId: zod.number(),
+        paymentMethod: zod.enum([
+          "cash",
+          "check",
+          "credit_card",
+          "debit_card",
+          "bank_transfer",
+          "other",
+        ]),
+        creditAccountId: zod.number(),
+        isDefault: zod.boolean(),
+        creditAccountCode: zod.string().nullish(),
+        creditAccountName: zod.string().nullish(),
+        creditAccountIsActive: zod.boolean().nullish(),
+        creditAccountAllowManualPosting: zod.boolean().nullish(),
+        createdAt: zod.coerce.date().optional(),
+        updatedAt: zod.coerce.date().optional(),
+      }),
+    ),
+    hasCompleteMapping: zod.boolean(),
+    createdAt: zod.coerce.date().optional(),
+    updatedAt: zod.coerce.date().optional(),
+  }),
+});
+
+/**
+ * @summary Update an expense category (admin only)
+ */
+export const UpdateExpenseCategoryParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateExpenseCategoryBody = zod.object({
+  name: zod.string().optional(),
+  debitAccountId: zod.number().optional(),
+  isActive: zod.boolean().optional(),
+});
+
+export const UpdateExpenseCategoryResponse = zod.object({
+  category: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    debitAccountId: zod.number(),
+    isActive: zod.boolean(),
+    isSystem: zod.boolean(),
+    debitAccountCode: zod.string().nullish(),
+    debitAccountName: zod.string().nullish(),
+    debitAccountIsActive: zod.boolean().nullish(),
+    debitAccountAllowManualPosting: zod.boolean().nullish(),
+    rules: zod.array(
+      zod.object({
+        id: zod.number(),
+        categoryId: zod.number(),
+        paymentMethod: zod.enum([
+          "cash",
+          "check",
+          "credit_card",
+          "debit_card",
+          "bank_transfer",
+          "other",
+        ]),
+        creditAccountId: zod.number(),
+        isDefault: zod.boolean(),
+        creditAccountCode: zod.string().nullish(),
+        creditAccountName: zod.string().nullish(),
+        creditAccountIsActive: zod.boolean().nullish(),
+        creditAccountAllowManualPosting: zod.boolean().nullish(),
+        createdAt: zod.coerce.date().optional(),
+        updatedAt: zod.coerce.date().optional(),
+      }),
+    ),
+    hasCompleteMapping: zod.boolean(),
+    createdAt: zod.coerce.date().optional(),
+    updatedAt: zod.coerce.date().optional(),
+  }),
+});
+
+/**
+ * @summary Deactivate an expense category (admin only)
+ */
+export const DeactivateExpenseCategoryParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DeactivateExpenseCategoryResponse = zod.object({
+  category: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    debitAccountId: zod.number(),
+    isActive: zod.boolean(),
+    isSystem: zod.boolean(),
+    debitAccountCode: zod.string().nullish(),
+    debitAccountName: zod.string().nullish(),
+    debitAccountIsActive: zod.boolean().nullish(),
+    debitAccountAllowManualPosting: zod.boolean().nullish(),
+    rules: zod.array(
+      zod.object({
+        id: zod.number(),
+        categoryId: zod.number(),
+        paymentMethod: zod.enum([
+          "cash",
+          "check",
+          "credit_card",
+          "debit_card",
+          "bank_transfer",
+          "other",
+        ]),
+        creditAccountId: zod.number(),
+        isDefault: zod.boolean(),
+        creditAccountCode: zod.string().nullish(),
+        creditAccountName: zod.string().nullish(),
+        creditAccountIsActive: zod.boolean().nullish(),
+        creditAccountAllowManualPosting: zod.boolean().nullish(),
+        createdAt: zod.coerce.date().optional(),
+        updatedAt: zod.coerce.date().optional(),
+      }),
+    ),
+    hasCompleteMapping: zod.boolean(),
+    createdAt: zod.coerce.date().optional(),
+    updatedAt: zod.coerce.date().optional(),
+  }),
+});
+
+/**
+ * @summary List payment-method credit rules for a category
+ */
+export const ListExpenseCategoryPaymentMethodRulesParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ListExpenseCategoryPaymentMethodRulesResponse = zod.object({
+  rules: zod.array(
+    zod.object({
+      id: zod.number(),
+      categoryId: zod.number(),
+      paymentMethod: zod.enum([
+        "cash",
+        "check",
+        "credit_card",
+        "debit_card",
+        "bank_transfer",
+        "other",
+      ]),
+      creditAccountId: zod.number(),
+      isDefault: zod.boolean(),
+      creditAccountCode: zod.string().nullish(),
+      creditAccountName: zod.string().nullish(),
+      creditAccountIsActive: zod.boolean().nullish(),
+      creditAccountAllowManualPosting: zod.boolean().nullish(),
+      createdAt: zod.coerce.date().optional(),
+      updatedAt: zod.coerce.date().optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Create a new payment-method credit rule (admin only)
+ */
+export const CreateExpenseCategoryPaymentMethodRuleParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const CreateExpenseCategoryPaymentMethodRuleBody = zod.object({
+  paymentMethod: zod.enum([
+    "cash",
+    "check",
+    "credit_card",
+    "debit_card",
+    "bank_transfer",
+    "other",
+  ]),
+  creditAccountId: zod.number(),
+  isDefault: zod.boolean().optional(),
+});
+
+/**
+ * @summary Update a payment-method credit rule (admin only)
+ */
+export const UpdateExpenseCategoryPaymentMethodRuleParams = zod.object({
+  id: zod.coerce.number(),
+  ruleId: zod.coerce.number(),
+});
+
+export const UpdateExpenseCategoryPaymentMethodRuleBody = zod.object({
+  paymentMethod: zod
+    .enum([
+      "cash",
+      "check",
+      "credit_card",
+      "debit_card",
+      "bank_transfer",
+      "other",
+    ])
+    .optional(),
+  creditAccountId: zod.number().optional(),
+  isDefault: zod.boolean().optional(),
+});
+
+export const UpdateExpenseCategoryPaymentMethodRuleResponse = zod.object({
+  rule: zod.object({
+    id: zod.number(),
+    categoryId: zod.number(),
+    paymentMethod: zod.enum([
+      "cash",
+      "check",
+      "credit_card",
+      "debit_card",
+      "bank_transfer",
+      "other",
+    ]),
+    creditAccountId: zod.number(),
+    isDefault: zod.boolean(),
+    creditAccountCode: zod.string().nullish(),
+    creditAccountName: zod.string().nullish(),
+    creditAccountIsActive: zod.boolean().nullish(),
+    creditAccountAllowManualPosting: zod.boolean().nullish(),
+    createdAt: zod.coerce.date().optional(),
+    updatedAt: zod.coerce.date().optional(),
+  }),
+});
+
+/**
+ * @summary Delete a payment-method credit rule (admin only)
+ */
+export const DeleteExpenseCategoryPaymentMethodRuleParams = zod.object({
+  id: zod.coerce.number(),
+  ruleId: zod.coerce.number(),
 });
 
 /**

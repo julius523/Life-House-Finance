@@ -16,5 +16,6 @@ export interface CreateExpenseBody {
   amount: number;
   paymentMethod: CreateExpenseBodyPaymentMethod;
   programId?: number;
+  categoryId?: number | null;
   receiptIds?: number[];
 }

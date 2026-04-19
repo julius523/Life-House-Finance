@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useCreateExpense, useListPrograms, useCreateReceipt } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
+import { apiJson } from "@/lib/api";
 import { ReceiptUploader, type PendingReceipt } from "@/components/receipt-uploader";
 import { useAuth } from "@/lib/auth";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -25,7 +27,15 @@ const formSchema = z.object({
   amount: z.coerce.number().positive("Amount must be greater than 0"),
   paymentMethod: z.enum(["cash", "check", "credit_card", "debit_card", "bank_transfer", "other"]),
   programId: z.string().optional(),
+  categoryId: z.string().optional(),
 });
+
+interface ExpenseCategoryOption {
+  id: number;
+  name: string;
+  isActive: boolean;
+  hasCompleteMapping: boolean;
+}
 
 export default function ExpenseNew() {
   const [, setLocation] = useLocation();
@@ -33,6 +43,16 @@ export default function ExpenseNew() {
   const createExpense = useCreateExpense();
   const createReceipt = useCreateReceipt();
   const { data: programs, isLoading: programsLoading } = useListPrograms();
+  // Task #51 — load active expense categories so submitters can classify
+  // each expense for the auto-draft mapping.
+  const categoriesQuery = useQuery({
+    queryKey: ["expense-categories", { active: true }],
+    queryFn: () =>
+      apiJson<{ categories: ExpenseCategoryOption[] }>(
+        `/accounting/expense-categories`,
+      ),
+  });
+  const categories = categoriesQuery.data?.categories ?? [];
   const [receipts, setReceipts] = useState<PendingReceipt[]>([]);
   const { user } = useAuth();
   const isShared = user?.role === "submitter";
@@ -48,6 +68,7 @@ export default function ExpenseNew() {
       amount: 0,
       paymentMethod: "credit_card",
       programId: "",
+      categoryId: "",
     },
   });
 
@@ -74,12 +95,18 @@ export default function ExpenseNew() {
       const { firstName, lastName, ...rest } = values;
       void firstName;
       void lastName;
+      const { categoryId, ...rest2 } = rest;
+      void categoryId;
       const expenseData = {
-        ...rest,
+        ...rest2,
         submittedBy,
         programId:
           values.programId && values.programId !== "none"
             ? Number(values.programId)
+            : undefined,
+        categoryId:
+          values.categoryId && values.categoryId !== "none"
+            ? Number(values.categoryId)
             : undefined,
       };
 
@@ -260,6 +287,35 @@ export default function ExpenseNew() {
                           {!programsLoading && (Array.isArray(programs) ? programs : (programs as any)?.items ?? []).map((p: any) => (
                             <SelectItem key={p.id} value={p.id.toString()}>{p.name}</SelectItem>
                           ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="categoryId"
+                  render={({ field }) => (
+                    <FormItem className="col-span-1 md:col-span-2">
+                      <FormLabel>Expense Category</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || "none"}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-expense-category">
+                            <SelectValue placeholder="Select a category (optional)" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">Uncategorized (default)</SelectItem>
+                          {categories
+                            .filter((c) => c.isActive)
+                            .map((c) => (
+                              <SelectItem key={c.id} value={String(c.id)}>
+                                {c.name}
+                                {!c.hasCompleteMapping ? " ⚠ (mapping incomplete)" : ""}
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />

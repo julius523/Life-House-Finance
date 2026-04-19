@@ -28,6 +28,7 @@ import MonthEndList from "@/pages/month-end/index";
 import MonthEndDetail from "@/pages/month-end/detail";
 import ReportsPage from "@/pages/reports";
 import AdminPage from "@/pages/admin";
+import AdminExpenseCategoriesPage from "@/pages/admin-expense-categories";
 import CreditsPage from "@/pages/credits";
 import AccountingPage from "@/pages/accounting";
 import AccountingCoaPage from "@/pages/accounting-coa";
@@ -123,6 +124,11 @@ function AppRoutes() {
         {route("/accounting/coa/:id", "accounting", AccountingCoaDetail)}
         {route("/accounting/settings", "accounting", AccountingSettingsPage)}
         {route("/admin", "admin", AdminPage)}
+        {route(
+          "/admin/expense-categories",
+          "accounting",
+          AdminExpenseCategoriesPage,
+        )}
 
         <Route component={NotFound} />
       </Switch>

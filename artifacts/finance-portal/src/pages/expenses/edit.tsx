@@ -8,7 +8,8 @@ import {
   getGetExpenseQueryKey,
   getListExpensesQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiJson } from "@/lib/api";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
@@ -64,9 +65,17 @@ const formSchema = z.object({
     "other",
   ]),
   programId: z.string().optional(),
+  categoryId: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
+
+interface ExpenseCategoryOption {
+  id: number;
+  name: string;
+  isActive: boolean;
+  hasCompleteMapping: boolean;
+}
 
 export default function ExpenseEdit() {
   const [, params] = useRoute("/expenses/:id/edit");
@@ -80,6 +89,15 @@ export default function ExpenseEdit() {
     query: { enabled: !!id, queryKey: getGetExpenseQueryKey(id) },
   });
   const { data: programs, isLoading: programsLoading } = useListPrograms();
+  // Task #51 — load categories so submitters/admins can change classification.
+  const categoriesQuery = useQuery({
+    queryKey: ["expense-categories", { active: true }],
+    queryFn: () =>
+      apiJson<{ categories: ExpenseCategoryOption[] }>(
+        `/accounting/expense-categories`,
+      ),
+  });
+  const categories = categoriesQuery.data?.categories ?? [];
   const updateExpense = useUpdateExpense();
   const deleteExpense = useDeleteExpense();
 
@@ -92,6 +110,7 @@ export default function ExpenseEdit() {
       amount: 0,
       paymentMethod: "credit_card",
       programId: "none",
+      categoryId: "none",
     },
   });
 
@@ -105,6 +124,9 @@ export default function ExpenseEdit() {
       amount: expense.amount,
       paymentMethod: expense.paymentMethod,
       programId: expense.programId ? String(expense.programId) : "none",
+      categoryId: (expense as { categoryId?: number | null }).categoryId
+        ? String((expense as { categoryId?: number | null }).categoryId)
+        : "none",
     });
   }, [expense, form]);
 
@@ -123,6 +145,10 @@ export default function ExpenseEdit() {
       values.programId && values.programId !== "none"
         ? Number(values.programId)
         : undefined,
+    categoryId:
+      values.categoryId && values.categoryId !== "none"
+        ? Number(values.categoryId)
+        : null,
   });
 
   const handleSave = async (values: FormValues) => {
@@ -309,6 +335,39 @@ export default function ExpenseEdit() {
                             programList.map((p) => (
                               <SelectItem key={p.id} value={p.id.toString()}>
                                 {p.name}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="categoryId"
+                  render={({ field }) => (
+                    <FormItem className="col-span-1 md:col-span-2">
+                      <FormLabel>Expense Category</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value || "none"}
+                      >
+                        <FormControl>
+                          <SelectTrigger data-testid="select-expense-category">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">Uncategorized</SelectItem>
+                          {categories
+                            .filter((c) => c.isActive)
+                            .map((c) => (
+                              <SelectItem key={c.id} value={String(c.id)}>
+                                {c.name}
+                                {!c.hasCompleteMapping
+                                  ? " ⚠ (mapping incomplete)"
+                                  : ""}
                               </SelectItem>
                             ))}
                         </SelectContent>

@@ -5,6 +5,7 @@ export * from "./programs";
 export * from "./program_contacts";
 export * from "./receipts";
 export * from "./expenses";
+export * from "./expense_categories";
 export * from "./bills";
 export * from "./transactions";
 export * from "./month_end_checklists";

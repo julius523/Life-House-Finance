@@ -34,6 +34,8 @@ import type {
   CreateBillBody,
   CreateChartOfAccountBody,
   CreateExpenseBody,
+  CreateExpenseCategoryBody,
+  CreateExpenseCategoryPaymentMethodRuleBody,
   CreateMonthEndChecklistBody,
   CreateProgramBody,
   CreateReceiptBody,
@@ -42,6 +44,11 @@ import type {
   DashboardSummary,
   DeleteChartOfAccountResponse,
   Expense,
+  ExpenseCategoryListResponse,
+  ExpenseCategoryMissingMappingResponse,
+  ExpenseCategoryPaymentMethodRuleListResponse,
+  ExpenseCategoryPaymentMethodRuleResponse,
+  ExpenseCategoryResponse,
   ExpenseListResponse,
   FinancialSummaryReport,
   GetChartOfAccountActivityParams,
@@ -57,6 +64,7 @@ import type {
   ListApprovalsParams,
   ListBillsParams,
   ListChartOfAccountsParams,
+  ListExpenseCategoriesParams,
   ListExpensesParams,
   ListNotificationsParams,
   ListProgramsParams,
@@ -87,6 +95,8 @@ import type {
   UpdateAccountingSettingsBody,
   UpdateChartOfAccountBody,
   UpdateExpenseBody,
+  UpdateExpenseCategoryBody,
+  UpdateExpenseCategoryPaymentMethodRuleBody,
   UpdateMonthEndChecklistBody,
   UpdateTransactionBody,
   Vendor,
@@ -5174,6 +5184,954 @@ export const useUpdateAccountingSettings = <
   TContext
 > => {
   return useMutation(getUpdateAccountingSettingsMutationOptions(options));
+};
+
+/**
+ * @summary List expense categories with their payment-method credit rules
+ */
+export const getListExpenseCategoriesUrl = (
+  params?: ListExpenseCategoriesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/accounting/expense-categories?${stringifiedParams}`
+    : `/api/accounting/expense-categories`;
+};
+
+export const listExpenseCategories = async (
+  params?: ListExpenseCategoriesParams,
+  options?: RequestInit,
+): Promise<ExpenseCategoryListResponse> => {
+  return customFetch<ExpenseCategoryListResponse>(
+    getListExpenseCategoriesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListExpenseCategoriesQueryKey = (
+  params?: ListExpenseCategoriesParams,
+) => {
+  return [
+    `/api/accounting/expense-categories`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListExpenseCategoriesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listExpenseCategories>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListExpenseCategoriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listExpenseCategories>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListExpenseCategoriesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listExpenseCategories>>
+  > = ({ signal }) =>
+    listExpenseCategories(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listExpenseCategories>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListExpenseCategoriesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listExpenseCategories>>
+>;
+export type ListExpenseCategoriesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List expense categories with their payment-method credit rules
+ */
+
+export function useListExpenseCategories<
+  TData = Awaited<ReturnType<typeof listExpenseCategories>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListExpenseCategoriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listExpenseCategories>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListExpenseCategoriesQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a new expense category (admin only)
+ */
+export const getCreateExpenseCategoryUrl = () => {
+  return `/api/accounting/expense-categories`;
+};
+
+export const createExpenseCategory = async (
+  createExpenseCategoryBody: CreateExpenseCategoryBody,
+  options?: RequestInit,
+): Promise<ExpenseCategoryResponse> => {
+  return customFetch<ExpenseCategoryResponse>(getCreateExpenseCategoryUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createExpenseCategoryBody),
+  });
+};
+
+export const getCreateExpenseCategoryMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createExpenseCategory>>,
+    TError,
+    { data: BodyType<CreateExpenseCategoryBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createExpenseCategory>>,
+  TError,
+  { data: BodyType<CreateExpenseCategoryBody> },
+  TContext
+> => {
+  const mutationKey = ["createExpenseCategory"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createExpenseCategory>>,
+    { data: BodyType<CreateExpenseCategoryBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createExpenseCategory(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateExpenseCategoryMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createExpenseCategory>>
+>;
+export type CreateExpenseCategoryMutationBody =
+  BodyType<CreateExpenseCategoryBody>;
+export type CreateExpenseCategoryMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a new expense category (admin only)
+ */
+export const useCreateExpenseCategory = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createExpenseCategory>>,
+    TError,
+    { data: BodyType<CreateExpenseCategoryBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createExpenseCategory>>,
+  TError,
+  { data: BodyType<CreateExpenseCategoryBody> },
+  TContext
+> => {
+  return useMutation(getCreateExpenseCategoryMutationOptions(options));
+};
+
+/**
+ * @summary Categories that do not have a complete debit/credit mapping
+ */
+export const getListExpenseCategoriesMissingMappingUrl = () => {
+  return `/api/accounting/expense-categories/missing-mapping`;
+};
+
+export const listExpenseCategoriesMissingMapping = async (
+  options?: RequestInit,
+): Promise<ExpenseCategoryMissingMappingResponse> => {
+  return customFetch<ExpenseCategoryMissingMappingResponse>(
+    getListExpenseCategoriesMissingMappingUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListExpenseCategoriesMissingMappingQueryKey = () => {
+  return [`/api/accounting/expense-categories/missing-mapping`] as const;
+};
+
+export const getListExpenseCategoriesMissingMappingQueryOptions = <
+  TData = Awaited<ReturnType<typeof listExpenseCategoriesMissingMapping>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listExpenseCategoriesMissingMapping>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListExpenseCategoriesMissingMappingQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listExpenseCategoriesMissingMapping>>
+  > = ({ signal }) =>
+    listExpenseCategoriesMissingMapping({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listExpenseCategoriesMissingMapping>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListExpenseCategoriesMissingMappingQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listExpenseCategoriesMissingMapping>>
+>;
+export type ListExpenseCategoriesMissingMappingQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Categories that do not have a complete debit/credit mapping
+ */
+
+export function useListExpenseCategoriesMissingMapping<
+  TData = Awaited<ReturnType<typeof listExpenseCategoriesMissingMapping>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listExpenseCategoriesMissingMapping>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions =
+    getListExpenseCategoriesMissingMappingQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get an expense category with its payment-method rules
+ */
+export const getGetExpenseCategoryUrl = (id: number) => {
+  return `/api/accounting/expense-categories/${id}`;
+};
+
+export const getExpenseCategory = async (
+  id: number,
+  options?: RequestInit,
+): Promise<ExpenseCategoryResponse> => {
+  return customFetch<ExpenseCategoryResponse>(getGetExpenseCategoryUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetExpenseCategoryQueryKey = (id: number) => {
+  return [`/api/accounting/expense-categories/${id}`] as const;
+};
+
+export const getGetExpenseCategoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getExpenseCategory>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getExpenseCategory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetExpenseCategoryQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getExpenseCategory>>
+  > = ({ signal }) => getExpenseCategory(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getExpenseCategory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetExpenseCategoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getExpenseCategory>>
+>;
+export type GetExpenseCategoryQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get an expense category with its payment-method rules
+ */
+
+export function useGetExpenseCategory<
+  TData = Awaited<ReturnType<typeof getExpenseCategory>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getExpenseCategory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetExpenseCategoryQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update an expense category (admin only)
+ */
+export const getUpdateExpenseCategoryUrl = (id: number) => {
+  return `/api/accounting/expense-categories/${id}`;
+};
+
+export const updateExpenseCategory = async (
+  id: number,
+  updateExpenseCategoryBody: UpdateExpenseCategoryBody,
+  options?: RequestInit,
+): Promise<ExpenseCategoryResponse> => {
+  return customFetch<ExpenseCategoryResponse>(getUpdateExpenseCategoryUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateExpenseCategoryBody),
+  });
+};
+
+export const getUpdateExpenseCategoryMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateExpenseCategory>>,
+    TError,
+    { id: number; data: BodyType<UpdateExpenseCategoryBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateExpenseCategory>>,
+  TError,
+  { id: number; data: BodyType<UpdateExpenseCategoryBody> },
+  TContext
+> => {
+  const mutationKey = ["updateExpenseCategory"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateExpenseCategory>>,
+    { id: number; data: BodyType<UpdateExpenseCategoryBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateExpenseCategory(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateExpenseCategoryMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateExpenseCategory>>
+>;
+export type UpdateExpenseCategoryMutationBody =
+  BodyType<UpdateExpenseCategoryBody>;
+export type UpdateExpenseCategoryMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update an expense category (admin only)
+ */
+export const useUpdateExpenseCategory = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateExpenseCategory>>,
+    TError,
+    { id: number; data: BodyType<UpdateExpenseCategoryBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateExpenseCategory>>,
+  TError,
+  { id: number; data: BodyType<UpdateExpenseCategoryBody> },
+  TContext
+> => {
+  return useMutation(getUpdateExpenseCategoryMutationOptions(options));
+};
+
+/**
+ * @summary Deactivate an expense category (admin only)
+ */
+export const getDeactivateExpenseCategoryUrl = (id: number) => {
+  return `/api/accounting/expense-categories/${id}/deactivate`;
+};
+
+export const deactivateExpenseCategory = async (
+  id: number,
+  options?: RequestInit,
+): Promise<ExpenseCategoryResponse> => {
+  return customFetch<ExpenseCategoryResponse>(
+    getDeactivateExpenseCategoryUrl(id),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getDeactivateExpenseCategoryMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deactivateExpenseCategory>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deactivateExpenseCategory>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["deactivateExpenseCategory"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deactivateExpenseCategory>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deactivateExpenseCategory(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeactivateExpenseCategoryMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deactivateExpenseCategory>>
+>;
+
+export type DeactivateExpenseCategoryMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Deactivate an expense category (admin only)
+ */
+export const useDeactivateExpenseCategory = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deactivateExpenseCategory>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deactivateExpenseCategory>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getDeactivateExpenseCategoryMutationOptions(options));
+};
+
+/**
+ * @summary List payment-method credit rules for a category
+ */
+export const getListExpenseCategoryPaymentMethodRulesUrl = (id: number) => {
+  return `/api/accounting/expense-categories/${id}/payment-method-rules`;
+};
+
+export const listExpenseCategoryPaymentMethodRules = async (
+  id: number,
+  options?: RequestInit,
+): Promise<ExpenseCategoryPaymentMethodRuleListResponse> => {
+  return customFetch<ExpenseCategoryPaymentMethodRuleListResponse>(
+    getListExpenseCategoryPaymentMethodRulesUrl(id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListExpenseCategoryPaymentMethodRulesQueryKey = (
+  id: number,
+) => {
+  return [
+    `/api/accounting/expense-categories/${id}/payment-method-rules`,
+  ] as const;
+};
+
+export const getListExpenseCategoryPaymentMethodRulesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listExpenseCategoryPaymentMethodRules>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listExpenseCategoryPaymentMethodRules>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListExpenseCategoryPaymentMethodRulesQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listExpenseCategoryPaymentMethodRules>>
+  > = ({ signal }) =>
+    listExpenseCategoryPaymentMethodRules(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listExpenseCategoryPaymentMethodRules>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListExpenseCategoryPaymentMethodRulesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listExpenseCategoryPaymentMethodRules>>
+>;
+export type ListExpenseCategoryPaymentMethodRulesQueryError =
+  ErrorType<unknown>;
+
+/**
+ * @summary List payment-method credit rules for a category
+ */
+
+export function useListExpenseCategoryPaymentMethodRules<
+  TData = Awaited<ReturnType<typeof listExpenseCategoryPaymentMethodRules>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listExpenseCategoryPaymentMethodRules>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListExpenseCategoryPaymentMethodRulesQueryOptions(
+    id,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a new payment-method credit rule (admin only)
+ */
+export const getCreateExpenseCategoryPaymentMethodRuleUrl = (id: number) => {
+  return `/api/accounting/expense-categories/${id}/payment-method-rules`;
+};
+
+export const createExpenseCategoryPaymentMethodRule = async (
+  id: number,
+  createExpenseCategoryPaymentMethodRuleBody: CreateExpenseCategoryPaymentMethodRuleBody,
+  options?: RequestInit,
+): Promise<ExpenseCategoryPaymentMethodRuleResponse> => {
+  return customFetch<ExpenseCategoryPaymentMethodRuleResponse>(
+    getCreateExpenseCategoryPaymentMethodRuleUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createExpenseCategoryPaymentMethodRuleBody),
+    },
+  );
+};
+
+export const getCreateExpenseCategoryPaymentMethodRuleMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createExpenseCategoryPaymentMethodRule>>,
+    TError,
+    { id: number; data: BodyType<CreateExpenseCategoryPaymentMethodRuleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createExpenseCategoryPaymentMethodRule>>,
+  TError,
+  { id: number; data: BodyType<CreateExpenseCategoryPaymentMethodRuleBody> },
+  TContext
+> => {
+  const mutationKey = ["createExpenseCategoryPaymentMethodRule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createExpenseCategoryPaymentMethodRule>>,
+    { id: number; data: BodyType<CreateExpenseCategoryPaymentMethodRuleBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return createExpenseCategoryPaymentMethodRule(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateExpenseCategoryPaymentMethodRuleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createExpenseCategoryPaymentMethodRule>>
+>;
+export type CreateExpenseCategoryPaymentMethodRuleMutationBody =
+  BodyType<CreateExpenseCategoryPaymentMethodRuleBody>;
+export type CreateExpenseCategoryPaymentMethodRuleMutationError =
+  ErrorType<unknown>;
+
+/**
+ * @summary Create a new payment-method credit rule (admin only)
+ */
+export const useCreateExpenseCategoryPaymentMethodRule = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createExpenseCategoryPaymentMethodRule>>,
+    TError,
+    { id: number; data: BodyType<CreateExpenseCategoryPaymentMethodRuleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createExpenseCategoryPaymentMethodRule>>,
+  TError,
+  { id: number; data: BodyType<CreateExpenseCategoryPaymentMethodRuleBody> },
+  TContext
+> => {
+  return useMutation(
+    getCreateExpenseCategoryPaymentMethodRuleMutationOptions(options),
+  );
+};
+
+/**
+ * @summary Update a payment-method credit rule (admin only)
+ */
+export const getUpdateExpenseCategoryPaymentMethodRuleUrl = (
+  id: number,
+  ruleId: number,
+) => {
+  return `/api/accounting/expense-categories/${id}/payment-method-rules/${ruleId}`;
+};
+
+export const updateExpenseCategoryPaymentMethodRule = async (
+  id: number,
+  ruleId: number,
+  updateExpenseCategoryPaymentMethodRuleBody: UpdateExpenseCategoryPaymentMethodRuleBody,
+  options?: RequestInit,
+): Promise<ExpenseCategoryPaymentMethodRuleResponse> => {
+  return customFetch<ExpenseCategoryPaymentMethodRuleResponse>(
+    getUpdateExpenseCategoryPaymentMethodRuleUrl(id, ruleId),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(updateExpenseCategoryPaymentMethodRuleBody),
+    },
+  );
+};
+
+export const getUpdateExpenseCategoryPaymentMethodRuleMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateExpenseCategoryPaymentMethodRule>>,
+    TError,
+    {
+      id: number;
+      ruleId: number;
+      data: BodyType<UpdateExpenseCategoryPaymentMethodRuleBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateExpenseCategoryPaymentMethodRule>>,
+  TError,
+  {
+    id: number;
+    ruleId: number;
+    data: BodyType<UpdateExpenseCategoryPaymentMethodRuleBody>;
+  },
+  TContext
+> => {
+  const mutationKey = ["updateExpenseCategoryPaymentMethodRule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateExpenseCategoryPaymentMethodRule>>,
+    {
+      id: number;
+      ruleId: number;
+      data: BodyType<UpdateExpenseCategoryPaymentMethodRuleBody>;
+    }
+  > = (props) => {
+    const { id, ruleId, data } = props ?? {};
+
+    return updateExpenseCategoryPaymentMethodRule(
+      id,
+      ruleId,
+      data,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateExpenseCategoryPaymentMethodRuleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateExpenseCategoryPaymentMethodRule>>
+>;
+export type UpdateExpenseCategoryPaymentMethodRuleMutationBody =
+  BodyType<UpdateExpenseCategoryPaymentMethodRuleBody>;
+export type UpdateExpenseCategoryPaymentMethodRuleMutationError =
+  ErrorType<unknown>;
+
+/**
+ * @summary Update a payment-method credit rule (admin only)
+ */
+export const useUpdateExpenseCategoryPaymentMethodRule = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateExpenseCategoryPaymentMethodRule>>,
+    TError,
+    {
+      id: number;
+      ruleId: number;
+      data: BodyType<UpdateExpenseCategoryPaymentMethodRuleBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateExpenseCategoryPaymentMethodRule>>,
+  TError,
+  {
+    id: number;
+    ruleId: number;
+    data: BodyType<UpdateExpenseCategoryPaymentMethodRuleBody>;
+  },
+  TContext
+> => {
+  return useMutation(
+    getUpdateExpenseCategoryPaymentMethodRuleMutationOptions(options),
+  );
+};
+
+/**
+ * @summary Delete a payment-method credit rule (admin only)
+ */
+export const getDeleteExpenseCategoryPaymentMethodRuleUrl = (
+  id: number,
+  ruleId: number,
+) => {
+  return `/api/accounting/expense-categories/${id}/payment-method-rules/${ruleId}`;
+};
+
+export const deleteExpenseCategoryPaymentMethodRule = async (
+  id: number,
+  ruleId: number,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(
+    getDeleteExpenseCategoryPaymentMethodRuleUrl(id, ruleId),
+    {
+      ...options,
+      method: "DELETE",
+    },
+  );
+};
+
+export const getDeleteExpenseCategoryPaymentMethodRuleMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteExpenseCategoryPaymentMethodRule>>,
+    TError,
+    { id: number; ruleId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteExpenseCategoryPaymentMethodRule>>,
+  TError,
+  { id: number; ruleId: number },
+  TContext
+> => {
+  const mutationKey = ["deleteExpenseCategoryPaymentMethodRule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteExpenseCategoryPaymentMethodRule>>,
+    { id: number; ruleId: number }
+  > = (props) => {
+    const { id, ruleId } = props ?? {};
+
+    return deleteExpenseCategoryPaymentMethodRule(id, ruleId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteExpenseCategoryPaymentMethodRuleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteExpenseCategoryPaymentMethodRule>>
+>;
+
+export type DeleteExpenseCategoryPaymentMethodRuleMutationError =
+  ErrorType<unknown>;
+
+/**
+ * @summary Delete a payment-method credit rule (admin only)
+ */
+export const useDeleteExpenseCategoryPaymentMethodRule = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteExpenseCategoryPaymentMethodRule>>,
+    TError,
+    { id: number; ruleId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteExpenseCategoryPaymentMethodRule>>,
+  TError,
+  { id: number; ruleId: number },
+  TContext
+> => {
+  return useMutation(
+    getDeleteExpenseCategoryPaymentMethodRuleMutationOptions(options),
+  );
 };
 
 /**
