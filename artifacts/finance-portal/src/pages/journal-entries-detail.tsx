@@ -54,9 +54,55 @@ type JournalEntry = {
   reversesJournalEntryId: number | null;
   reversedByJournalEntryId: number | null;
   reversalReason: string | null;
+  manualDraftId: number | null;
   createdAt: string;
   lines: JournalEntryLine[];
 };
+
+type ApprovalEvent = {
+  id: number;
+  type:
+    | "manual_je_draft_created"
+    | "manual_je_draft_edited"
+    | "manual_je_draft_submitted"
+    | "manual_je_draft_approved"
+    | "manual_je_draft_rejected"
+    | "manual_je_draft_posted"
+    | string;
+  description: string;
+  actor: string;
+  actorUserId: number | null;
+  actorEmail: string | null;
+  actorFirstName: string | null;
+  actorLastName: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+const EVENT_LABELS: Record<string, string> = {
+  manual_je_draft_created: "Created",
+  manual_je_draft_edited: "Edited",
+  manual_je_draft_submitted: "Submitted for review",
+  manual_je_draft_approved: "Approved",
+  manual_je_draft_rejected: "Rejected",
+  manual_je_draft_posted: "Posted to ledger",
+};
+
+function eventLabel(t: string): string {
+  return EVENT_LABELS[t] ?? t;
+}
+
+function actorDisplay(ev: ApprovalEvent): string {
+  const name = [ev.actorFirstName, ev.actorLastName]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  if (name) return name;
+  if (ev.actorEmail) return ev.actorEmail;
+  if (ev.actor) return ev.actor;
+  if (ev.actorUserId) return `User #${ev.actorUserId}`;
+  return "System";
+}
 
 function formatCents(cents: number): string {
   return (cents / 100).toLocaleString(undefined, {
@@ -81,6 +127,9 @@ export default function JournalEntryDetailPage() {
   const [entry, setEntry] = useState<JournalEntry | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<ApprovalEvent[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!canView || !id) return;
@@ -111,6 +160,36 @@ export default function JournalEntryDetailPage() {
       cancelled = true;
     };
   }, [id, canView, toast]);
+
+  useEffect(() => {
+    if (!canView || !id || !entry || entry.manualDraftId === null) {
+      setHistory(null);
+      setHistoryError(null);
+      return;
+    }
+    let cancelled = false;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    apiJson<{ events: ApprovalEvent[] }>(
+      `/accounting/journal-entries/${id}/approval-history`,
+    )
+      .then((data) => {
+        if (cancelled) return;
+        setHistory(data.events);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setHistoryError(
+          e instanceof Error ? e.message : "Failed to load approval history.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, canView, entry]);
 
   if (!canView) {
     return (
@@ -346,6 +425,94 @@ export default function JournalEntryDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {entry.manualDraftId !== null && (
+        <Card data-testid="card-approval-history">
+          <CardHeader>
+            <CardTitle className="text-base">Approval history</CardTitle>
+            <CardDescription>
+              Full chain from draft through posting for manual draft #
+              {entry.manualDraftId}.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {historyLoading && !history ? (
+              <div className="space-y-2">
+                <Skeleton className="h-6 w-2/3" />
+                <Skeleton className="h-6 w-1/2" />
+                <Skeleton className="h-6 w-3/5" />
+              </div>
+            ) : historyError ? (
+              <p className="text-sm text-destructive">{historyError}</p>
+            ) : !history || history.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No approval events recorded for this draft.
+              </p>
+            ) : (
+              <ol
+                className="relative border-l border-border ml-3 space-y-4"
+                data-testid="list-approval-history"
+              >
+                {history.map((ev) => {
+                  const reason =
+                    ev.type === "manual_je_draft_rejected" &&
+                    ev.metadata &&
+                    typeof (ev.metadata as Record<string, unknown>)["reason"] ===
+                      "string"
+                      ? ((ev.metadata as Record<string, unknown>)[
+                          "reason"
+                        ] as string)
+                      : null;
+                  const dotClass =
+                    ev.type === "manual_je_draft_rejected"
+                      ? "bg-destructive"
+                      : ev.type === "manual_je_draft_posted"
+                        ? "bg-primary"
+                        : ev.type === "manual_je_draft_approved"
+                          ? "bg-green-600"
+                          : "bg-muted-foreground";
+                  return (
+                    <li
+                      key={ev.id}
+                      className="ml-6"
+                      data-testid={`history-event-${ev.id}`}
+                    >
+                      <span
+                        className={`absolute -left-[7px] flex h-3 w-3 items-center justify-center rounded-full ${dotClass} ring-2 ring-background`}
+                      />
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <span className="font-medium">
+                          {eventLabel(ev.type)}
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          by {actorDisplay(ev)}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          · {format(new Date(ev.createdAt), "MMM d, yyyy p")}
+                        </span>
+                      </div>
+                      {reason && (
+                        <p
+                          className="text-sm text-muted-foreground mt-1"
+                          data-testid={`history-reason-${ev.id}`}
+                        >
+                          Reason: {reason}
+                        </p>
+                      )}
+                      {ev.description &&
+                        ev.type !== "manual_je_draft_rejected" && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {ev.description}
+                          </p>
+                        )}
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

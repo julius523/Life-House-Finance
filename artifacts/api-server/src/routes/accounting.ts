@@ -2073,6 +2073,79 @@ router.get(
   },
 );
 
+// Task #43 — approval history for a posted journal entry that originated
+// from a manual draft. Returns the full activity_log chain
+// (created/edited/submitted/approved/rejected/posted) joined to users so
+// the UI can show "who did what when" without parsing free-text actor
+// strings. Empty list when the JE was a direct post (no manual_draft_id).
+router.get(
+  "/accounting/journal-entries/:id/approval-history",
+  async (req, res): Promise<void> => {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Admins or approvers only" });
+      return;
+    }
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [je] = await db
+      .select({
+        id: journalEntriesTable.id,
+        manualDraftId: journalEntriesTable.manualDraftId,
+      })
+      .from(journalEntriesTable)
+      .where(eq(journalEntriesTable.id, id));
+    if (!je) {
+      res.status(404).json({ error: "Journal entry not found" });
+      return;
+    }
+    if (je.manualDraftId === null) {
+      res.json({ manualDraftId: null, events: [] });
+      return;
+    }
+    const rows = await db
+      .select({
+        id: activityLogTable.id,
+        type: activityLogTable.type,
+        description: activityLogTable.description,
+        actor: activityLogTable.actor,
+        actorUserId: activityLogTable.actorUserId,
+        metadata: activityLogTable.metadata,
+        createdAt: activityLogTable.createdAt,
+        actorEmail: usersTable.email,
+        actorFirstName: usersTable.firstName,
+        actorLastName: usersTable.lastName,
+      })
+      .from(activityLogTable)
+      .leftJoin(usersTable, eq(usersTable.id, activityLogTable.actorUserId))
+      .where(
+        and(
+          eq(activityLogTable.referenceType, "manual_journal_entry_draft"),
+          eq(activityLogTable.referenceId, je.manualDraftId),
+        ),
+      )
+      .orderBy(asc(activityLogTable.createdAt), asc(activityLogTable.id));
+    res.json({
+      manualDraftId: je.manualDraftId,
+      events: rows.map((r) => ({
+        id: r.id,
+        type: r.type,
+        description: r.description,
+        actor: r.actor,
+        actorUserId: r.actorUserId,
+        actorEmail: r.actorEmail,
+        actorFirstName: r.actorFirstName,
+        actorLastName: r.actorLastName,
+        metadata: r.metadata,
+        createdAt: r.createdAt,
+      })),
+    });
+  },
+);
+
 // --- Manual journal entry drafts ------------------------------------------
 // Drafts let accountants save work-in-progress JE editor state and resume
 // later. They never touch the ledger. Visibility is the user who created
