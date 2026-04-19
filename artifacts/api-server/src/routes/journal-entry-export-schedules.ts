@@ -7,7 +7,7 @@
 
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import {
   db,
   journalEntryExportSchedulesTable,
@@ -253,9 +253,5 @@ router.get(
     res.json({ entries: rows });
   },
 );
-
-// Suppress unused-import warning for `and` if linter cares — it stays
-// imported for future filtering on the log endpoint.
-void and;
 
 export default router;
