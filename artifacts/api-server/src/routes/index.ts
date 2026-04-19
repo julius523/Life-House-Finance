@@ -19,6 +19,7 @@ import notificationsRouter from "./notifications";
 import accountingRouter from "./accounting";
 import coaRouter from "./coa";
 import journalEntryExportSchedulesRouter from "./journal-entry-export-schedules";
+import remediationRouter from "./remediation";
 
 const router: IRouter = Router();
 
@@ -42,5 +43,6 @@ router.use(notificationsRouter);
 router.use(accountingRouter);
 router.use(coaRouter);
 router.use(journalEntryExportSchedulesRouter);
+router.use(remediationRouter);
 
 export default router;

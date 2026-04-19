@@ -139,6 +139,7 @@ import type {
   ListProgramContacts200,
   ListProgramsParams,
   ListReceiptsParams,
+  ListRemediationQueueParams,
   ListTransactionsParams,
   ListVendorContacts200,
   ListVendorsParams,
@@ -167,6 +168,12 @@ import type {
   RejectBillBody,
   RejectJournalEntryDraftBody,
   RejectionBody,
+  RemediateDraftLineAccountBody,
+  RemediateDraftLineResponse,
+  RemediatePostedEntryRequest,
+  RemediatePostedEntryResponse,
+  RemediationCounts,
+  RemediationListResponse,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResendAdminNotificationResponse,
@@ -13282,4 +13289,395 @@ export const useSendCopilotMessage = <
   TContext
 > => {
   return useMutation(getSendCopilotMessageMutationOptions(options));
+};
+
+/**
+ * @summary List accounting remediation queue rows
+ */
+export const getListRemediationQueueUrl = (
+  params?: ListRemediationQueueParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/accounting/remediation?${stringifiedParams}`
+    : `/api/accounting/remediation`;
+};
+
+export const listRemediationQueue = async (
+  params?: ListRemediationQueueParams,
+  options?: RequestInit,
+): Promise<RemediationListResponse> => {
+  return customFetch<RemediationListResponse>(
+    getListRemediationQueueUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListRemediationQueueQueryKey = (
+  params?: ListRemediationQueueParams,
+) => {
+  return [`/api/accounting/remediation`, ...(params ? [params] : [])] as const;
+};
+
+export const getListRemediationQueueQueryOptions = <
+  TData = Awaited<ReturnType<typeof listRemediationQueue>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListRemediationQueueParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listRemediationQueue>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListRemediationQueueQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listRemediationQueue>>
+  > = ({ signal }) =>
+    listRemediationQueue(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listRemediationQueue>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListRemediationQueueQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listRemediationQueue>>
+>;
+export type ListRemediationQueueQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List accounting remediation queue rows
+ */
+
+export function useListRemediationQueue<
+  TData = Awaited<ReturnType<typeof listRemediationQueue>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListRemediationQueueParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listRemediationQueue>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListRemediationQueueQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Aggregate counts for the remediation queue
+ */
+export const getGetRemediationCountsUrl = () => {
+  return `/api/accounting/remediation/counts`;
+};
+
+export const getRemediationCounts = async (
+  options?: RequestInit,
+): Promise<RemediationCounts> => {
+  return customFetch<RemediationCounts>(getGetRemediationCountsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetRemediationCountsQueryKey = () => {
+  return [`/api/accounting/remediation/counts`] as const;
+};
+
+export const getGetRemediationCountsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRemediationCounts>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getRemediationCounts>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetRemediationCountsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getRemediationCounts>>
+  > = ({ signal }) => getRemediationCounts({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getRemediationCounts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetRemediationCountsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getRemediationCounts>>
+>;
+export type GetRemediationCountsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Aggregate counts for the remediation queue
+ */
+
+export function useGetRemediationCounts<
+  TData = Awaited<ReturnType<typeof getRemediationCounts>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getRemediationCounts>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetRemediationCountsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Repoint a single draft journal-entry line to a valid account
+ */
+export const getRemediateDraftLineAccountUrl = (
+  draftId: number,
+  lineId: number,
+) => {
+  return `/api/accounting/journal-entry-drafts/${draftId}/lines/${lineId}/remediate-account`;
+};
+
+export const remediateDraftLineAccount = async (
+  draftId: number,
+  lineId: number,
+  remediateDraftLineAccountBody: RemediateDraftLineAccountBody,
+  options?: RequestInit,
+): Promise<RemediateDraftLineResponse> => {
+  return customFetch<RemediateDraftLineResponse>(
+    getRemediateDraftLineAccountUrl(draftId, lineId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(remediateDraftLineAccountBody),
+    },
+  );
+};
+
+export const getRemediateDraftLineAccountMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof remediateDraftLineAccount>>,
+    TError,
+    {
+      draftId: number;
+      lineId: number;
+      data: BodyType<RemediateDraftLineAccountBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof remediateDraftLineAccount>>,
+  TError,
+  {
+    draftId: number;
+    lineId: number;
+    data: BodyType<RemediateDraftLineAccountBody>;
+  },
+  TContext
+> => {
+  const mutationKey = ["remediateDraftLineAccount"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof remediateDraftLineAccount>>,
+    {
+      draftId: number;
+      lineId: number;
+      data: BodyType<RemediateDraftLineAccountBody>;
+    }
+  > = (props) => {
+    const { draftId, lineId, data } = props ?? {};
+
+    return remediateDraftLineAccount(draftId, lineId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RemediateDraftLineAccountMutationResult = NonNullable<
+  Awaited<ReturnType<typeof remediateDraftLineAccount>>
+>;
+export type RemediateDraftLineAccountMutationBody =
+  BodyType<RemediateDraftLineAccountBody>;
+export type RemediateDraftLineAccountMutationError = ErrorType<void>;
+
+/**
+ * @summary Repoint a single draft journal-entry line to a valid account
+ */
+export const useRemediateDraftLineAccount = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof remediateDraftLineAccount>>,
+    TError,
+    {
+      draftId: number;
+      lineId: number;
+      data: BodyType<RemediateDraftLineAccountBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof remediateDraftLineAccount>>,
+  TError,
+  {
+    draftId: number;
+    lineId: number;
+    data: BodyType<RemediateDraftLineAccountBody>;
+  },
+  TContext
+> => {
+  return useMutation(getRemediateDraftLineAccountMutationOptions(options));
+};
+
+/**
+ * Posted JEs are immutable in place. This endpoint runs one of two
+explicit corrective actions:
+  - reverse_and_replace: reverse the original (audited via
+    reverseJournalEntry) and post a fresh replacement JE.
+  - adjusting_entry: post a new balanced JE that references the
+    original in its memo, leaving the original untouched.
+
+ * @summary Apply a corrective action to a posted journal entry
+ */
+export const getRemediatePostedJournalEntryUrl = (entryId: number) => {
+  return `/api/accounting/journal-entries/${entryId}/remediate`;
+};
+
+export const remediatePostedJournalEntry = async (
+  entryId: number,
+  remediatePostedEntryRequest: RemediatePostedEntryRequest,
+  options?: RequestInit,
+): Promise<RemediatePostedEntryResponse> => {
+  return customFetch<RemediatePostedEntryResponse>(
+    getRemediatePostedJournalEntryUrl(entryId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(remediatePostedEntryRequest),
+    },
+  );
+};
+
+export const getRemediatePostedJournalEntryMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof remediatePostedJournalEntry>>,
+    TError,
+    { entryId: number; data: BodyType<RemediatePostedEntryRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof remediatePostedJournalEntry>>,
+  TError,
+  { entryId: number; data: BodyType<RemediatePostedEntryRequest> },
+  TContext
+> => {
+  const mutationKey = ["remediatePostedJournalEntry"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof remediatePostedJournalEntry>>,
+    { entryId: number; data: BodyType<RemediatePostedEntryRequest> }
+  > = (props) => {
+    const { entryId, data } = props ?? {};
+
+    return remediatePostedJournalEntry(entryId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RemediatePostedJournalEntryMutationResult = NonNullable<
+  Awaited<ReturnType<typeof remediatePostedJournalEntry>>
+>;
+export type RemediatePostedJournalEntryMutationBody =
+  BodyType<RemediatePostedEntryRequest>;
+export type RemediatePostedJournalEntryMutationError = ErrorType<void>;
+
+/**
+ * @summary Apply a corrective action to a posted journal entry
+ */
+export const useRemediatePostedJournalEntry = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof remediatePostedJournalEntry>>,
+    TError,
+    { entryId: number; data: BodyType<RemediatePostedEntryRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof remediatePostedJournalEntry>>,
+  TError,
+  { entryId: number; data: BodyType<RemediatePostedEntryRequest> },
+  TContext
+> => {
+  return useMutation(getRemediatePostedJournalEntryMutationOptions(options));
 };

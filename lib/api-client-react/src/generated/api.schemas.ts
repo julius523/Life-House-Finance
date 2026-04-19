@@ -1388,6 +1388,166 @@ export interface ReconciliationReport {
   independentNetIncomeCheck: ReconciliationIndependentNetIncomeCheck;
 }
 
+export type RemediationRowStatus =
+  (typeof RemediationRowStatus)[keyof typeof RemediationRowStatus];
+
+export const RemediationRowStatus = {
+  draft: "draft",
+  posted: "posted",
+} as const;
+
+export type RemediationRowMutability =
+  (typeof RemediationRowMutability)[keyof typeof RemediationRowMutability];
+
+export const RemediationRowMutability = {
+  locked: "locked",
+  mutable: "mutable",
+} as const;
+
+export type RemediationRowFailureCode =
+  (typeof RemediationRowFailureCode)[keyof typeof RemediationRowFailureCode];
+
+export const RemediationRowFailureCode = {
+  missing_account: "missing_account",
+  archived_account: "archived_account",
+  non_postable_account: "non_postable_account",
+  invalid_line_amount: "invalid_line_amount",
+  unbalanced_entry: "unbalanced_entry",
+} as const;
+
+export type RemediationRowCurrentAccount = {
+  id: number;
+  code: string;
+  name: string;
+} | null;
+
+export type RemediationRowSourceType =
+  | (typeof RemediationRowSourceType)[keyof typeof RemediationRowSourceType]
+  | null;
+
+export const RemediationRowSourceType = {
+  expense: "expense",
+  bill: "bill",
+} as const;
+
+export interface RemediationRow {
+  id: string;
+  status: RemediationRowStatus;
+  mutability: RemediationRowMutability;
+  failureCode: RemediationRowFailureCode;
+  jeNumber?: string | null;
+  entryId: number;
+  entryDate?: string | null;
+  memo?: string | null;
+  entryStatus: string;
+  workflowState?: string | null;
+  lineId: number;
+  lineDescription?: string | null;
+  debitCents: number;
+  creditCents: number;
+  currentAccount?: RemediationRowCurrentAccount;
+  accountText?: string | null;
+  sourceType?: RemediationRowSourceType;
+  sourceRecordId?: number | null;
+  sourceRecordLink?: string | null;
+  shortMessage: string;
+}
+
+export interface RemediationListResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  rows: RemediationRow[];
+}
+
+export type RemediationCountsByStatus = {
+  draft: number;
+  posted: number;
+};
+
+export type RemediationCountsByCode = {
+  missing_account: number;
+  archived_account: number;
+  non_postable_account: number;
+  invalid_line_amount: number;
+  unbalanced_entry: number;
+};
+
+export interface RemediationCounts {
+  total: number;
+  byStatus: RemediationCountsByStatus;
+  byCode: RemediationCountsByCode;
+}
+
+export type RemediatePostedEntryLineType =
+  (typeof RemediatePostedEntryLineType)[keyof typeof RemediatePostedEntryLineType];
+
+export const RemediatePostedEntryLineType = {
+  debit: "debit",
+  credit: "credit",
+} as const;
+
+export interface RemediatePostedEntryLine {
+  type: RemediatePostedEntryLineType;
+  /** Positive amount in dollars */
+  amount: number;
+  account_code: string;
+  program?: string | null;
+  fund?: string | null;
+  memo?: string | null;
+}
+
+export interface RemediatePostedEntryPayload {
+  /** YYYY-MM-DD */
+  entryDate: string;
+  memo: string;
+  /** @minItems 2 */
+  lines: RemediatePostedEntryLine[];
+}
+
+export type RemediatePostedEntryRequestAction =
+  (typeof RemediatePostedEntryRequestAction)[keyof typeof RemediatePostedEntryRequestAction];
+
+export const RemediatePostedEntryRequestAction = {
+  reverse_and_replace: "reverse_and_replace",
+  adjusting_entry: "adjusting_entry",
+} as const;
+
+export interface RemediatePostedEntryRequest {
+  action: RemediatePostedEntryRequestAction;
+  /**
+   * Operator-supplied reason recorded on the activity log
+   * @minLength 5
+   */
+  note: string;
+  payload: RemediatePostedEntryPayload;
+}
+
+export type RemediatePostedEntryResponseAction =
+  (typeof RemediatePostedEntryResponseAction)[keyof typeof RemediatePostedEntryResponseAction];
+
+export const RemediatePostedEntryResponseAction = {
+  reverse_and_replace: "reverse_and_replace",
+  adjusting_entry: "adjusting_entry",
+} as const;
+
+export interface RemediatePostedEntryResponse {
+  ok: boolean;
+  action: RemediatePostedEntryResponseAction;
+  originalEntryId: number;
+  reversalId?: number | null;
+  replacementId?: number | null;
+  adjustingEntryId?: number | null;
+}
+
+export interface RemediateDraftLineResponse {
+  ok: boolean;
+  draftId: number;
+  lineId: number;
+  oldAccountId?: number | null;
+  newAccountId: number;
+}
+
 export interface AccountingDashboardOpenPeriod {
   id: number;
   label: string;
@@ -2984,4 +3144,54 @@ export type PingAccountingDiagnostics200 = {
 
 export type GetJournalEntryExportScheduleLogParams = {
   limit?: number;
+};
+
+export type ListRemediationQueueParams = {
+  code?: ListRemediationQueueCode;
+  entryId?: number;
+  sourceType?: ListRemediationQueueSourceType;
+  status?: ListRemediationQueueStatus;
+  /**
+   * @minimum 1
+   * @maximum 500
+   */
+  limit?: number;
+  /**
+   * @minimum 0
+   */
+  offset?: number;
+};
+
+export type ListRemediationQueueCode =
+  (typeof ListRemediationQueueCode)[keyof typeof ListRemediationQueueCode];
+
+export const ListRemediationQueueCode = {
+  missing_account: "missing_account",
+  archived_account: "archived_account",
+  non_postable_account: "non_postable_account",
+  invalid_line_amount: "invalid_line_amount",
+  unbalanced_entry: "unbalanced_entry",
+} as const;
+
+export type ListRemediationQueueSourceType =
+  (typeof ListRemediationQueueSourceType)[keyof typeof ListRemediationQueueSourceType];
+
+export const ListRemediationQueueSourceType = {
+  expense: "expense",
+  bill: "bill",
+} as const;
+
+export type ListRemediationQueueStatus =
+  (typeof ListRemediationQueueStatus)[keyof typeof ListRemediationQueueStatus];
+
+export const ListRemediationQueueStatus = {
+  draft: "draft",
+  posted: "posted",
+} as const;
+
+export type RemediateDraftLineAccountBody = {
+  /** Active, postable chart-of-accounts id */
+  accountId: number;
+  /** Operator-supplied reason recorded on the activity log */
+  note: string;
 };

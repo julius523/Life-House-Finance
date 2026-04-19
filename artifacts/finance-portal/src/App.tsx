@@ -40,6 +40,7 @@ import JournalEntriesListPage from "@/pages/journal-entries-list";
 import JournalEntryDetailPage from "@/pages/journal-entries-detail";
 import JournalEntryDraftDetailPage from "@/pages/journal-entry-draft-detail";
 import JournalExportSchedulesPage from "@/pages/journal-export-schedules";
+import AccountingRemediationPage from "@/pages/accounting-remediation";
 
 const queryClient = new QueryClient();
 
@@ -126,6 +127,11 @@ function AppRoutes() {
           "/accounting/blocked-expenses",
           "accounting",
           AccountingBlockedExpensesPage,
+        )}
+        {route(
+          "/accounting/remediation",
+          "accounting",
+          AccountingRemediationPage,
         )}
         {route("/accounting/coa", "accounting", AccountingCoaPage)}
         {route("/accounting/coa/:id", "accounting", AccountingCoaDetail)}

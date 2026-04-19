@@ -165,6 +165,32 @@ const PER_ENTRY_CHECK_LABELS: Record<string, string> = {
 };
 
 /**
+ * Map a per-entry integrity check code to the closest stable failure code
+ * exposed by /accounting/remediation. Used to deep-link from the
+ * reconciliation row straight into the pre-filtered remediation queue.
+ * Returns null when no remediation surface exists for the check (e.g.
+ * je_zero_lines — operator must recreate the entry, not repoint a line).
+ */
+function remediationLinkForCheck(
+  checkCode: string,
+  entryId: number,
+): string | null {
+  const map: Record<string, string> = {
+    je_unbalanced: "unbalanced_entry",
+    je_missing_account: "missing_account",
+    je_invalid_line_amount: "invalid_line_amount",
+  };
+  const code = map[checkCode];
+  if (!code) return null;
+  const sp = new URLSearchParams({
+    code,
+    entryId: String(entryId),
+    status: "posted",
+  });
+  return `/accounting/remediation?${sp.toString()}`;
+}
+
+/**
  * Per-entry integrity subsection of the Reconciliation card. Surfaces the
  * specific posted/reversed JEs that fail any per-entry check (balanced,
  * mapped, non-empty, positive line amounts) so finance can drill straight
@@ -259,7 +285,24 @@ function PerEntryIntegritySection({
                     </td>
                     <td className="px-3 py-2 text-xs">{f.entryDate}</td>
                     <td className="px-3 py-2 text-xs">
-                      {PER_ENTRY_CHECK_LABELS[f.checkCode] ?? f.checkCode}
+                      <div>
+                        {PER_ENTRY_CHECK_LABELS[f.checkCode] ?? f.checkCode}
+                      </div>
+                      {(() => {
+                        const href = remediationLinkForCheck(
+                          f.checkCode,
+                          f.journalEntryId,
+                        );
+                        return href ? (
+                          <Link
+                            href={href}
+                            className="text-[11px] text-blue-700 hover:underline"
+                            data-testid={`reconciliation-per-entry-remediate-${f.journalEntryId}-${f.checkCode}`}
+                          >
+                            Remediate →
+                          </Link>
+                        ) : null;
+                      })()}
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       {f.shortMessage}

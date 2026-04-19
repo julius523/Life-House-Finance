@@ -1,0 +1,197 @@
+Perfect. That closes the reconciliation hardening run cleanly.
+
+Next slice: unmapped-lines remediation / admin flow.
+
+That is the highest-value next move because you now have:
+
+* detection,
+* per-entry integrity,
+* independent equity movement validation,
+
+but still no tight operator workflow for fixing what reconciliation finds.
+
+What to build next
+
+1. Add a remediation queue
+
+Create a new admin page for accounting integrity issues.
+
+Route:
+
+* /accounting/remediation
+
+It should list:
+
+* JE number
+* entry date
+* memo
+* line id
+* line description
+* debit
+* credit
+* current account id / code / name
+* failure code
+* source type and source record link if one exists
+* workflow state of the originating record, if relevant
+
+Primary failure codes for v1:
+
+* missing_account
+* archived_account
+* non_postable_account
+* invalid_line_amount
+* unbalanced_entry
+
+Do not invent fuzzy categories. Keep them stable.
+
+⸻
+
+2. Split remediation by mutability
+
+This matters.
+
+Draft JE lines
+
+Allow direct fix in the UI:
+
+* assign/change account
+* save
+* log actor + old/new values + reason
+
+Posted JE lines
+
+Do not allow in-place mutation.
+
+Instead require one of:
+
+* reverse + corrected repost, or
+* adjusting JE flow
+
+If your current system already has a hardened reversal/posting path, reuse it. Do not add a sneaky side door.
+
+⸻
+
+3. Deep-link from reconciliation
+
+Every failed row in:
+
+* per-entry integrity section
+* net income / equity movement warning block, where relevant later
+* future reconciliation checks
+
+should link into the remediation queue with filters pre-applied.
+
+Example query params:
+
+* /accounting/remediation?code=missing_account&entryId=123
+* /accounting/remediation?code=unbalanced_entry
+
+⸻
+
+4. Add remediation APIs
+
+You need four backend surfaces.
+
+Read queue
+
+GET /accounting/remediation
+
+Supports filters:
+
+* code
+* entryId
+* sourceType
+* status=draft|posted
+* pagination
+
+Draft-line fix
+
+POST /accounting/journal-entry-drafts/:draftId/lines/:lineId/remediate-account
+
+Body:
+
+* accountId
+* note
+
+Posted-entry corrective action
+
+Pick one explicit path.
+
+Preferred:
+POST /accounting/journal-entries/:entryId/remediate
+Body:
+
+* action: reverse_and_replace | adjusting_entry
+* payload required for chosen action
+* note
+
+Counts for nav badge / card summary
+
+GET /accounting/remediation/counts
+
+⸻
+
+5. Activity log every action
+
+Every remediation action must write:
+
+* actor id
+* timestamp
+* target type/id
+* failure code
+* old value
+* new value
+* note
+* corrective action type
+
+No exception.
+
+Suggested event names:
+
+* accounting_remediation_draft_line_updated
+* accounting_remediation_posted_entry_reversed
+* accounting_remediation_adjusting_entry_created
+
+⸻
+
+6. Reconciliation contract after fix
+
+After remediation:
+
+* draft fixes should disappear from the remediation queue once the underlying failure is resolved
+* posted corrective flows should preserve original history and clear the live reconciliation failure through the correcting entry path
+* no deleted evidence, ever
+
+⸻
+
+Exact acceptance gates
+
+1. Every reconciliation failure row is traceable to a remediation target.
+2. Draft lines can be corrected without page refresh drift.
+3. Posted entries cannot be edited in place.
+4. Every remediation action is fully logged.
+5. Reconciliation results refresh cleanly after fixes.
+6. No white-screen when linked source records are missing.
+7. Source links remain intact.
+8. Queue filters are stable and deep-linkable.
+
+⸻
+
+Tiny cleanups to bundle with it
+
+These are cheap and worth folding in:
+
+* replace the local TemplateForm / AdminNotification aliases in admin.tsx with generated DTOs
+* fix the pre-existing useGetCopilotThread queryKey typing issue
+
+⸻
+
+Recommended implementation order
+
+1. backend remediation read model
+2. remediation UI
+3. draft-line fix flow
+4. posted-entry corrective flow
+5. reconciliation deep links
+6. activity log hardening
+7. polish + regression tests

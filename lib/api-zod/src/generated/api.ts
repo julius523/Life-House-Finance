@@ -5484,3 +5484,166 @@ export const SendCopilotMessageResponse = zod.object({
     .optional(),
   error: zod.string().optional(),
 });
+
+/**
+ * @summary List accounting remediation queue rows
+ */
+export const listRemediationQueueQueryLimitDefault = 100;
+export const listRemediationQueueQueryLimitMax = 500;
+
+export const listRemediationQueueQueryOffsetDefault = 0;
+export const listRemediationQueueQueryOffsetMin = 0;
+
+export const ListRemediationQueueQueryParams = zod.object({
+  code: zod
+    .enum([
+      "missing_account",
+      "archived_account",
+      "non_postable_account",
+      "invalid_line_amount",
+      "unbalanced_entry",
+    ])
+    .optional(),
+  entryId: zod.coerce.number().optional(),
+  sourceType: zod.enum(["expense", "bill"]).optional(),
+  status: zod.enum(["draft", "posted"]).optional(),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(listRemediationQueueQueryLimitMax)
+    .default(listRemediationQueueQueryLimitDefault),
+  offset: zod.coerce
+    .number()
+    .min(listRemediationQueueQueryOffsetMin)
+    .default(listRemediationQueueQueryOffsetDefault),
+});
+
+export const ListRemediationQueueResponse = zod.object({
+  total: zod.number(),
+  limit: zod.number(),
+  offset: zod.number(),
+  rows: zod.array(
+    zod.object({
+      id: zod.string(),
+      status: zod.enum(["draft", "posted"]),
+      mutability: zod.enum(["locked", "mutable"]),
+      failureCode: zod.enum([
+        "missing_account",
+        "archived_account",
+        "non_postable_account",
+        "invalid_line_amount",
+        "unbalanced_entry",
+      ]),
+      jeNumber: zod.string().nullish(),
+      entryId: zod.number(),
+      entryDate: zod.string().nullish(),
+      memo: zod.string().nullish(),
+      entryStatus: zod.string(),
+      workflowState: zod.string().nullish(),
+      lineId: zod.number(),
+      lineDescription: zod.string().nullish(),
+      debitCents: zod.number(),
+      creditCents: zod.number(),
+      currentAccount: zod
+        .object({
+          id: zod.number(),
+          code: zod.string(),
+          name: zod.string(),
+        })
+        .nullish(),
+      accountText: zod.string().nullish(),
+      sourceType: zod.enum(["expense", "bill"]).nullish(),
+      sourceRecordId: zod.number().nullish(),
+      sourceRecordLink: zod.string().nullish(),
+      shortMessage: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Aggregate counts for the remediation queue
+ */
+export const GetRemediationCountsResponse = zod.object({
+  total: zod.number(),
+  byStatus: zod.object({
+    draft: zod.number(),
+    posted: zod.number(),
+  }),
+  byCode: zod.object({
+    missing_account: zod.number(),
+    archived_account: zod.number(),
+    non_postable_account: zod.number(),
+    invalid_line_amount: zod.number(),
+    unbalanced_entry: zod.number(),
+  }),
+});
+
+/**
+ * @summary Repoint a single draft journal-entry line to a valid account
+ */
+export const remediateDraftLineAccountPathLineIdMin = 0;
+
+export const RemediateDraftLineAccountParams = zod.object({
+  draftId: zod.coerce.number(),
+  lineId: zod.coerce
+    .number()
+    .min(remediateDraftLineAccountPathLineIdMin)
+    .describe("0-based index inside the draft's payload.lines array"),
+});
+
+export const RemediateDraftLineAccountBody = zod.object({
+  accountId: zod.number().describe("Active, postable chart-of-accounts id"),
+  note: zod
+    .string()
+    .describe("Operator-supplied reason recorded on the activity log"),
+});
+
+export const RemediateDraftLineAccountResponse = zod.object({
+  ok: zod.boolean(),
+  draftId: zod.number(),
+  lineId: zod.number(),
+  oldAccountId: zod.number().nullish(),
+  newAccountId: zod.number(),
+});
+
+/**
+ * Posted JEs are immutable in place. This endpoint runs one of two
+explicit corrective actions:
+  - reverse_and_replace: reverse the original (audited via
+    reverseJournalEntry) and post a fresh replacement JE.
+  - adjusting_entry: post a new balanced JE that references the
+    original in its memo, leaving the original untouched.
+
+ * @summary Apply a corrective action to a posted journal entry
+ */
+export const RemediatePostedJournalEntryParams = zod.object({
+  entryId: zod.coerce.number(),
+});
+
+export const remediatePostedJournalEntryBodyNoteMin = 5;
+
+export const remediatePostedJournalEntryBodyPayloadLinesMin = 2;
+
+export const RemediatePostedJournalEntryBody = zod.object({
+  action: zod.enum(["reverse_and_replace", "adjusting_entry"]),
+  note: zod
+    .string()
+    .min(remediatePostedJournalEntryBodyNoteMin)
+    .describe("Operator-supplied reason recorded on the activity log"),
+  payload: zod.object({
+    entryDate: zod.string().describe("YYYY-MM-DD"),
+    memo: zod.string(),
+    lines: zod
+      .array(
+        zod.object({
+          type: zod.enum(["debit", "credit"]),
+          amount: zod.number().describe("Positive amount in dollars"),
+          account_code: zod.string(),
+          program: zod.string().nullish(),
+          fund: zod.string().nullish(),
+          memo: zod.string().nullish(),
+        }),
+      )
+      .min(remediatePostedJournalEntryBodyPayloadLinesMin),
+  }),
+});

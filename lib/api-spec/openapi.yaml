@@ -3536,6 +3536,142 @@ paths:
               schema:
                 $ref: "#/components/schemas/SendCopilotMessageResponse"
 
+  /accounting/remediation:
+    get:
+      operationId: listRemediationQueue
+      tags: [accounting]
+      summary: List accounting remediation queue rows
+      parameters:
+        - in: query
+          name: code
+          schema:
+            type: string
+            enum:
+              - missing_account
+              - archived_account
+              - non_postable_account
+              - invalid_line_amount
+              - unbalanced_entry
+        - in: query
+          name: entryId
+          schema: { type: integer }
+        - in: query
+          name: sourceType
+          schema:
+            type: string
+            enum: [expense, bill]
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [draft, posted]
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: Remediation queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemediationListResponse"
+
+  /accounting/remediation/counts:
+    get:
+      operationId: getRemediationCounts
+      tags: [accounting]
+      summary: Aggregate counts for the remediation queue
+      responses:
+        "200":
+          description: Counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemediationCounts"
+
+  /accounting/journal-entry-drafts/{draftId}/lines/{lineId}/remediate-account:
+    post:
+      operationId: remediateDraftLineAccount
+      tags: [accounting]
+      summary: Repoint a single draft journal-entry line to a valid account
+      parameters:
+        - in: path
+          name: draftId
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: lineId
+          required: true
+          description: 0-based index inside the draft's payload.lines array
+          schema: { type: integer, minimum: 0 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accountId:
+                  type: integer
+                  description: Active, postable chart-of-accounts id
+                note:
+                  type: string
+                  description: Operator-supplied reason recorded on the activity log
+              required: [accountId, note]
+      responses:
+        "200":
+          description: Draft line updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemediateDraftLineResponse"
+        "400":
+          description: Invalid input
+        "404":
+          description: Draft, line, or account not found
+
+  /accounting/journal-entries/{entryId}/remediate:
+    post:
+      operationId: remediatePostedJournalEntry
+      tags: [accounting]
+      summary: Apply a corrective action to a posted journal entry
+      description: |
+        Posted JEs are immutable in place. This endpoint runs one of two
+        explicit corrective actions:
+          - reverse_and_replace: reverse the original (audited via
+            reverseJournalEntry) and post a fresh replacement JE.
+          - adjusting_entry: post a new balanced JE that references the
+            original in its memo, leaving the original untouched.
+      parameters:
+        - in: path
+          name: entryId
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemediatePostedEntryRequest"
+      responses:
+        "201":
+          description: Corrective action applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemediatePostedEntryResponse"
+        "400":
+          description: Invalid input or replacement post failed
+        "403":
+          description: Forbidden (role gate)
+        "404":
+          description: Entry not found
+        "409":
+          description: Period locked or replacement post failed
+
 components:
   schemas:
     HealthStatus:
@@ -5642,6 +5778,179 @@ components:
           perEntry,
           independentNetIncomeCheck,
         ]
+
+    RemediationRow:
+      type: object
+      properties:
+        id: { type: string }
+        status:
+          type: string
+          enum: [draft, posted]
+        mutability:
+          type: string
+          enum: [locked, mutable]
+        failureCode:
+          type: string
+          enum:
+            - missing_account
+            - archived_account
+            - non_postable_account
+            - invalid_line_amount
+            - unbalanced_entry
+        jeNumber:
+          type: string
+          nullable: true
+        entryId: { type: integer }
+        entryDate:
+          type: string
+          nullable: true
+        memo:
+          type: string
+          nullable: true
+        entryStatus: { type: string }
+        workflowState:
+          type: string
+          nullable: true
+        lineId: { type: integer }
+        lineDescription:
+          type: string
+          nullable: true
+        debitCents: { type: integer }
+        creditCents: { type: integer }
+        currentAccount:
+          nullable: true
+          allOf:
+            - type: object
+              properties:
+                id: { type: integer }
+                code: { type: string }
+                name: { type: string }
+              required: [id, code, name]
+        accountText:
+          type: string
+          nullable: true
+        sourceType:
+          type: string
+          enum: [expense, bill]
+          nullable: true
+        sourceRecordId:
+          type: integer
+          nullable: true
+        sourceRecordLink:
+          type: string
+          nullable: true
+        shortMessage: { type: string }
+      required:
+        - id
+        - status
+        - mutability
+        - failureCode
+        - entryId
+        - entryStatus
+        - lineId
+        - debitCents
+        - creditCents
+        - shortMessage
+
+    RemediationListResponse:
+      type: object
+      properties:
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/RemediationRow"
+      required: [total, limit, offset, rows]
+
+    RemediationCounts:
+      type: object
+      properties:
+        total: { type: integer }
+        byStatus:
+          type: object
+          properties:
+            draft: { type: integer }
+            posted: { type: integer }
+          required: [draft, posted]
+        byCode:
+          type: object
+          properties:
+            missing_account: { type: integer }
+            archived_account: { type: integer }
+            non_postable_account: { type: integer }
+            invalid_line_amount: { type: integer }
+            unbalanced_entry: { type: integer }
+          required:
+            - missing_account
+            - archived_account
+            - non_postable_account
+            - invalid_line_amount
+            - unbalanced_entry
+      required: [total, byStatus, byCode]
+
+    RemediatePostedEntryLine:
+      type: object
+      properties:
+        type: { type: string, enum: [debit, credit] }
+        amount: { type: number, description: Positive amount in dollars }
+        account_code: { type: string }
+        program: { type: string, nullable: true }
+        fund: { type: string, nullable: true }
+        memo: { type: string, nullable: true }
+      required: [type, amount, account_code]
+
+    RemediatePostedEntryPayload:
+      type: object
+      properties:
+        entryDate: { type: string, description: YYYY-MM-DD }
+        memo: { type: string }
+        lines:
+          type: array
+          minItems: 2
+          items:
+            $ref: "#/components/schemas/RemediatePostedEntryLine"
+      required: [entryDate, memo, lines]
+
+    RemediatePostedEntryRequest:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [reverse_and_replace, adjusting_entry]
+        note:
+          type: string
+          minLength: 5
+          description: Operator-supplied reason recorded on the activity log
+        payload:
+          $ref: "#/components/schemas/RemediatePostedEntryPayload"
+      required: [action, note, payload]
+
+    RemediatePostedEntryResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        action:
+          type: string
+          enum: [reverse_and_replace, adjusting_entry]
+        originalEntryId: { type: integer }
+        reversalId: { type: integer, nullable: true }
+        replacementId: { type: integer, nullable: true }
+        adjustingEntryId: { type: integer, nullable: true }
+      required: [ok, action, originalEntryId]
+
+    RemediateDraftLineResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        draftId: { type: integer }
+        lineId: { type: integer }
+        oldAccountId:
+          type: integer
+          nullable: true
+        newAccountId: { type: integer }
+      required: [ok, draftId, lineId, newAccountId]
 
     ReconciliationIncludedEquityAccount:
       type: object
