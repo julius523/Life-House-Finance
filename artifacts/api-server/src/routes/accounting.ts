@@ -3972,7 +3972,7 @@ function serializeRule(
 }
 
 function computeHasCompleteMapping(
-  category: ExpenseCategoryRow,
+  _category: ExpenseCategoryRow,
   debit: CoaRow | undefined,
   rules: Array<{ rule: ExpenseCategoryRuleRow; coa: CoaRow | undefined }>,
 ): boolean {
@@ -3986,7 +3986,6 @@ function computeHasCompleteMapping(
   ) {
     return false;
   }
-  void category;
   return true;
 }
 
@@ -4177,6 +4176,20 @@ router.post(
         isSystem: false,
       })
       .returning();
+    const actor = req.authUser!;
+    await db.insert(activityLogTable).values({
+      type: "expense_category_created",
+      description: `${actor.firstName} ${actor.lastName} created expense category "${row!.name}"`,
+      actor: `${actor.firstName} ${actor.lastName}`,
+      actorUserId: actor.id,
+      referenceId: row!.id,
+      referenceType: "expense_category",
+      metadata: {
+        name: row!.name,
+        debitAccountId: row!.debitAccountId,
+        isActive: row!.isActive,
+      },
+    });
     const serialized = await loadCategoryById(row!.id);
     res.status(201).json({ category: serialized });
   },
@@ -4259,6 +4272,27 @@ router.patch(
       .update(expenseCategoriesTable)
       .set(update)
       .where(eq(expenseCategoriesTable.id, id));
+    const actor = req.authUser!;
+    await db.insert(activityLogTable).values({
+      type: "expense_category_updated",
+      description: `${actor.firstName} ${actor.lastName} updated expense category "${existing.name}"`,
+      actor: `${actor.firstName} ${actor.lastName}`,
+      actorUserId: actor.id,
+      referenceId: id,
+      referenceType: "expense_category",
+      metadata: {
+        before: {
+          name: existing.name,
+          debitAccountId: existing.debitAccountId,
+          isActive: existing.isActive,
+        },
+        after: {
+          name: update.name ?? existing.name,
+          debitAccountId: update.debitAccountId ?? existing.debitAccountId,
+          isActive: update.isActive ?? existing.isActive,
+        },
+      },
+    });
     const serialized = await loadCategoryById(id);
     res.json({ category: serialized });
   },
@@ -4293,6 +4327,16 @@ router.post(
       .update(expenseCategoriesTable)
       .set({ isActive: false, updatedAt: new Date() })
       .where(eq(expenseCategoriesTable.id, id));
+    const actor = req.authUser!;
+    await db.insert(activityLogTable).values({
+      type: "expense_category_deactivated",
+      description: `${actor.firstName} ${actor.lastName} deactivated expense category "${existing.name}"`,
+      actor: `${actor.firstName} ${actor.lastName}`,
+      actorUserId: actor.id,
+      referenceId: id,
+      referenceType: "expense_category",
+      metadata: { name: existing.name },
+    });
     const serialized = await loadCategoryById(id);
     res.json({ category: serialized });
   },
@@ -4427,6 +4471,21 @@ router.post(
         .returning();
       return row!;
     });
+    const actor = req.authUser!;
+    await db.insert(activityLogTable).values({
+      type: "expense_category_rule_created",
+      description: `${actor.firstName} ${actor.lastName} added ${created.paymentMethod} rule to expense category "${cat.name}"`,
+      actor: `${actor.firstName} ${actor.lastName}`,
+      actorUserId: actor.id,
+      referenceId: cat.id,
+      referenceType: "expense_category",
+      metadata: {
+        ruleId: created.id,
+        paymentMethod: created.paymentMethod,
+        creditAccountId: created.creditAccountId,
+        isDefault: created.isDefault,
+      },
+    });
     res.status(201).json({ rule: serializeRule(created, credit.row) });
   },
 );
@@ -4554,6 +4613,28 @@ router.patch(
         .limit(1);
       creditCoa = c;
     }
+    const actor = req.authUser!;
+    await db.insert(activityLogTable).values({
+      type: "expense_category_rule_updated",
+      description: `${actor.firstName} ${actor.lastName} updated ${updated.paymentMethod} rule on expense category #${id}`,
+      actor: `${actor.firstName} ${actor.lastName}`,
+      actorUserId: actor.id,
+      referenceId: id,
+      referenceType: "expense_category",
+      metadata: {
+        ruleId: updated.id,
+        before: {
+          paymentMethod: existing.paymentMethod,
+          creditAccountId: existing.creditAccountId,
+          isDefault: existing.isDefault,
+        },
+        after: {
+          paymentMethod: updated.paymentMethod,
+          creditAccountId: updated.creditAccountId,
+          isDefault: updated.isDefault,
+        },
+      },
+    });
     res.json({ rule: serializeRule(updated, creditCoa) });
   },
 );
@@ -4609,6 +4690,21 @@ router.delete(
     await db
       .delete(expenseCategoryPaymentMethodRulesTable)
       .where(eq(expenseCategoryPaymentMethodRulesTable.id, ruleId));
+    const actor = req.authUser!;
+    await db.insert(activityLogTable).values({
+      type: "expense_category_rule_deleted",
+      description: `${actor.firstName} ${actor.lastName} deleted ${existing.paymentMethod} rule from expense category #${id}`,
+      actor: `${actor.firstName} ${actor.lastName}`,
+      actorUserId: actor.id,
+      referenceId: id,
+      referenceType: "expense_category",
+      metadata: {
+        ruleId: existing.id,
+        paymentMethod: existing.paymentMethod,
+        creditAccountId: existing.creditAccountId,
+        isDefault: existing.isDefault,
+      },
+    });
     res.status(204).send();
   },
 );

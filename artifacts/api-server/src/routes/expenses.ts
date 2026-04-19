@@ -29,32 +29,20 @@ import {
 
 const router: IRouter = Router();
 
-// Resolve the categoryId we should persist on a write:
-//  - If client provided one, validate it exists & is active.
-//  - Otherwise, fall back to the seeded "Uncategorized" system row so every
-//    expense always has a deterministic mapping (Task #51 invariant; Task #52
-//    auto-draft generation depends on this).
-// Returns either the resolved id or an error string for the caller to surface.
-async function resolveCategoryIdForWrite(
-  categoryId: number | null | undefined,
-): Promise<{ ok: true; categoryId: number | null } | { ok: false; error: string }> {
-  if (categoryId !== undefined && categoryId !== null) {
-    const [cat] = await db
-      .select({ id: expenseCategoriesTable.id, isActive: expenseCategoriesTable.isActive })
-      .from(expenseCategoriesTable)
-      .where(eq(expenseCategoriesTable.id, categoryId))
-      .limit(1);
-    if (!cat) return { ok: false, error: "Unknown expense category" };
-    if (!cat.isActive) return { ok: false, error: "Expense category is archived" };
-    return { ok: true, categoryId: cat.id };
-  }
-  // Default to system "Uncategorized" — seed guarantees its presence.
-  const [uncat] = await db
-    .select({ id: expenseCategoriesTable.id })
+// Validate a categoryId provided by the client: must exist and be active.
+// Used by both create and update paths. Create requires a non-null id;
+// update may receive null only to clear (rare) — both paths funnel here.
+async function validateCategoryId(
+  categoryId: number,
+): Promise<{ ok: true; categoryId: number } | { ok: false; error: string }> {
+  const [cat] = await db
+    .select({ id: expenseCategoriesTable.id, isActive: expenseCategoriesTable.isActive })
     .from(expenseCategoriesTable)
-    .where(eq(expenseCategoriesTable.name, "Uncategorized"))
+    .where(eq(expenseCategoriesTable.id, categoryId))
     .limit(1);
-  return { ok: true, categoryId: uncat?.id ?? null };
+  if (!cat) return { ok: false, error: "Unknown expense category" };
+  if (!cat.isActive) return { ok: false, error: "Expense category is archived" };
+  return { ok: true, categoryId: cat.id };
 }
 
 async function getProgramName(programId: number | null | undefined): Promise<string | undefined> {
@@ -174,7 +162,12 @@ router.post("/expenses", async (req, res): Promise<void> => {
   }
   const data = parsed.data;
 
-  const catResolved = await resolveCategoryIdForWrite(data.categoryId);
+  // Required: every new expense must select a category (Task #51 contract).
+  if (data.categoryId === undefined || data.categoryId === null) {
+    res.status(400).json({ error: "categoryId is required" });
+    return;
+  }
+  const catResolved = await validateCategoryId(data.categoryId);
   if (!catResolved.ok) {
     res.status(400).json({ error: catResolved.error });
     return;
@@ -267,8 +260,8 @@ router.put("/expenses/:id", async (req, res): Promise<void> => {
   if (data.expenseDate !== undefined) updates["expenseDate"] = data.expenseDate;
   if (data.paymentMethod !== undefined) updates["paymentMethod"] = data.paymentMethod;
   if (data.programId !== undefined) updates["programId"] = data.programId;
-  if (data.categoryId !== undefined) {
-    const resolved = await resolveCategoryIdForWrite(data.categoryId);
+  if (data.categoryId !== undefined && data.categoryId !== null) {
+    const resolved = await validateCategoryId(data.categoryId);
     if (!resolved.ok) {
       res.status(400).json({ error: resolved.error });
       return;

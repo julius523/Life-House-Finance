@@ -1,6 +1,7 @@
 import { pgTable, text, serial, numeric, timestamp, date, integer, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { expenseCategoriesTable } from "./expense_categories";
 
 export const expensesTable = pgTable("expenses", {
   id: serial("id").primaryKey(),
@@ -20,15 +21,14 @@ export const expensesTable = pgTable("expenses", {
   receiptIds: integer("receipt_ids").array(),
   duplicateDismissed: boolean("duplicate_dismissed").notNull().default(false),
   accountingEntryRef: text("accounting_entry_ref"),
-  /**
-   * Task #51 — nullable FK into expense_categories. Backfilled to the
-   * seeded "Uncategorized" row so legacy expenses do not break list
-   * views; new expenses are required (validated at the API layer) to
-   * pick a real category. Kept nullable in the DB so the seed/backfill
-   * step can run idempotently and so we never lose an expense if its
-   * category is hard-deleted (use FK ON DELETE SET NULL).
-   */
-  categoryId: integer("category_id"),
+  // Task #51 — FK into expense_categories. ON DELETE SET NULL so an
+  // expense is never lost if a category is hard-deleted; the boot-time
+  // seed re-backfills any nulls to "Uncategorized" and the API requires
+  // a category on new expense creation.
+  categoryId: integer("category_id").references(
+    () => expenseCategoriesTable.id,
+    { onDelete: "set null" },
+  ),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

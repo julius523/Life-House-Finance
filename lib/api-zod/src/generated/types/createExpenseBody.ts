@@ -16,6 +16,7 @@ export interface CreateExpenseBody {
   amount: number;
   paymentMethod: CreateExpenseBodyPaymentMethod;
   programId?: number;
-  categoryId?: number | null;
+  /** Required. Use the seeded "Uncategorized" id when the submitter has no better classification. */
+  categoryId: number;
   receiptIds?: number[];
 }

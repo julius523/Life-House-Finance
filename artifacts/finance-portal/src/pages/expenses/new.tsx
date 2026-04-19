@@ -92,22 +92,27 @@ export default function ExpenseNew() {
         submittedBy = "Unknown";
       }
 
-      const { firstName, lastName, ...rest } = values;
-      void firstName;
-      void lastName;
-      const { categoryId, ...rest2 } = rest;
-      void categoryId;
+      if (!values.categoryId || values.categoryId === "none") {
+        toast({
+          title: "Please choose an expense category",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const expenseData = {
-        ...rest2,
         submittedBy,
+        expenseDate: values.expenseDate,
+        merchant: values.merchant,
+        description: values.description,
+        amount: values.amount,
+        paymentMethod: values.paymentMethod,
         programId:
           values.programId && values.programId !== "none"
             ? Number(values.programId)
             : undefined,
-        categoryId:
-          values.categoryId && values.categoryId !== "none"
-            ? Number(values.categoryId)
-            : undefined,
+        categoryId: Number(values.categoryId),
+        receiptIds: undefined,
       };
 
       const result = await createExpense.mutateAsync({ data: expenseData });
@@ -303,11 +308,10 @@ export default function ExpenseNew() {
                       <Select onValueChange={field.onChange} value={field.value || "none"}>
                         <FormControl>
                           <SelectTrigger data-testid="select-expense-category">
-                            <SelectValue placeholder="Select a category (optional)" />
+                            <SelectValue placeholder="Select a category" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="none">Uncategorized (default)</SelectItem>
                           {categories
                             .filter((c) => c.isActive)
                             .map((c) => (

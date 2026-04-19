@@ -175,7 +175,11 @@ export const CreateExpenseBody = zod.object({
     "other",
   ]),
   programId: zod.number().optional(),
-  categoryId: zod.number().nullish(),
+  categoryId: zod
+    .number()
+    .describe(
+      'Required. Use the seeded \"Uncategorized\" id when the submitter has no better classification.',
+    ),
   receiptIds: zod.array(zod.number()).optional(),
 });
 

@@ -11,7 +11,7 @@
  *    NULL.
  */
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import {
   db,
   chartOfAccountsTable,
@@ -115,9 +115,6 @@ export async function seedExpenseCategories(): Promise<{
     .set({ categoryId: category.id })
     .where(isNull(expensesTable.categoryId))
     .returning({ id: expensesTable.id });
-
-  // Suppress unused-import warning for sql.
-  void sql;
 
   return {
     categoryCreated,

@@ -1905,7 +1905,7 @@ components:
           type: integer
         categoryId:
           type: integer
-          nullable: true
+          description: Required. Use the seeded "Uncategorized" id when the submitter has no better classification.
         receiptIds:
           type: array
           items:
@@ -1917,6 +1917,7 @@ components:
         - description
         - amount
         - paymentMethod
+        - categoryId
 
     UpdateExpenseBody:
       type: object
