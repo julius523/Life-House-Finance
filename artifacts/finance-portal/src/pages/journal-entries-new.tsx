@@ -30,16 +30,13 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { apiJson } from "@/lib/api";
+import {
+  useListChartOfAccounts,
+  type ChartOfAccount,
+} from "@workspace/api-client-react";
 import { ArrowLeft, BookOpen, Plus, Save, Trash2 } from "lucide-react";
 
-type Account = {
-  id: number;
-  code: string;
-  name: string;
-  type: "asset" | "liability" | "equity" | "revenue" | "expense";
-  isActive: boolean;
-  allowManualPosting: boolean;
-};
+type Account = ChartOfAccount;
 
 type LineDraft = {
   uid: number;
@@ -125,9 +122,14 @@ export default function JournalEntriesNewPage() {
     return Number.isInteger(n) && n > 0 ? n : null;
   }, [search]);
 
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [accountsLoading, setAccountsLoading] = useState(true);
-  const [accountsError, setAccountsError] = useState<string | null>(null);
+  const accountsQuery = useListChartOfAccounts(undefined, {
+    query: { enabled: !!canPost },
+  });
+  const accounts: Account[] = accountsQuery.data?.accounts ?? [];
+  const accountsLoading = accountsQuery.isLoading;
+  const accountsError = accountsQuery.error
+    ? (accountsQuery.error as Error).message ?? "Failed to load chart of accounts."
+    : null;
 
   const [entryDate, setEntryDate] = useState<string>(todayIsoLocal());
   const [memo, setMemo] = useState("");
@@ -146,30 +148,6 @@ export default function JournalEntriesNewPage() {
   const [draftLoading, setDraftLoading] = useState(false);
   const [draftLoadError, setDraftLoadError] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!canPost) return;
-    let cancelled = false;
-    setAccountsLoading(true);
-    apiJson<{ accounts: Account[] }>("/accounting/chart-of-accounts")
-      .then((data) => {
-        if (cancelled) return;
-        setAccounts(data.accounts);
-        setAccountsError(null);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setAccountsError(
-          e instanceof Error ? e.message : "Failed to load chart of accounts.",
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setAccountsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [canPost]);
 
   // Load existing draft if ?draft=ID is in the URL.
   useEffect(() => {

@@ -2013,6 +2013,64 @@ export const DeleteChartOfAccountResponse = zod.object({
 });
 
 /**
+ * @summary Get an account's recent posted ledger activity
+ */
+export const GetChartOfAccountActivityParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const getChartOfAccountActivityQueryLimitDefault = 50;
+
+export const GetChartOfAccountActivityQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .default(getChartOfAccountActivityQueryLimitDefault),
+});
+
+export const GetChartOfAccountActivityResponse = zod.object({
+  account: zod.object({
+    id: zod.number(),
+    code: zod.string(),
+    name: zod.string(),
+    description: zod.string().nullish(),
+    type: zod.enum([
+      "asset",
+      "liability",
+      "equity",
+      "revenue",
+      "expense",
+      "contra_asset",
+      "contra_liability",
+      "contra_revenue",
+      "other",
+    ]),
+    subtype: zod.string().nullish(),
+    normalBalance: zod.enum(["debit", "credit"]),
+    parentAccountId: zod.number().nullish(),
+    isActive: zod.boolean(),
+    isSystem: zod.boolean(),
+    allowManualPosting: zod.boolean(),
+    createdAt: zod.coerce.date().optional(),
+    updatedAt: zod.coerce.date().optional(),
+  }),
+  activity: zod.array(
+    zod.object({
+      lineId: zod.number(),
+      journalEntryId: zod.number(),
+      type: zod.enum(["debit", "credit"]),
+      amountCents: zod.number(),
+      memo: zod.string().nullish(),
+      program: zod.string().nullish(),
+      fund: zod.string().nullish(),
+      entryDate: zod.string(),
+      entryMemo: zod.string().nullish(),
+      entryStatus: zod.string(),
+      postedAt: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
  * @summary Get the singleton accounting settings row (admin only)
  */
 export const GetAccountingSettingsResponse = zod.object({

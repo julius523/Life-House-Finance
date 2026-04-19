@@ -809,6 +809,33 @@ export interface ChartOfAccount {
   updatedAt?: string;
 }
 
+export type ChartOfAccountActivityRowType =
+  (typeof ChartOfAccountActivityRowType)[keyof typeof ChartOfAccountActivityRowType];
+
+export const ChartOfAccountActivityRowType = {
+  debit: "debit",
+  credit: "credit",
+} as const;
+
+export interface ChartOfAccountActivityRow {
+  lineId: number;
+  journalEntryId: number;
+  type: ChartOfAccountActivityRowType;
+  amountCents: number;
+  memo?: string | null;
+  program?: string | null;
+  fund?: string | null;
+  entryDate: string;
+  entryMemo?: string | null;
+  entryStatus: string;
+  postedAt?: string | null;
+}
+
+export interface ChartOfAccountActivityResponse {
+  account: ChartOfAccount;
+  activity: ChartOfAccountActivityRow[];
+}
+
 export interface ChartOfAccountListResponse {
   accounts: ChartOfAccount[];
 }
@@ -1206,6 +1233,10 @@ export const ListChartOfAccountsIncludeArchived = {
   true: "true",
   false: "false",
 } as const;
+
+export type GetChartOfAccountActivityParams = {
+  limit?: number;
+};
 
 export type ListNotificationsParams = {
   unreadOnly?: boolean;

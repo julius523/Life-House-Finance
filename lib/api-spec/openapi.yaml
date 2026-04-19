@@ -1265,6 +1265,30 @@ paths:
               schema:
                 $ref: "#/components/schemas/DeleteChartOfAccountResponse"
 
+  /accounting/chart-of-accounts/{id}/activity:
+    get:
+      operationId: getChartOfAccountActivity
+      tags: [accounting]
+      summary: Get an account's recent posted ledger activity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Account metadata plus recent posted journal lines
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChartOfAccountActivityResponse"
+
   /accounting/settings:
     get:
       operationId: getAccountingSettings
@@ -2813,6 +2837,56 @@ components:
         - isActive
         - isSystem
         - allowManualPosting
+
+    ChartOfAccountActivityRow:
+      type: object
+      properties:
+        lineId:
+          type: integer
+        journalEntryId:
+          type: integer
+        type:
+          type: string
+          enum: [debit, credit]
+        amountCents:
+          type: integer
+        memo:
+          type: string
+          nullable: true
+        program:
+          type: string
+          nullable: true
+        fund:
+          type: string
+          nullable: true
+        entryDate:
+          type: string
+        entryMemo:
+          type: string
+          nullable: true
+        entryStatus:
+          type: string
+        postedAt:
+          type: string
+          nullable: true
+      required:
+        - lineId
+        - journalEntryId
+        - type
+        - amountCents
+        - entryDate
+        - entryStatus
+
+    ChartOfAccountActivityResponse:
+      type: object
+      properties:
+        account:
+          $ref: "#/components/schemas/ChartOfAccount"
+        activity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChartOfAccountActivityRow"
+      required: [account, activity]
 
     ChartOfAccountListResponse:
       type: object

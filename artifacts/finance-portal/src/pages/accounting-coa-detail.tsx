@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { useRoute, Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,73 +5,26 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { ArrowLeft } from "lucide-react";
-import { apiJson } from "@/lib/api";
-
-type Account = {
-  id: number;
-  code: string;
-  name: string;
-  type: string;
-  subtype: string | null;
-  normalBalance: "debit" | "credit";
-  isActive: boolean;
-  isSystem: boolean;
-  allowManualPosting: boolean;
-  description: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type ActivityRow = {
-  lineId: number;
-  journalEntryId: number;
-  type: "debit" | "credit";
-  amountCents: number;
-  memo: string | null;
-  program: string | null;
-  fund: string | null;
-  entryDate: string;
-  entryMemo: string | null;
-  entryStatus: string;
-  postedAt: string | null;
-};
-
-type ActivityResponse = { account: Account; activity: ActivityRow[] };
+import { useGetChartOfAccountActivity } from "@workspace/api-client-react";
 
 const fmtUsd = (cents: number) =>
   `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function AccountingCoaDetail() {
   const [, params] = useRoute<{ id: string }>("/accounting/coa/:id");
-  const id = params?.id;
-  const [data, setData] = useState<ActivityResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const idNum = params?.id ? Number(params.id) : NaN;
+  const enabled = Number.isFinite(idNum);
+  const { data, isLoading, error } = useGetChartOfAccountActivity(
+    idNum,
+    { limit: 100 },
+    { query: { enabled } },
+  );
 
-  useEffect(() => {
-    if (!id) return;
-    let cancelled = false;
-    setLoading(true);
-    apiJson<ActivityResponse>(`/accounting/chart-of-accounts/${id}/activity?limit=100`)
-      .then((r) => {
-        if (!cancelled) setData(r);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e?.message ?? e));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
-
-  if (loading) return <Skeleton className="h-64 w-full" />;
+  if (isLoading) return <Skeleton className="h-64 w-full" />;
   if (error)
     return (
       <div className="p-6 text-sm text-destructive" data-testid="coa-detail-error">
-        {error}
+        {String((error as Error)?.message ?? error)}
       </div>
     );
   if (!data) return null;

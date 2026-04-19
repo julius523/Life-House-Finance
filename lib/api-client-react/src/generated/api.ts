@@ -23,6 +23,7 @@ import type {
   ApprovalActionBody,
   ApprovalQueueItem,
   Bill,
+  ChartOfAccountActivityResponse,
   ChartOfAccountDetailResponse,
   ChartOfAccountListResponse,
   ChartOfAccountResponse,
@@ -43,6 +44,7 @@ import type {
   Expense,
   ExpenseListResponse,
   FinancialSummaryReport,
+  GetChartOfAccountActivityParams,
   GetFinancialSummaryReportParams,
   GetProgramSpendingParams,
   GetRecentActivityParams,
@@ -4885,6 +4887,126 @@ export const useDeleteChartOfAccount = <
 > => {
   return useMutation(getDeleteChartOfAccountMutationOptions(options));
 };
+
+/**
+ * @summary Get an account's recent posted ledger activity
+ */
+export const getGetChartOfAccountActivityUrl = (
+  id: number,
+  params?: GetChartOfAccountActivityParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/accounting/chart-of-accounts/${id}/activity?${stringifiedParams}`
+    : `/api/accounting/chart-of-accounts/${id}/activity`;
+};
+
+export const getChartOfAccountActivity = async (
+  id: number,
+  params?: GetChartOfAccountActivityParams,
+  options?: RequestInit,
+): Promise<ChartOfAccountActivityResponse> => {
+  return customFetch<ChartOfAccountActivityResponse>(
+    getGetChartOfAccountActivityUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetChartOfAccountActivityQueryKey = (
+  id: number,
+  params?: GetChartOfAccountActivityParams,
+) => {
+  return [
+    `/api/accounting/chart-of-accounts/${id}/activity`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetChartOfAccountActivityQueryOptions = <
+  TData = Awaited<ReturnType<typeof getChartOfAccountActivity>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  params?: GetChartOfAccountActivityParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getChartOfAccountActivity>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetChartOfAccountActivityQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getChartOfAccountActivity>>
+  > = ({ signal }) =>
+    getChartOfAccountActivity(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getChartOfAccountActivity>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetChartOfAccountActivityQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getChartOfAccountActivity>>
+>;
+export type GetChartOfAccountActivityQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get an account's recent posted ledger activity
+ */
+
+export function useGetChartOfAccountActivity<
+  TData = Awaited<ReturnType<typeof getChartOfAccountActivity>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  params?: GetChartOfAccountActivityParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getChartOfAccountActivity>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetChartOfAccountActivityQueryOptions(
+    id,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Get the singleton accounting settings row (admin only)
