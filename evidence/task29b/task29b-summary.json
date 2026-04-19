@@ -7,7 +7,7 @@
       "evidence": {
         "status": 201,
         "draftStatus": "draft",
-        "draftId": 16
+        "draftId": 43
       }
     },
     {
@@ -28,7 +28,7 @@
         "status": 200,
         "draftStatus": "submitted",
         "submittedBy": 3,
-        "submittedAt": "2026-04-19T01:37:19.537Z"
+        "submittedAt": "2026-04-19T01:42:43.301Z"
       }
     },
     {
@@ -68,9 +68,9 @@
         "status": 201,
         "idempotent": false,
         "draftStatus": "posted",
-        "jeId": 73,
-        "jeManualDraftId": 16,
-        "draftPostedJeId": 73
+        "jeId": 96,
+        "jeManualDraftId": 43,
+        "draftPostedJeId": 96
       }
     },
     {
@@ -80,7 +80,7 @@
       "evidence": {
         "status": 200,
         "idempotent": true,
-        "jeId": 73
+        "jeId": 96
       }
     },
     {
@@ -89,8 +89,8 @@
       "pass": true,
       "evidence": {
         "matchCount": 1,
-        "matchedId": 73,
-        "jeId": 73
+        "matchedId": 96,
+        "jeId": 96
       }
     },
     {
@@ -161,15 +161,32 @@
       "desc": "Posted JE row links back to draft: journalEntry.manualDraftId === draftId AND evidence_snapshot.idempotency.key === 'manual-draft-{id}'",
       "pass": true,
       "evidence": {
-        "manualDraftId": 16,
-        "idempotencyKey": "manual-draft-16",
-        "expectedKey": "manual-draft-16"
+        "manualDraftId": 43,
+        "idempotencyKey": "manual-draft-43",
+        "expectedKey": "manual-draft-43"
+      }
+    },
+    {
+      "id": "T14",
+      "desc": "Single draft lifecycle (create → edit → submit → reject → resubmit → approve → post) produces all 6 activity_log event types for the same draft id",
+      "pass": true,
+      "evidence": {
+        "fullDraftId": 46,
+        "seenTypes": [
+          "manual_je_draft_approved",
+          "manual_je_draft_created",
+          "manual_je_draft_edited",
+          "manual_je_draft_posted",
+          "manual_je_draft_rejected",
+          "manual_je_draft_submitted"
+        ],
+        "missing": []
       }
     }
   ],
-  "passes": 14,
-  "total": 14,
-  "draftId": 16,
-  "draft2Id": 17,
-  "jeId": 73
+  "passes": 15,
+  "total": 15,
+  "draftId": 43,
+  "draft2Id": 44,
+  "jeId": 96
 }

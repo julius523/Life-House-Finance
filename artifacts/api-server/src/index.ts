@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { seedUsers } from "./lib/seedUsers";
 import { ensureTodaySnapshot } from "./lib/dailySnapshot";
 import { seedChartOfAccountsAndSettings } from "./lib/seedChartOfAccounts";
+import { ensureSchemaConstraints } from "./lib/ensureSchema";
 
 const rawPort = process.env["PORT"];
 
@@ -18,7 +19,11 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-seedUsers()
+ensureSchemaConstraints()
+  .catch((err) => {
+    logger.error({ err }, "Failed to ensure schema constraints");
+  })
+  .then(() => seedUsers())
   .catch((err) => {
     logger.error({ err }, "Failed to seed users");
   })

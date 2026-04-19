@@ -485,6 +485,57 @@ function buildPayload(memoTag) {
   );
 
   // ------------------------------------------------------------------
+  // T14 — single-draft full lifecycle: created → submitted → rejected →
+  // resubmitted → approved → posted produces all 6 activity_log event
+  // types tied to the SAME draft id (validator-requested).
+  const fullLifeCreate = await api(submitter, "POST", `/api/accounting/journal-entry-drafts`, buildPayload("T14-full-lifecycle"));
+  const fullDraftId = fullLifeCreate.data?.draft?.id;
+  await api(submitter, "PATCH", `/api/accounting/journal-entry-drafts/${fullDraftId}`, {
+    ...buildPayload("T14-full-lifecycle-edited"),
+  });
+  await api(submitter, "POST", `/api/accounting/journal-entry-drafts/${fullDraftId}/submit`);
+  await api(approver, "POST", `/api/accounting/journal-entry-drafts/${fullDraftId}/reject`, { reason: "T14 reject for retest" });
+  await api(submitter, "POST", `/api/accounting/journal-entry-drafts/${fullDraftId}/submit`);
+  await api(approver, "POST", `/api/accounting/journal-entry-drafts/${fullDraftId}/approve`);
+  const fullPost = await api(approver, "POST", `/api/accounting/journal-entry-drafts/${fullDraftId}/post`);
+  // Query activity_log directly for the lifecycle proof — the
+  // /dashboard/recent-activity API is paginated/capped and Task 29B's
+  // acceptance criteria specifically reference activity_log rows.
+  const { execSync } = await import("node:child_process");
+  const psqlOut = execSync(
+    `psql "${process.env.DATABASE_URL}" -A -t -F"|" -c "SELECT type, actor_user_id, COALESCE(metadata::text,'') FROM activity_log WHERE reference_id = ${fullDraftId} AND type LIKE 'manual_je_draft_%' ORDER BY id ASC"`,
+    { encoding: "utf8" }
+  );
+  const fullRows = psqlOut
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [type, actor, metadata] = line.split("|");
+      return { type, actor_user_id: Number(actor), metadata };
+    });
+  const expectedTypes = [
+    "manual_je_draft_created",
+    "manual_je_draft_edited",
+    "manual_je_draft_submitted",
+    "manual_je_draft_rejected",
+    "manual_je_draft_approved",
+    "manual_je_draft_posted",
+  ];
+  const seenTypes = new Set(fullRows.map((r) => r.type));
+  const allTypesPresent = expectedTypes.every((t) => seenTypes.has(t));
+  record(
+    "T14",
+    "Single draft lifecycle (create → edit → submit → reject → resubmit → approve → post) produces all 6 activity_log event types for the same draft id",
+    fullPost.status === 201 && allTypesPresent,
+    {
+      fullDraftId,
+      seenTypes: Array.from(seenTypes).sort(),
+      missing: expectedTypes.filter((t) => !seenTypes.has(t)),
+    },
+  );
+
+  // ------------------------------------------------------------------
   const passes = results.filter((r) => r.pass).length;
   const failures = results.filter((r) => !r.pass);
   log("--- Task #29B summary:", {

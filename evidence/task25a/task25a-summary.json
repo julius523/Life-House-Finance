@@ -26,12 +26,12 @@
         "first": {
           "status": 201,
           "idempotent": false,
-          "jeId": 79
+          "jeId": 109
         },
         "replay": {
           "status": 200,
           "idempotent": true,
-          "jeId": 79
+          "jeId": 109
         }
       }
     },
@@ -41,7 +41,7 @@
       "pass": true,
       "evidence": {
         "matchCount": 1,
-        "memo": "T25A-3 same-key replay 799d021e-dfa0-48fe-b6cc-deef6e325515"
+        "memo": "T25A-3 same-key replay 4ccb0b68-b3d3-4ecf-b141-c5aaccc57d36"
       }
     },
     {
@@ -51,12 +51,12 @@
       "evidence": {
         "first": {
           "status": 201,
-          "jeId": 80
+          "jeId": 110
         },
         "conflict": {
           "status": 409,
           "code": "IDEMPOTENCY_CONFLICT",
-          "existingJeId": 80
+          "existingJeId": 110
         }
       }
     },
@@ -95,8 +95,8 @@
       "desc": "Sanity: same payload, DIFFERENT keys → two distinct JEs (idempotency is keyed on the header, not on payload alone)",
       "pass": true,
       "evidence": {
-        "idA": 82,
-        "idB": 83
+        "idA": 113,
+        "idB": 112
       }
     },
     {
@@ -104,7 +104,7 @@
       "desc": "evidence_snapshot.idempotency.{key,fingerprint} present and key matches the original request",
       "pass": true,
       "evidence": {
-        "storedKey": "799d021e-dfa0-48fe-b6cc-deef6e325515",
+        "storedKey": "4ccb0b68-b3d3-4ecf-b141-c5aaccc57d36",
         "fingerprintLen": 64
       }
     }
