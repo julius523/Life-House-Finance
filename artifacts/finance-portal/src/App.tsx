@@ -36,6 +36,7 @@ import AccountingSettingsPage from "@/pages/accounting-settings";
 import JournalEntriesNewPage from "@/pages/journal-entries-new";
 import JournalEntriesListPage from "@/pages/journal-entries-list";
 import JournalEntryDetailPage from "@/pages/journal-entries-detail";
+import JournalEntryDraftDetailPage from "@/pages/journal-entry-draft-detail";
 
 const queryClient = new QueryClient();
 
@@ -112,6 +113,11 @@ function AppRoutes() {
           "/accounting/journal-entries/:id",
           "accounting",
           JournalEntryDetailPage,
+        )}
+        {route(
+          "/accounting/journal-entry-drafts/:id",
+          "accounting",
+          JournalEntryDraftDetailPage,
         )}
         {route("/accounting/coa", "accounting", AccountingCoaPage)}
         {route("/accounting/coa/:id", "accounting", AccountingCoaDetail)}

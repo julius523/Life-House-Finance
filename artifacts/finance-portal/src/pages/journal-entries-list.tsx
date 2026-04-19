@@ -59,12 +59,25 @@ type JournalEntry = {
 type StatusFilter = "all" | "posted" | "reversed";
 type SourceFilter = "all" | "manual" | "copilot";
 type DraftScope = "mine" | "all";
+type DraftStatus =
+  | "draft"
+  | "submitted"
+  | "approved"
+  | "rejected"
+  | "posted";
+type DraftStatusFilter = "all" | DraftStatus;
 
 type DraftSummary = {
   id: number;
   createdByUserId: number;
   entryDate: string | null;
   memo: string | null;
+  status: DraftStatus;
+  submittedByUserId: number | null;
+  approvedByUserId: number | null;
+  rejectedByUserId: number | null;
+  rejectionReason: string | null;
+  postedJournalEntryId: number | null;
   createdAt: string;
   updatedAt: string;
   createdBy: {
@@ -74,6 +87,21 @@ type DraftSummary = {
     lastName: string | null;
   };
 };
+
+function DraftStatusBadge({ status }: { status: DraftStatus }) {
+  switch (status) {
+    case "draft":
+      return <Badge variant="outline">Draft</Badge>;
+    case "submitted":
+      return <Badge variant="secondary">Submitted</Badge>;
+    case "approved":
+      return <Badge className="bg-blue-600 hover:bg-blue-600">Approved</Badge>;
+    case "rejected":
+      return <Badge variant="destructive">Rejected</Badge>;
+    case "posted":
+      return <Badge>Posted</Badge>;
+  }
+}
 
 const PAGE_SIZE = 50;
 
@@ -115,6 +143,8 @@ export default function JournalEntriesListPage() {
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [draftsLoading, setDraftsLoading] = useState(true);
   const [draftScope, setDraftScope] = useState<DraftScope>("mine");
+  const [draftStatusFilter, setDraftStatusFilter] =
+    useState<DraftStatusFilter>("all");
   const [draftRefreshKey, setDraftRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -125,7 +155,13 @@ export default function JournalEntriesListPage() {
       `/accounting/journal-entry-drafts?scope=${draftScope}`,
     )
       .then((data) => {
-        if (!cancelled) setDrafts(data.drafts);
+        if (!cancelled) {
+          const filtered =
+            draftStatusFilter === "all"
+              ? data.drafts
+              : data.drafts.filter((d) => d.status === draftStatusFilter);
+          setDrafts(filtered);
+        }
       })
       .catch(() => {
         if (!cancelled) setDrafts([]);
@@ -136,7 +172,7 @@ export default function JournalEntriesListPage() {
     return () => {
       cancelled = true;
     };
-  }, [canView, draftScope, draftRefreshKey]);
+  }, [canView, draftScope, draftStatusFilter, draftRefreshKey]);
 
   const discardDraft = async (id: number) => {
     if (
@@ -343,6 +379,27 @@ export default function JournalEntriesListPage() {
           </div>
           <div className="flex items-center gap-2">
             <Select
+              value={draftStatusFilter}
+              onValueChange={(v) =>
+                setDraftStatusFilter(v as DraftStatusFilter)
+              }
+            >
+              <SelectTrigger
+                className="w-[160px]"
+                data-testid="select-draft-status-filter"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="draft">Draft</SelectItem>
+                <SelectItem value="submitted">Submitted</SelectItem>
+                <SelectItem value="approved">Approved</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
+                <SelectItem value="posted">Posted</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
               value={draftScope}
               onValueChange={(v) => setDraftScope(v as DraftScope)}
             >
@@ -374,11 +431,12 @@ export default function JournalEntriesListPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[110px]">Status</TableHead>
                     <TableHead className="w-[120px]">Entry date</TableHead>
                     <TableHead>Memo</TableHead>
                     <TableHead className="w-[180px]">Saved by</TableHead>
                     <TableHead className="w-[160px]">Last updated</TableHead>
-                    <TableHead className="w-[180px] text-right" />
+                    <TableHead className="w-[200px] text-right" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -389,11 +447,16 @@ export default function JournalEntriesListPage() {
                         .join(" ") ||
                       d.createdBy.email ||
                       `User #${d.createdBy.id}`;
+                    const editable =
+                      d.status === "draft" || d.status === "rejected";
                     return (
                       <TableRow
                         key={d.id}
                         data-testid={`row-draft-${d.id}`}
                       >
+                        <TableCell data-testid={`text-draft-status-${d.id}`}>
+                          <DraftStatusBadge status={d.status} />
+                        </TableCell>
                         <TableCell>
                           {d.entryDate
                             ? format(parseDateOnly(d.entryDate), "MMM d, yyyy")
@@ -414,23 +477,33 @@ export default function JournalEntriesListPage() {
                               asChild
                               size="sm"
                               variant="outline"
-                              data-testid={`button-resume-draft-${d.id}`}
+                              data-testid={`button-open-draft-${d.id}`}
                             >
                               <Link
-                                href={`/accounting/journal-entries/new?draft=${d.id}`}
+                                href={
+                                  editable
+                                    ? `/accounting/journal-entries/new?draft=${d.id}`
+                                    : `/accounting/journal-entry-drafts/${d.id}`
+                                }
                               >
-                                Resume
+                                {editable
+                                  ? "Resume"
+                                  : d.status === "posted"
+                                    ? "View"
+                                    : "Review"}
                               </Link>
                             </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => discardDraft(d.id)}
-                              data-testid={`button-discard-draft-${d.id}`}
-                              title="Discard draft"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {editable && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => discardDraft(d.id)}
+                                data-testid={`button-discard-draft-${d.id}`}
+                                title="Discard draft"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
