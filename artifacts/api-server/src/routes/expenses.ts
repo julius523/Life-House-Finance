@@ -124,10 +124,28 @@ async function loadAccountingLinkForExpense(
     draftMemo = d?.memo ?? null;
   }
 
+  // Task #53 review fix — JE fallback through the draft. Some
+  // accounting_source_links rows only carry the draft linkage; if that
+  // draft was later posted we still want to surface the resulting
+  // journal entry on the expense detail card. Resolve the JE via
+  // journal_entries.manual_draft_id when the bridge row didn't already
+  // carry one.
+  let resolvedJournalEntryId = journalEntryId;
+  if (resolvedJournalEntryId === null && draftId !== null) {
+    const [jeFromDraft] = await db
+      .select({ id: journalEntriesTable.id })
+      .from(journalEntriesTable)
+      .where(eq(journalEntriesTable.manualDraftId, draftId))
+      .limit(1);
+    if (jeFromDraft?.id) {
+      resolvedJournalEntryId = jeFromDraft.id;
+    }
+  }
+
   let journalEntryNo: string | null = null;
   let journalEntryDate: string | null = null;
   let journalEntryStatus: AccountingLinkSummary["journalEntryStatus"] = null;
-  if (journalEntryId !== null) {
+  if (resolvedJournalEntryId !== null) {
     const [je] = await db
       .select({
         entryNo: journalEntriesTable.entryNo,
