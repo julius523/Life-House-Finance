@@ -902,6 +902,20 @@ export type FinancialSummaryReportProfitAndLossExpensesByProgramItem = {
   amount: number;
 };
 
+export type FinancialSummaryReportProfitAndLossIncomeByAccountItem = {
+  accountId: number;
+  code: string;
+  name: string;
+  amount: number;
+};
+
+export type FinancialSummaryReportProfitAndLossExpensesByAccountItem = {
+  accountId: number;
+  code: string;
+  name: string;
+  amount: number;
+};
+
 export type FinancialSummaryReportProfitAndLoss = {
   incomeByProgram: FinancialSummaryReportProfitAndLossIncomeByProgramItem[];
   uncategorizedIncome: number;
@@ -910,6 +924,8 @@ export type FinancialSummaryReportProfitAndLoss = {
   uncategorizedExpenses: number;
   totalExpenses: number;
   netIncome: number;
+  incomeByAccount: FinancialSummaryReportProfitAndLossIncomeByAccountItem[];
+  expensesByAccount: FinancialSummaryReportProfitAndLossExpensesByAccountItem[];
 };
 
 export type FinancialSummaryReportBalanceSheet = {

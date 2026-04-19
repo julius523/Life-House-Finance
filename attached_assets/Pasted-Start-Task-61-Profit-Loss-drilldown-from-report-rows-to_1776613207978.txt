@@ -1,0 +1,86 @@
+Start Task #61 — Profit & Loss drilldown from report rows to posted journal entries.
+
+Treat this as a reporting traceability task, not a report-math rewrite.
+
+What & Why
+The Reports page is now stabilized by Task #60, but users still cannot click a Profit & Loss line and see the posted journal entries behind the number. This task adds drilldown from each P&L row into the underlying posted journal entries and their lines so finance can validate totals without leaving the reporting flow.
+
+Done looks like
+- Each clickable P&L row opens a drilldown view showing the posted journal entries contributing to that row for the active date range.
+- The drilldown respects the current report filters and date range.
+- The drilldown only includes posted journal entries, never drafts.
+- Each drilldown row shows enough context to audit the total:
+  - entry number
+  - entry date
+  - memo/description
+  - account name
+  - debit / credit / net contribution as applicable
+  - source label if already available from prior work
+- Users can click from a drilldown row into the journal entry detail page.
+- Empty states, permission-denied states, and partial-failure states render safely inline.
+- The page does not white-screen if the drilldown query fails.
+- No changes to P&L calculation logic unless strictly required to make the drilldown reconcile to the displayed row total.
+
+Out of scope
+- CSV export of the drilldown data (#62).
+- Changing report math or account classification rules.
+- Adding Balance Sheet drilldowns beyond what is already merged.
+- Copilot / reconciliation suggestions.
+
+Hard constraints
+- Use the real posted journal entry source of truth. No synthetic client-side recomputation from unrelated endpoints.
+- Do not include draft journal entries.
+- Do not bypass the existing typed client / OpenAPI flow. Update the spec and regenerate the client if the endpoint changes.
+- Preserve the Task #60 stability rules: panel-level failure must stay isolated and visible.
+- Do not silently swallow mismatches. If a row cannot drill down cleanly, surface an inline error state.
+
+Steps
+1. API
+- Add a read endpoint for P&L drilldown that accepts:
+  - start date
+  - end date
+  - row identifier / account grouping identifier used by the P&L report
+  - any existing report filters needed to match the displayed row
+- Return posted journal entries and line-level contribution data required to reconcile the clicked row.
+- Reuse the same underlying classification / query logic the P&L report uses so totals tie out.
+
+2. OpenAPI + typed client
+- Extend openapi.yaml for the new drilldown endpoint and response types.
+- Regenerate the typed client.
+- Keep response shapes explicit and stable.
+
+3. UI
+- Make P&L rows clickable where drilldown is valid.
+- Add a drilldown panel / drawer / detail section that loads on demand.
+- Show loading, empty, inline error, and permission-denied states safely.
+- Include links to JE detail pages.
+- Keep the interaction consistent with the existing reporting UI.
+
+4. Reconciliation guard
+- Verify the drilldown total matches the clicked P&L row total for the same range and filters.
+- If there is a mismatch, surface an inline warning instead of hiding it.
+
+Validation / acceptance gate
+- Clicking a P&L row loads underlying posted journal entries for the same date range.
+- Drilldown totals match the displayed report row total in normal cases.
+- Empty ranges and no-activity rows show a clean empty state.
+- 401/403/API failures render inline without crashing the Reports page.
+- No draft entries appear in the drilldown.
+- Journal entry detail links work.
+- Existing Reports page stabilization from Task #60 remains intact.
+
+Relevant files
+- artifacts/api-server/src/routes/accounting.ts
+- artifacts/api-server/src/routes/reports.ts
+- lib/api-spec/openapi.yaml
+- artifacts/finance-portal/src/pages/reports.tsx
+- artifacts/finance-portal/src/pages/journal-entries-detail.tsx
+- generated typed client files affected by codegen
+
+Dependencies
+- Task #60 complete
+- Existing journal entry detail route working
+- Existing P&L report endpoint stable
+
+Revision instructions
+Revise the full task description end-to-end. Do not give partial edits or section-only changes. Keep all locked constraints intact unless I explicitly change them. Return the complete builder-ready task in this same format: What & Why, Done looks like, Out of scope, Hard constraints, Steps, Validation / acceptance gate, Relevant files, Dependencies, Revision instructions.

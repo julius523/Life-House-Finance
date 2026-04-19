@@ -4628,6 +4628,30 @@ components:
               type: number
             netIncome:
               type: number
+            # Task #61 — per-account breakdown for ledger-source P&L. Only
+            # populated when source=ledger; in operational source the
+            # arrays are empty because operational P&L has no posted
+            # journal-entry backing.
+            incomeByAccount:
+              type: array
+              items:
+                type: object
+                properties:
+                  accountId: { type: integer }
+                  code: { type: string }
+                  name: { type: string }
+                  amount: { type: number }
+                required: [accountId, code, name, amount]
+            expensesByAccount:
+              type: array
+              items:
+                type: object
+                properties:
+                  accountId: { type: integer }
+                  code: { type: string }
+                  name: { type: string }
+                  amount: { type: number }
+                required: [accountId, code, name, amount]
           required:
             - incomeByProgram
             - uncategorizedIncome
@@ -4636,6 +4660,8 @@ components:
             - uncategorizedExpenses
             - totalExpenses
             - netIncome
+            - incomeByAccount
+            - expensesByAccount
         balanceSheet:
           type: object
           properties:

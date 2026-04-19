@@ -251,6 +251,14 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
   let expensesByProgram: { programId: number; programName: string; amount: number }[] = [];
   let uncategorizedExpenses = 0;
   let totalExpenses = 0;
+  // Task #61 — per-account breakdown for ledger-source P&L so the UI can
+  // expand each row and drill down into the posted JE lines that built it
+  // (via the existing /reports/account-activity endpoint). Empty in
+  // operational mode because operational P&L is sourced from
+  // expenses/bills/transactions, which have no posted JE backing.
+  type PLAccount = { accountId: number; code: string; name: string; amount: number };
+  let incomeByAccount: PLAccount[] = [];
+  let expensesByAccount: PLAccount[] = [];
 
   // ---- Balance sheet variables (filled by either branch below) -------
   let cashOnHand = 0;
@@ -317,6 +325,61 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
     }
     totalIncome = uncategorizedIncome;
     totalExpenses = uncategorizedExpenses;
+
+    // Task #61 — per-account breakdown using the same WHERE/JOIN as plRows
+    // above so the per-account amounts sum exactly to totalIncome/Expenses.
+    const plAccountRows = await db
+      .select({
+        accountId: chartOfAccountsTable.id,
+        code: chartOfAccountsTable.code,
+        name: chartOfAccountsTable.name,
+        type: chartOfAccountsTable.type,
+        debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+        credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      })
+      .from(journalEntryLinesTable)
+      .innerJoin(
+        journalEntriesTable,
+        eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+      )
+      .innerJoin(
+        chartOfAccountsTable,
+        eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
+      )
+      .where(and(...plConds))
+      .groupBy(
+        chartOfAccountsTable.id,
+        chartOfAccountsTable.code,
+        chartOfAccountsTable.name,
+        chartOfAccountsTable.type,
+      );
+    for (const a of plAccountRows) {
+      const d = Number(a.debits) / 100;
+      const c = Number(a.credits) / 100;
+      if (a.type === "revenue") {
+        const amount = c - d;
+        if (amount !== 0) {
+          incomeByAccount.push({
+            accountId: a.accountId,
+            code: a.code,
+            name: a.name,
+            amount,
+          });
+        }
+      } else if (a.type === "expense") {
+        const amount = d - c;
+        if (amount !== 0) {
+          expensesByAccount.push({
+            accountId: a.accountId,
+            code: a.code,
+            name: a.name,
+            amount,
+          });
+        }
+      }
+    }
+    incomeByAccount.sort((x, y) => x.code.localeCompare(y.code));
+    expensesByAccount.sort((x, y) => x.code.localeCompare(y.code));
 
     // ----- Ledger-based Balance Sheet (as of toDate) ----------------------
     const bsConds = [
@@ -651,6 +714,8 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
         uncategorizedExpenses,
         totalExpenses,
         netIncome: totalIncome - totalExpenses,
+        incomeByAccount,
+        expensesByAccount,
       },
       balanceSheet: {
         cashOnHand,

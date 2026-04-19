@@ -2340,6 +2340,22 @@ export const GetFinancialSummaryReportResponse = zod.object({
     uncategorizedExpenses: zod.number(),
     totalExpenses: zod.number(),
     netIncome: zod.number(),
+    incomeByAccount: zod.array(
+      zod.object({
+        accountId: zod.number(),
+        code: zod.string(),
+        name: zod.string(),
+        amount: zod.number(),
+      }),
+    ),
+    expensesByAccount: zod.array(
+      zod.object({
+        accountId: zod.number(),
+        code: zod.string(),
+        name: zod.string(),
+        amount: zod.number(),
+      }),
+    ),
   }),
   balanceSheet: zod.object({
     cashOnHand: zod

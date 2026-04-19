@@ -547,89 +547,52 @@ export default function ReportsPage() {
               </CardTitle>
               <CardDescription>
                 Cash-basis income vs. committed spend for the selected period.
+                {source === "ledger"
+                  ? " Click a row to see the posted journal entries behind it."
+                  : " Switch to the Ledger source above to drill into the posted journal entries behind each row."}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-6">
-                <div>
-                  <div className="font-semibold text-success mb-2">Income</div>
-                  <table className="w-full text-sm">
-                    <tbody>
-                      {data.profitAndLoss.incomeByProgram.length === 0 &&
-                        data.profitAndLoss.uncategorizedIncome === 0 && (
-                          <tr>
-                            <td className="py-2 text-muted-foreground">
-                              No income recorded in this period.
-                            </td>
-                          </tr>
-                        )}
-                      {data.profitAndLoss.incomeByProgram.map((row) => (
-                        <tr key={row.programName} className="border-b last:border-0">
-                          <td className="py-2">{row.programName}</td>
-                          <td className="py-2 text-right font-medium">
-                            {fmtMoney(row.amount)}
-                          </td>
-                        </tr>
-                      ))}
-                      {data.profitAndLoss.uncategorizedIncome > 0 && (
-                        <tr className="border-b last:border-0">
-                          <td className="py-2 italic text-muted-foreground">
-                            Unallocated deposits
-                          </td>
-                          <td className="py-2 text-right font-medium">
-                            {fmtMoney(data.profitAndLoss.uncategorizedIncome)}
-                          </td>
-                        </tr>
-                      )}
-                      <tr className="border-t-2 border-success/30">
-                        <td className="py-2 font-bold">Total income</td>
-                        <td className="py-2 text-right font-bold text-success">
-                          {fmtMoney(data.profitAndLoss.totalIncome)}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                <PLSection
+                  title="Income"
+                  titleClassName="text-success"
+                  totalLabel="Total income"
+                  totalClassName="text-success"
+                  totalBorderClassName="border-success/30"
+                  emptyText="No income recorded in this period."
+                  programRows={data.profitAndLoss.incomeByProgram}
+                  uncategorized={data.profitAndLoss.uncategorizedIncome}
+                  uncategorizedLabel="Unallocated deposits"
+                  total={data.profitAndLoss.totalIncome}
+                  accounts={
+                    source === "ledger"
+                      ? data.profitAndLoss.incomeByAccount ?? []
+                      : []
+                  }
+                  fromDate={fromDate}
+                  toDate={toDate}
+                  parentSlug="pl-income"
+                />
 
-                <div>
-                  <div className="font-semibold mb-2">Expenses</div>
-                  <table className="w-full text-sm">
-                    <tbody>
-                      {data.profitAndLoss.expensesByProgram.length === 0 &&
-                        data.profitAndLoss.uncategorizedExpenses === 0 && (
-                          <tr>
-                            <td className="py-2 text-muted-foreground">
-                              No expenses recorded in this period.
-                            </td>
-                          </tr>
-                        )}
-                      {data.profitAndLoss.expensesByProgram.map((row) => (
-                        <tr key={row.programName} className="border-b last:border-0">
-                          <td className="py-2">{row.programName}</td>
-                          <td className="py-2 text-right font-medium">
-                            {fmtMoney(row.amount)}
-                          </td>
-                        </tr>
-                      ))}
-                      {data.profitAndLoss.uncategorizedExpenses > 0 && (
-                        <tr className="border-b last:border-0">
-                          <td className="py-2 italic text-muted-foreground">
-                            Unallocated
-                          </td>
-                          <td className="py-2 text-right font-medium">
-                            {fmtMoney(data.profitAndLoss.uncategorizedExpenses)}
-                          </td>
-                        </tr>
-                      )}
-                      <tr className="border-t-2 border-foreground/20">
-                        <td className="py-2 font-bold">Total expenses</td>
-                        <td className="py-2 text-right font-bold">
-                          {fmtMoney(data.profitAndLoss.totalExpenses)}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                <PLSection
+                  title="Expenses"
+                  totalLabel="Total expenses"
+                  totalBorderClassName="border-foreground/20"
+                  emptyText="No expenses recorded in this period."
+                  programRows={data.profitAndLoss.expensesByProgram}
+                  uncategorized={data.profitAndLoss.uncategorizedExpenses}
+                  uncategorizedLabel="Unallocated"
+                  total={data.profitAndLoss.totalExpenses}
+                  accounts={
+                    source === "ledger"
+                      ? data.profitAndLoss.expensesByAccount ?? []
+                      : []
+                  }
+                  fromDate={fromDate}
+                  toDate={toDate}
+                  parentSlug="pl-expense"
+                />
 
                 <div className="flex items-center justify-between border-t-2 pt-3">
                   <div className="font-bold text-base">Net income (P&amp;L)</div>
@@ -1312,6 +1275,244 @@ function ExpandableRow({
         </ul>
       )}
     </div>
+  );
+}
+
+// Task #61 — P&L section with optional per-account drilldown.
+// In ledger source, `accounts` is populated and rows expand inline to show
+// the posted journal-entry lines that built the row. In operational source,
+// `accounts` is empty and we fall back to the legacy program rows
+// (operational P&L is sourced from expenses/bills/transactions, which have
+// no posted JE backing — drilldown would be a lie).
+function PLSection({
+  title,
+  titleClassName,
+  totalLabel,
+  totalClassName,
+  totalBorderClassName,
+  emptyText,
+  programRows,
+  uncategorized,
+  uncategorizedLabel,
+  total,
+  accounts,
+  fromDate,
+  toDate,
+  parentSlug,
+}: {
+  title: string;
+  titleClassName?: string;
+  totalLabel: string;
+  totalClassName?: string;
+  totalBorderClassName: string;
+  emptyText: string;
+  programRows: { programName: string; amount: number }[];
+  uncategorized: number;
+  uncategorizedLabel: string;
+  total: number;
+  accounts: { accountId: number; code: string; name: string; amount: number }[];
+  fromDate: string;
+  toDate: string;
+  parentSlug: string;
+}) {
+  const useAccountRows = accounts.length > 0;
+  const accountSum = accounts.reduce((s, a) => s + a.amount, 0);
+  const reconcileMismatch =
+    useAccountRows && Math.abs(accountSum - total) > 0.005;
+  return (
+    <div data-testid={`pl-section-${parentSlug}`}>
+      <div className={`font-semibold mb-2 ${titleClassName ?? ""}`}>{title}</div>
+      <table className="w-full text-sm">
+        <tbody>
+          {useAccountRows ? (
+            accounts.map((a) => (
+              <PLAccountDrillDownRow
+                key={a.accountId}
+                account={a}
+                fromDate={fromDate}
+                toDate={toDate}
+                parentSlug={parentSlug}
+              />
+            ))
+          ) : (
+            <>
+              {programRows.length === 0 && uncategorized === 0 && (
+                <tr>
+                  <td className="py-2 text-muted-foreground" colSpan={2}>
+                    {emptyText}
+                  </td>
+                </tr>
+              )}
+              {programRows.map((row) => (
+                <tr key={row.programName} className="border-b last:border-0">
+                  <td className="py-2">{row.programName}</td>
+                  <td className="py-2 text-right font-medium">
+                    {fmtMoney(row.amount)}
+                  </td>
+                </tr>
+              ))}
+              {uncategorized > 0 && (
+                <tr className="border-b last:border-0">
+                  <td className="py-2 italic text-muted-foreground">
+                    {uncategorizedLabel}
+                  </td>
+                  <td className="py-2 text-right font-medium">
+                    {fmtMoney(uncategorized)}
+                  </td>
+                </tr>
+              )}
+            </>
+          )}
+          <tr className={`border-t-2 ${totalBorderClassName}`}>
+            <td className="py-2 font-bold">{totalLabel}</td>
+            <td
+              className={`py-2 text-right font-bold ${totalClassName ?? ""}`}
+            >
+              {fmtMoney(total)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      {reconcileMismatch && (
+        <div
+          className="mt-2 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs"
+          data-testid={`pl-reconcile-mismatch-${parentSlug}`}
+        >
+          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 text-warning shrink-0" />
+          <div>
+            Per-account total ({fmtMoney(accountSum)}) does not match the
+            displayed {totalLabel.toLowerCase()} ({fmtMoney(total)}). The
+            drill-down view may be incomplete.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PLAccountDrillDownRow({
+  account,
+  fromDate,
+  toDate,
+  parentSlug,
+}: {
+  account: { accountId: number; code: string; name: string; amount: number };
+  fromDate: string;
+  toDate: string;
+  parentSlug: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rangeOk = isValidRange(fromDate, toDate);
+  const { data, isLoading, error } = useGetAccountActivityReport(
+    { accountId: account.accountId, from: fromDate, to: toDate },
+    { query: { enabled: open && rangeOk } },
+  );
+  const errMsg = error ? errorMessage(error) : null;
+  return (
+    <>
+      <tr
+        className="border-b last:border-0"
+        data-testid={`pl-row-${parentSlug}-${account.accountId}`}
+      >
+        <td className="py-2">
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="flex w-full items-center gap-2 text-left hover:text-foreground"
+            aria-expanded={open}
+            data-testid={`pl-row-toggle-${parentSlug}-${account.accountId}`}
+          >
+            <span className="text-xs text-muted-foreground tabular-nums w-3 inline-block">
+              {open ? "▾" : "▸"}
+            </span>
+            <span className="font-mono text-muted-foreground mr-2">
+              {account.code}
+            </span>
+            <span className="underline-offset-2 hover:underline">
+              {account.name}
+            </span>
+          </button>
+        </td>
+        <td className="py-2 text-right font-medium tabular-nums">
+          {fmtMoney(account.amount)}
+        </td>
+      </tr>
+      {open && (
+        <tr
+          className="border-b last:border-0"
+          data-testid={`pl-row-activity-${parentSlug}-${account.accountId}`}
+        >
+          <td colSpan={2} className="bg-muted/20 px-3 py-2">
+            {isLoading && (
+              <div className="py-1 text-xs text-muted-foreground">
+                Loading journal-entry activity…
+              </div>
+            )}
+            {errMsg && (
+              <div className="py-1 text-xs text-destructive">
+                Could not load activity: {errMsg}
+              </div>
+            )}
+            {data && data.lines.length === 0 && (
+              <div className="py-1 text-xs text-muted-foreground italic">
+                No posted journal-entry lines in this period.
+              </div>
+            )}
+            {data && data.lines.length > 0 && (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-muted-foreground border-b">
+                    <th className="py-1 pr-2 font-normal">Date</th>
+                    <th className="py-1 pr-2 font-normal">Entry</th>
+                    <th className="py-1 pr-2 text-right font-normal">Debit</th>
+                    <th className="py-1 text-right font-normal">Credit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.lines.map((l) => (
+                    <tr key={l.lineId} className="border-b last:border-0">
+                      <td className="py-1 pr-2 tabular-nums whitespace-nowrap">
+                        {l.entryDate}
+                      </td>
+                      <td className="py-1 pr-2">
+                        <Link
+                          href={`/accounting/journal-entries/${l.journalEntryId}`}
+                          className="text-primary hover:underline font-mono"
+                        >
+                          {l.entryNo}
+                        </Link>
+                        {(l.lineMemo ?? l.entryMemo) && (
+                          <span className="text-muted-foreground ml-2">
+                            {l.lineMemo ?? l.entryMemo}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-1 pr-2 text-right tabular-nums">
+                        {l.debit > 0 ? fmtMoney(l.debit) : ""}
+                      </td>
+                      <td className="py-1 text-right tabular-nums">
+                        {l.credit > 0 ? fmtMoney(l.credit) : ""}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="border-t-2">
+                    <td className="py-1 pr-2 font-semibold" colSpan={2}>
+                      Totals
+                    </td>
+                    <td className="py-1 pr-2 text-right tabular-nums font-semibold">
+                      {fmtMoney(data.totals.debits)}
+                    </td>
+                    <td className="py-1 text-right tabular-nums font-semibold">
+                      {fmtMoney(data.totals.credits)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

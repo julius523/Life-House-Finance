@@ -5,7 +5,9 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { FinancialSummaryReportProfitAndLossExpensesByAccountItem } from "./financialSummaryReportProfitAndLossExpensesByAccountItem";
 import type { FinancialSummaryReportProfitAndLossExpensesByProgramItem } from "./financialSummaryReportProfitAndLossExpensesByProgramItem";
+import type { FinancialSummaryReportProfitAndLossIncomeByAccountItem } from "./financialSummaryReportProfitAndLossIncomeByAccountItem";
 import type { FinancialSummaryReportProfitAndLossIncomeByProgramItem } from "./financialSummaryReportProfitAndLossIncomeByProgramItem";
 
 export type FinancialSummaryReportProfitAndLoss = {
@@ -16,4 +18,6 @@ export type FinancialSummaryReportProfitAndLoss = {
   uncategorizedExpenses: number;
   totalExpenses: number;
   netIncome: number;
+  incomeByAccount: FinancialSummaryReportProfitAndLossIncomeByAccountItem[];
+  expensesByAccount: FinancialSummaryReportProfitAndLossExpensesByAccountItem[];
 };
