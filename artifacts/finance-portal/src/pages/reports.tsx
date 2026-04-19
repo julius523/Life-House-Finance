@@ -629,17 +629,37 @@ export default function ReportsPage() {
                   </dl>
                 </div>
               </div>
-              <div className="mt-6 flex items-center justify-between border-t-2 pt-3">
-                <div className="font-bold text-base">Equity (Assets − Liabilities)</div>
-                <div
-                  className={`font-bold text-lg ${
-                    data.balanceSheet.equity >= 0
-                      ? "text-success"
-                      : "text-destructive"
-                  }`}
-                >
-                  {fmtMoney(data.balanceSheet.equity)}
-                </div>
+              <div className="mt-6 border-t-2 pt-3">
+                <div className="font-semibold mb-2">Equity</div>
+                <dl className="text-sm divide-y">
+                  <Row
+                    k="Opening net assets"
+                    v={fmtMoney(data.balanceSheet.openingNetAssets)}
+                  />
+                  <Row
+                    k="Current period net income"
+                    v={fmtMoney(data.balanceSheet.currentPeriodNetIncome)}
+                    accent={
+                      data.balanceSheet.currentPeriodNetIncome >= 0
+                        ? "ok"
+                        : "warn"
+                    }
+                  />
+                  <div className="flex items-center justify-between py-2 border-t-2">
+                    <div className="font-bold text-base">
+                      Total equity (Assets − Liabilities)
+                    </div>
+                    <div
+                      className={`font-bold text-lg ${
+                        data.balanceSheet.equity >= 0
+                          ? "text-success"
+                          : "text-destructive"
+                      }`}
+                    >
+                      {fmtMoney(data.balanceSheet.equity)}
+                    </div>
+                  </div>
+                </dl>
               </div>
             </CardContent>
           </Card>

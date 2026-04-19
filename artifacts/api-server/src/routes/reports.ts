@@ -665,6 +665,12 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
         totalAssets,
         totalLiabilities,
         equity,
+        // Task 31 — split the single equity total into the two GAAP-style
+        // components (opening net assets carried forward + current period
+        // net income). Defining opening as `equity − currentPeriodNetIncome`
+        // guarantees the three rows reconcile to assets − liabilities.
+        currentPeriodNetIncome: totalIncome - totalExpenses,
+        openingNetAssets: equity - (totalIncome - totalExpenses),
         cashAccounts,
         accountsReceivableAccounts,
         otherAssetAccounts,

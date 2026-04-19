@@ -2613,6 +2613,18 @@ components:
               type: number
             equity:
               type: number
+            openingNetAssets:
+              type: number
+              description: |
+                Equity carried forward from periods strictly before fromDate.
+                Computed as `equity - currentPeriodNetIncome` so the three
+                equity rows always reconcile to assets − liabilities.
+            currentPeriodNetIncome:
+              type: number
+              description: |
+                Net income for the selected period (totalIncome −
+                totalExpenses). The change in net assets contributed by
+                activity inside [fromDate, toDate].
             cashAccounts:
               type: array
               description: |
@@ -2653,6 +2665,8 @@ components:
             - totalAssets
             - totalLiabilities
             - equity
+            - openingNetAssets
+            - currentPeriodNetIncome
             - cashAccounts
             - accountsReceivableAccounts
             - otherAssetAccounts

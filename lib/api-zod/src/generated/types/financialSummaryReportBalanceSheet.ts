@@ -39,6 +39,16 @@ mirrors unreimbursedExpenses.
   totalAssets: number;
   totalLiabilities: number;
   equity: number;
+  /** Equity carried forward from periods strictly before fromDate.
+Computed as `equity - currentPeriodNetIncome` so the three
+equity rows always reconcile to assets − liabilities.
+ */
+  openingNetAssets: number;
+  /** Net income for the selected period (totalIncome −
+totalExpenses). The change in net assets contributed by
+activity inside [fromDate, toDate].
+ */
+  currentPeriodNetIncome: number;
   /** Per-CoA-account rows that sum to the `cash` total (ledger
 source). Empty for the operational source.
  */

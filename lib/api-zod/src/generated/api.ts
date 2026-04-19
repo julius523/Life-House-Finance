@@ -1682,6 +1682,16 @@ export const GetFinancialSummaryReportResponse = zod.object({
     totalAssets: zod.number(),
     totalLiabilities: zod.number(),
     equity: zod.number(),
+    openingNetAssets: zod
+      .number()
+      .describe(
+        "Equity carried forward from periods strictly before fromDate.\nComputed as `equity - currentPeriodNetIncome` so the three\nequity rows always reconcile to assets − liabilities.\n",
+      ),
+    currentPeriodNetIncome: zod
+      .number()
+      .describe(
+        "Net income for the selected period (totalIncome −\ntotalExpenses). The change in net assets contributed by\nactivity inside [fromDate, toDate].\n",
+      ),
     cashAccounts: zod
       .array(
         zod
