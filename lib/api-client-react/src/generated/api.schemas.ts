@@ -9,6 +9,21 @@ export interface HealthStatus {
   status: string;
 }
 
+/**
+ * A single Chart-of-Accounts row contributing to a Balance Sheet bucket
+on the financial-summary report.
+
+ */
+export interface BalanceSheetAccount {
+  accountId: number;
+  code: string;
+  name: string;
+  /** Net balance expressed in the bucket's natural sign (positive when
+it adds to the parent total, negative when it offsets it).
+ */
+  balance: number;
+}
+
 export interface DashboardSummary {
   totalExpensesPending: number;
   totalExpensesThisMonth: number;
@@ -676,6 +691,18 @@ mirrors unreimbursedExpenses.
   totalAssets: number;
   totalLiabilities: number;
   equity: number;
+  /** Per-CoA-account rows that sum to the `cash` total (ledger
+source). Empty for the operational source.
+ */
+  cashAccounts: BalanceSheetAccount[];
+  /** Per-account rows summing to `accountsReceivable`. */
+  accountsReceivableAccounts: BalanceSheetAccount[];
+  /** Per-account rows summing to `otherAssets`. */
+  otherAssetAccounts: BalanceSheetAccount[];
+  /** Per-account rows summing to `accountsPayable`. */
+  accountsPayableAccounts: BalanceSheetAccount[];
+  /** Per-account rows summing to `otherLiabilities`. */
+  otherLiabilityAccounts: BalanceSheetAccount[];
 };
 
 export interface FinancialSummaryReport {

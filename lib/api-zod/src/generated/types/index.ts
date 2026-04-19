@@ -19,6 +19,7 @@ export * from "./approvalActionBody";
 export * from "./approvalQueueItem";
 export * from "./approvalQueueItemType";
 export * from "./approvalQueueItemUrgency";
+export * from "./balanceSheetAccount";
 export * from "./bill";
 export * from "./billStatus";
 export * from "./chartOfAccount";

@@ -1447,6 +1447,29 @@ components:
       required:
         - status
 
+    BalanceSheetAccount:
+      type: object
+      description: |
+        A single Chart-of-Accounts row contributing to a Balance Sheet bucket
+        on the financial-summary report.
+      properties:
+        accountId:
+          type: integer
+        code:
+          type: string
+        name:
+          type: string
+        balance:
+          type: number
+          description: |
+            Net balance expressed in the bucket's natural sign (positive when
+            it adds to the parent total, negative when it offsets it).
+      required:
+        - accountId
+        - code
+        - name
+        - balance
+
     DashboardSummary:
       type: object
       properties:
@@ -2590,6 +2613,33 @@ components:
               type: number
             equity:
               type: number
+            cashAccounts:
+              type: array
+              description: |
+                Per-CoA-account rows that sum to the `cash` total (ledger
+                source). Empty for the operational source.
+              items:
+                $ref: '#/components/schemas/BalanceSheetAccount'
+            accountsReceivableAccounts:
+              type: array
+              description: Per-account rows summing to `accountsReceivable`.
+              items:
+                $ref: '#/components/schemas/BalanceSheetAccount'
+            otherAssetAccounts:
+              type: array
+              description: Per-account rows summing to `otherAssets`.
+              items:
+                $ref: '#/components/schemas/BalanceSheetAccount'
+            accountsPayableAccounts:
+              type: array
+              description: Per-account rows summing to `accountsPayable`.
+              items:
+                $ref: '#/components/schemas/BalanceSheetAccount'
+            otherLiabilityAccounts:
+              type: array
+              description: Per-account rows summing to `otherLiabilities`.
+              items:
+                $ref: '#/components/schemas/BalanceSheetAccount'
           required:
             - cashOnHand
             - outstandingReceivables
@@ -2603,6 +2653,11 @@ components:
             - totalAssets
             - totalLiabilities
             - equity
+            - cashAccounts
+            - accountsReceivableAccounts
+            - otherAssetAccounts
+            - accountsPayableAccounts
+            - otherLiabilityAccounts
       required:
         - generatedAt
         - expenseTotalsByStatus

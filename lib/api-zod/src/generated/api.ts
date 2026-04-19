@@ -1682,6 +1682,98 @@ export const GetFinancialSummaryReportResponse = zod.object({
     totalAssets: zod.number(),
     totalLiabilities: zod.number(),
     equity: zod.number(),
+    cashAccounts: zod
+      .array(
+        zod
+          .object({
+            accountId: zod.number(),
+            code: zod.string(),
+            name: zod.string(),
+            balance: zod
+              .number()
+              .describe(
+                "Net balance expressed in the bucket's natural sign (positive when\nit adds to the parent total, negative when it offsets it).\n",
+              ),
+          })
+          .describe(
+            "A single Chart-of-Accounts row contributing to a Balance Sheet bucket\non the financial-summary report.\n",
+          ),
+      )
+      .describe(
+        "Per-CoA-account rows that sum to the `cash` total (ledger\nsource). Empty for the operational source.\n",
+      ),
+    accountsReceivableAccounts: zod
+      .array(
+        zod
+          .object({
+            accountId: zod.number(),
+            code: zod.string(),
+            name: zod.string(),
+            balance: zod
+              .number()
+              .describe(
+                "Net balance expressed in the bucket's natural sign (positive when\nit adds to the parent total, negative when it offsets it).\n",
+              ),
+          })
+          .describe(
+            "A single Chart-of-Accounts row contributing to a Balance Sheet bucket\non the financial-summary report.\n",
+          ),
+      )
+      .describe("Per-account rows summing to `accountsReceivable`."),
+    otherAssetAccounts: zod
+      .array(
+        zod
+          .object({
+            accountId: zod.number(),
+            code: zod.string(),
+            name: zod.string(),
+            balance: zod
+              .number()
+              .describe(
+                "Net balance expressed in the bucket's natural sign (positive when\nit adds to the parent total, negative when it offsets it).\n",
+              ),
+          })
+          .describe(
+            "A single Chart-of-Accounts row contributing to a Balance Sheet bucket\non the financial-summary report.\n",
+          ),
+      )
+      .describe("Per-account rows summing to `otherAssets`."),
+    accountsPayableAccounts: zod
+      .array(
+        zod
+          .object({
+            accountId: zod.number(),
+            code: zod.string(),
+            name: zod.string(),
+            balance: zod
+              .number()
+              .describe(
+                "Net balance expressed in the bucket's natural sign (positive when\nit adds to the parent total, negative when it offsets it).\n",
+              ),
+          })
+          .describe(
+            "A single Chart-of-Accounts row contributing to a Balance Sheet bucket\non the financial-summary report.\n",
+          ),
+      )
+      .describe("Per-account rows summing to `accountsPayable`."),
+    otherLiabilityAccounts: zod
+      .array(
+        zod
+          .object({
+            accountId: zod.number(),
+            code: zod.string(),
+            name: zod.string(),
+            balance: zod
+              .number()
+              .describe(
+                "Net balance expressed in the bucket's natural sign (positive when\nit adds to the parent total, negative when it offsets it).\n",
+              ),
+          })
+          .describe(
+            "A single Chart-of-Accounts row contributing to a Balance Sheet bucket\non the financial-summary report.\n",
+          ),
+      )
+      .describe("Per-account rows summing to `otherLiabilities`."),
   }),
 });
 

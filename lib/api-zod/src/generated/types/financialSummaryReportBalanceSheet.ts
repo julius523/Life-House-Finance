@@ -5,6 +5,7 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { BalanceSheetAccount } from "./balanceSheetAccount";
 
 export type FinancialSummaryReportBalanceSheet = {
   /** Net of reconciled credits minus reconciled debits. */
@@ -38,4 +39,16 @@ mirrors unreimbursedExpenses.
   totalAssets: number;
   totalLiabilities: number;
   equity: number;
+  /** Per-CoA-account rows that sum to the `cash` total (ledger
+source). Empty for the operational source.
+ */
+  cashAccounts: BalanceSheetAccount[];
+  /** Per-account rows summing to `accountsReceivable`. */
+  accountsReceivableAccounts: BalanceSheetAccount[];
+  /** Per-account rows summing to `otherAssets`. */
+  otherAssetAccounts: BalanceSheetAccount[];
+  /** Per-account rows summing to `accountsPayable`. */
+  accountsPayableAccounts: BalanceSheetAccount[];
+  /** Per-account rows summing to `otherLiabilities`. */
+  otherLiabilityAccounts: BalanceSheetAccount[];
 };

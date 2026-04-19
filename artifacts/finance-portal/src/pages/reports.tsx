@@ -545,6 +545,8 @@ export default function ReportsPage() {
               <CardTitle className="text-base">Balance Sheet</CardTitle>
               <CardDescription>
                 Snapshot as of {format(new Date(toDate), "MMM d, yyyy")}.
+                {source === "ledger" &&
+                  " Click a row to see the underlying accounts."}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -554,14 +556,20 @@ export default function ReportsPage() {
                   <dl className="text-sm divide-y">
                     {source === "ledger" ? (
                       <>
-                        <Row k="Cash" v={fmtMoney(data.balanceSheet.cash)} />
-                        <Row
+                        <ExpandableRow
+                          k="Cash"
+                          v={fmtMoney(data.balanceSheet.cash)}
+                          accounts={data.balanceSheet.cashAccounts}
+                        />
+                        <ExpandableRow
                           k="Accounts receivable"
                           v={fmtMoney(data.balanceSheet.accountsReceivable)}
+                          accounts={data.balanceSheet.accountsReceivableAccounts}
                         />
-                        <Row
+                        <ExpandableRow
                           k="Other assets"
                           v={fmtMoney(data.balanceSheet.otherAssets)}
+                          accounts={data.balanceSheet.otherAssetAccounts}
                         />
                       </>
                     ) : (
@@ -588,13 +596,15 @@ export default function ReportsPage() {
                   <dl className="text-sm divide-y">
                     {source === "ledger" ? (
                       <>
-                        <Row
+                        <ExpandableRow
                           k="Accounts payable"
                           v={fmtMoney(data.balanceSheet.accountsPayable)}
+                          accounts={data.balanceSheet.accountsPayableAccounts}
                         />
-                        <Row
+                        <ExpandableRow
                           k="Other liabilities"
                           v={fmtMoney(data.balanceSheet.otherLiabilities)}
+                          accounts={data.balanceSheet.otherLiabilityAccounts}
                         />
                       </>
                     ) : (
@@ -1078,6 +1088,73 @@ function Row({
     <div className="flex items-center justify-between py-2">
       <dt className="text-muted-foreground">{k}</dt>
       <dd className={`font-semibold ${cls ?? ""}`}>{v}</dd>
+    </div>
+  );
+}
+
+function ExpandableRow({
+  k,
+  v,
+  accounts,
+}: {
+  k: string;
+  v: string;
+  accounts: { accountId: number; code: string; name: string; balance: number }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const hasAccounts = accounts.length > 0;
+  return (
+    <div className="py-1">
+      <button
+        type="button"
+        onClick={() => hasAccounts && setOpen((o) => !o)}
+        disabled={!hasAccounts}
+        className={`flex w-full items-center justify-between py-1 text-left ${
+          hasAccounts
+            ? "cursor-pointer hover:text-foreground"
+            : "cursor-default"
+        }`}
+        data-testid={`bs-row-${k.replace(/\s+/g, "-").toLowerCase()}`}
+        aria-expanded={open}
+      >
+        <span className="text-muted-foreground inline-flex items-center gap-1.5">
+          {hasAccounts && (
+            <span className="text-xs text-muted-foreground tabular-nums w-3 inline-block">
+              {open ? "▾" : "▸"}
+            </span>
+          )}
+          {!hasAccounts && <span className="w-3 inline-block" />}
+          {k}
+        </span>
+        <span className="font-semibold">{v}</span>
+      </button>
+      {open && hasAccounts && (
+        <ul
+          className="mt-1 mb-1 ml-5 border-l pl-3 text-xs space-y-1"
+          data-testid={`bs-row-${k.replace(/\s+/g, "-").toLowerCase()}-accounts`}
+        >
+          {accounts.map((a) => (
+            <li
+              key={a.accountId}
+              className="flex items-center justify-between gap-3"
+            >
+              <span className="truncate">
+                <span className="font-mono text-muted-foreground mr-2">
+                  {a.code}
+                </span>
+                {a.name}
+              </span>
+              <span className="tabular-nums font-medium">
+                {new Intl.NumberFormat("en-US", {
+                  style: "currency",
+                  currency: "USD",
+                  minimumFractionDigits: 2,
+                }).format(a.balance)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -269,6 +269,15 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
   let totalLiabilities = 0;
   let equity = 0;
 
+  // Task 30 — per-CoA-account rows that make up each Balance Sheet bucket so
+  // the UI can expand a row inline and show the underlying accounts.
+  type BSAccount = { accountId: number; code: string; name: string; balance: number };
+  let cashAccounts: BSAccount[] = [];
+  let accountsReceivableAccounts: BSAccount[] = [];
+  let otherAssetAccounts: BSAccount[] = [];
+  let accountsPayableAccounts: BSAccount[] = [];
+  let otherLiabilityAccounts: BSAccount[] = [];
+
   if (source === "ledger") {
     // ----- Ledger-based P&L ------------------------------------------------
     // Sum activity per CoA row over [fromDate, toDate]; revenue accounts net
@@ -340,6 +349,65 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
         chartOfAccountsTable.subtype,
         chartOfAccountsTable.normalBalance,
       );
+    // Per-account breakdown (Task 30) — same WHERE/JOIN as bsRows above but
+    // grouped down to the individual CoA row so the UI can expand a Balance
+    // Sheet row and see which accounts contribute to it.
+    const bsAccountRows = await db
+      .select({
+        accountId: chartOfAccountsTable.id,
+        code: chartOfAccountsTable.code,
+        name: chartOfAccountsTable.name,
+        type: chartOfAccountsTable.type,
+        subtype: chartOfAccountsTable.subtype,
+        debits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'debit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+        credits: sql<number>`coalesce(sum(case when ${journalEntryLinesTable.type} = 'credit' then ${journalEntryLinesTable.amountCents} else 0 end), 0)::int`,
+      })
+      .from(journalEntryLinesTable)
+      .innerJoin(
+        journalEntriesTable,
+        eq(journalEntryLinesTable.journalEntryId, journalEntriesTable.id),
+      )
+      .innerJoin(
+        chartOfAccountsTable,
+        eq(journalEntryLinesTable.accountId, chartOfAccountsTable.id),
+      )
+      .where(and(...bsConds))
+      .groupBy(
+        chartOfAccountsTable.id,
+        chartOfAccountsTable.code,
+        chartOfAccountsTable.name,
+        chartOfAccountsTable.type,
+        chartOfAccountsTable.subtype,
+      );
+    for (const a of bsAccountRows) {
+      const d = Number(a.debits) / 100;
+      const c = Number(a.credits) / 100;
+      const row = { accountId: a.accountId, code: a.code, name: a.name, balance: 0 };
+      if (a.type === "asset") {
+        row.balance = d - c;
+        if (a.subtype === "cash") cashAccounts.push(row);
+        else if (a.subtype === "ar") accountsReceivableAccounts.push(row);
+        else otherAssetAccounts.push(row);
+      } else if (a.type === "contra_asset") {
+        row.balance = d - c; // typically negative — reduces assets
+        otherAssetAccounts.push(row);
+      } else if (a.type === "liability") {
+        row.balance = c - d;
+        if (a.subtype === "ap") accountsPayableAccounts.push(row);
+        else otherLiabilityAccounts.push(row);
+      } else if (a.type === "contra_liability") {
+        row.balance = c - d;
+        otherLiabilityAccounts.push(row);
+      }
+    }
+    const sortRows = (rows: BSAccount[]) =>
+      rows.sort((x, y) => x.code.localeCompare(y.code));
+    sortRows(cashAccounts);
+    sortRows(accountsReceivableAccounts);
+    sortRows(otherAssetAccounts);
+    sortRows(accountsPayableAccounts);
+    sortRows(otherLiabilityAccounts);
+
     for (const r of bsRows) {
       const debits = Number(r.debits) / 100;
       const credits = Number(r.credits) / 100;
@@ -597,6 +665,11 @@ router.get("/reports/financial-summary", async (req, res): Promise<void> => {
         totalAssets,
         totalLiabilities,
         equity,
+        cashAccounts,
+        accountsReceivableAccounts,
+        otherAssetAccounts,
+        accountsPayableAccounts,
+        otherLiabilityAccounts,
       },
     })
   );
