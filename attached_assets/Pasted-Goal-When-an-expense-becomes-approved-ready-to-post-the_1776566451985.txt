@@ -1,0 +1,266 @@
+Goal
+
+When an expense becomes approved / ready-to-post, the system should generate an accounting draft, not hit the ledger directly. That draft then goes through the existing manual JE workflow: draft → submit → approve → reject → post.
+
+That keeps one control path instead of two Franken-systems duct-taped together.
+
+Recommended sequence
+Task 1 — Expense category → CoA mapping foundation
+
+This is the keystone. Without it, the rest is guesswork with nicer typography.
+
+Build
+New mapping table:
+expense_category_account_mappings
+expense_category_id
+debit_account_id
+credit_account_id or a rule source
+optional method:
+cash_basis
+accrual_basis
+is_active
+timestamps / actor fields
+Admin endpoints:
+list mappings
+create/edit mapping
+deactivate mapping
+Admin UI:
+mapping list
+mapping edit form
+missing-mapping view
+Rules
+Only active CoA accounts can be selected
+Only allow_manual_posting=true accounts can be selected for manual-draft generation unless explicitly marked as system-only later
+One category should resolve deterministically
+Missing mapping must block draft generation cleanly
+Acceptance gate
+Every expense category either has exactly one active posting rule or is explicitly flagged unmapped.
+Task 2 — Expense → accounting draft generation
+
+This is the actual bridge.
+
+Trigger
+
+Default: on expense approval
+
+That is the right default unless you want true cash-basis operational posting behavior. Your earlier direction leans accrual/control-first, so approval is the clean move.
+
+Build
+
+When expense status becomes approved:
+
+resolve category mapping
+build JE draft lines
+create a manual journal entry draft
+attach traceability metadata back to the expense
+do not auto-submit
+do not auto-post
+Typical line logic
+
+For the first slice, keep it simple and explicit:
+
+Debit mapped expense account
+Credit mapped cash / clearing / payable account based on rule
+
+You can support:
+
+cash-style categories first
+payable-style categories in a later slice if needed
+Required outputs
+draft created successfully, with:
+source = expense
+source expense id
+created-by system/user indicator
+evidence snapshot / memo carrying expense context
+if blocked:
+expense marked accounting_blocked
+reason visible
+Acceptance gate
+Approved expense with valid mapping creates exactly one draft JE.
+Same expense does not generate duplicate drafts on retries.
+Task 3 — Traceability links both directions
+
+This is non-negotiable. If you skip this, future-you gets to play “find the accounting peanut” across five tables.
+
+Build
+On expense detail
+
+Show:
+
+linked JE draft
+linked posted JE
+accounting status:
+not started
+draft created
+submitted
+approved
+posted
+blocked
+On JE draft / JE detail
+
+Show:
+
+originating expense
+expense number / title / vendor / amount / approval date
+back-link to expense detail
+Data model
+
+Add explicit backlink fields, not vibes:
+
+on draft: source_type='expense', source_id
+on JE: either inherited through draft, or explicit nullable expense FK/reference metadata
+Acceptance gate
+From expense, one click reaches draft/JE.
+From JE, one click reaches originating expense.
+Task 4 — Missing mapping / blocked accounting queue
+
+Finance needs a queue of “why didn’t this flow?”
+
+Build
+
+New queue/report:
+
+approved expenses with no accounting draft
+blocked because:
+missing category mapping
+archived account
+inactive account
+non-manual-postable account
+closed period
+invalid amount
+duplicate generation prevented
+UI
+
+Simple table with:
+
+expense
+category
+block reason
+action link
+Acceptance gate
+Finance can see every approved expense that failed accounting generation, and why.
+Task 5 — Idempotent draft generation
+
+You already learned this lesson the fun way: duplicate financial records are bad for stress levels and blood pressure.
+
+Build
+
+For generation from expense:
+
+deterministic idempotency key such as:
+expense-draft-{expenseId}
+unique constraint on source link or idempotency key
+replay returns existing draft
+changed payload with same logical source should return conflict or force explicit regeneration flow
+Acceptance gate
+repeated approval hooks or retry storms create one draft, not many.
+Task 6 — Workflow handoff into the existing JE approval flow
+
+Do not build a parallel “expense accounting approval” path.
+
+Reuse
+
+Existing:
+
+draft JE persistence
+submit / approve / reject / post
+no-self-approval
+approval history
+optimistic locking
+idempotent posting
+Requirement
+
+Generated expense drafts must behave like first-class manual drafts, just with source metadata.
+
+Acceptance gate
+An expense-generated draft can be submitted, approved, rejected, and posted using the same server path as manual JE drafts.
+Suggested task split
+Task A — Mapping foundation
+schema
+endpoints
+admin UI
+missing-mapping report
+Task B — Expense → draft generator
+trigger on approval
+mapping resolution
+draft creation
+idempotency
+blocked-state recording
+Task C — Traceability UI
+expense detail backlink
+JE detail backlink
+accounting status badges
+Task D — Validation + regression battery
+generation tests
+duplicate prevention
+missing mapping
+archived/inactive account blocking
+full workflow proof through posting
+regression against existing manual JE flow
+Posting trigger recommendation
+My recommendation
+
+Generate draft on expense approval
+
+Why:
+
+best control point
+clean audit chain
+mirrors normal accounting review flow
+keeps ledger impact gated behind the existing approval/post pipeline
+easier to reconcile than “wait until payment” for the first slice
+Not for this first slice
+
+Generating on payment is more cash-basis-friendly, but it complicates:
+
+partial payments
+timing differences
+whether approval exists before payment
+linkage with bills later
+
+Start on approval. Add payment-aware behavior later where it actually belongs.
+
+Minimal data additions I’d expect
+
+On expense or related accounting bridge table:
+
+accounting_status
+accounting_block_reason
+accounting_draft_id
+posted_journal_entry_id
+accounting_generated_at
+
+Or use a dedicated link table if you want cleaner normalization:
+
+expense_accounting_links
+expense_id
+manual_journal_entry_draft_id
+journal_entry_id
+status
+block_reason
+timestamps
+
+I slightly prefer the link table if you know bills are coming right behind it.
+
+Hard acceptance gates
+
+This slice is not done unless all of these are true:
+
+Approved expense with a valid mapping creates exactly one JE draft.
+No expense can silently post directly to the ledger.
+Duplicate triggers/retries do not create duplicate drafts.
+Missing mapping blocks generation with a visible reason.
+Archived/inactive/non-postable CoA accounts block generation cleanly.
+Expense-generated drafts use the existing JE draft workflow, not a parallel path.
+Expense detail and JE detail show two-way traceability.
+Audit trail shows who approved the expense, who submitted the JE draft, who approved the draft, and who posted it.
+Existing manual JE workflow regressions stay green.
+Trial Balance is only affected after the draft is actually posted.
+What comes immediately after
+
+Once this slice is solid:
+
+Bills → draft JE / A/P flow
+Operational vs ledger tie-out screen
+Copilot-assisted expense posting explanations
+Eventually: optional auto-submit rules
