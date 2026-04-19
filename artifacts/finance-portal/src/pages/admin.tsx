@@ -18,6 +18,7 @@ import {
   getListAdminNotificationsQueryKey,
   getGetEmailSettingsQueryKey,
   type EmailTemplate,
+  type AdminNotification as AdminNotificationDTO,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -594,15 +595,10 @@ function ChangePasswordDialog({
 }
 
 
-type TemplateForm = {
-  type: string;
-  subject: string;
-  body: string;
-  defaultSubject: string;
-  defaultBody: string;
-  variables: string[];
-  sampleVariables: Record<string, string>;
-};
+// Use the generated EmailTemplate DTO (lib/api-client-react) directly so the
+// form shape stays in lockstep with the API contract; no local mirror to
+// drift out of sync when the spec evolves.
+type TemplateForm = EmailTemplate;
 
 const TEMPLATE_LABELS: Record<string, string> = {
   bill_needs_correction: "Bill sent back for correction",
@@ -983,23 +979,10 @@ function EmailSettingsCard() {
   );
 }
 
-type AdminNotification = {
-  id: number;
-  userId: number;
-  type: string;
-  title: string;
-  body: string;
-  link?: string;
-  emailTo?: string;
-  emailStatus: "sent" | "failed" | "not_attempted";
-  emailError?: string;
-  emailSentAt?: string;
-  emailLastAttemptAt?: string;
-  emailAttempts: number;
-  createdAt: string;
-  recipientName?: string;
-  recipientEmail?: string;
-};
+// Use the generated AdminNotification DTO directly so the row shape stays
+// in lockstep with the API contract. The generated type includes the
+// AdminNotificationEmailStatus enum, replacing the local string union.
+type AdminNotification = AdminNotificationDTO;
 
 function EmailDeliveryCard() {
   const { toast } = useToast();

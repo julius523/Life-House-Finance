@@ -1,0 +1,266 @@
+Good. The backend is there. The obvious next move is to finish the operator-facing half so posted-entry remediation is actually usable instead of technically possible but practically stranded.
+
+Next slice: posted-entry corrective UI + closeout cleanups
+
+Goal
+
+Turn the new posted-entry remediation backend into a real finance workflow.
+
+Right now:
+
+* draft failures can be fixed,
+* posted failures are detectable,
+* posted corrective APIs exist,
+
+but the queue still leaves posted rows effectively dead-ended with “Locked.”
+
+That is the gap.
+
+⸻
+
+Task focus
+
+1. Add posted-row action flow on /accounting/remediation
+
+For rows tied to posted journal entries, replace the passive “Locked” state with an action menu.
+
+Actions:
+
+* Reverse and replace
+* Create adjusting entry
+
+Do not expose any direct edit path for posted entries.
+
+2. Add a corrective-action dialog
+
+When a user clicks a posted-row action, open a modal with:
+
+Shared fields
+
+* required note / justification
+* failure code summary
+* JE number
+* memo
+* line details
+* source link if present
+
+If reverse_and_replace
+
+Show:
+
+* original JE summary
+* replacement draft preview or replacement-line editor
+* explicit warning that original entry will be reversed, not mutated
+
+If adjusting_entry
+
+Show:
+
+* affected account / line summary
+* adjustment lines editor
+* balancing enforcement before submit
+
+No silent defaults that can create garbage. Finance tools are where optimism goes to die.
+
+⸻
+
+Backend/UI contract to honor
+
+Use the shipped endpoint:
+
+* POST /accounting/journal-entries/:id/remediate
+
+Body should stay explicit:
+
+* action: "reverse_and_replace" | "adjusting_entry"
+* note
+* action-specific payload
+
+Map server responses cleanly:
+
+* 403 → forbidden
+* 409 → period locked / state conflict
+* 400 → invalid corrective payload
+
+Do not flatten all errors into “something went wrong.” That is how accounting teams start throwing staplers.
+
+⸻
+
+Builder-ready acceptance criteria
+
+A. Queue behavior
+
+* Posted rows show actionable controls, not dead text.
+* Draft rows still use the existing inline repoint flow.
+* Mixed queues remain filterable and stable.
+
+B. Corrective dialog
+
+* Can open from a posted remediation row.
+* Shows the exact failing entry and reason.
+* Requires a note before submit.
+* Prevents submission with incomplete action-specific fields.
+
+C. Mutation results
+
+After successful remediation:
+
+* queue refreshes
+* counts refresh
+* reconciliation deep-link state stays sane
+* user lands on either:
+    * created replacement draft / JE detail, or
+    * refreshed remediation queue with success toast
+
+D. Auditability
+
+Every posted corrective action must still write:
+
+* actor
+* target JE id
+* action type
+* note
+* old/new linkage if applicable
+
+E. No illegal shortcuts
+
+* no in-place edit of posted JE lines
+* no bypass of hardened reverse/post services
+* no direct write to journal_entries outside existing controlled paths
+
+⸻
+
+UI implementation instructions
+
+On the remediation page
+
+For each row:
+
+* if status === draft, show existing repoint/fix action
+* if status === posted, show menu:
+    * Reverse and replace
+    * Adjusting entry
+
+Add a modal component
+
+Suggested component split:
+
+* PostedRemediationDialog
+* ReverseAndReplaceForm
+* AdjustingEntryForm
+
+State to manage:
+
+* selected remediation row
+* selected action
+* note
+* line payload
+* submitting
+* server error
+
+Query invalidation after submit
+
+Invalidate:
+
+* remediation list
+* remediation counts
+* reconciliation report
+* affected JE detail
+* journal entries list
+
+That last one gets missed constantly and then people think the app lied.
+
+⸻
+
+Exact payload rules
+
+Reverse and replace
+
+Use when:
+
+* wrong/missing account mapping
+* structurally bad posted JE that should be replaced wholesale
+
+Require:
+
+* note
+* replacement lines
+* balanced replacement total
+* valid active postable accounts
+
+Adjusting entry
+
+Use when:
+
+* original entry should remain historically true
+* only the accounting position needs correction
+
+Require:
+
+* note
+* adjustment lines
+* balanced entry
+* valid active postable accounts
+
+⸻
+
+Edge cases you should explicitly handle
+
+* period locked
+* JE already reversed by another user
+* stale remediation row after queue refresh
+* archived/non-postable account selected in correction form
+* linked source record missing
+* duplicate submit click
+* partial replacement payload
+* server returns corrective success but source row still visible until refetch
+
+Use disabled submit states and optimistic UI carefully. This is not a chat bubble. It is accounting.
+
+⸻
+
+Tiny cleanup bundle for the same slice
+
+Fold these in now so they stop hanging around like unmatched socks:
+
+1. Replace local aliases in admin.tsx
+
+Swap:
+
+* TemplateForm
+* AdminNotification
+
+for generated DTO-backed types where safe.
+
+2. Fix the copilot query typing issue
+
+Resolve the pre-existing useGetCopilotThread queryKey typing problem in accounting.tsx.
+
+These are not worthy of their own dramatic saga.
+
+⸻
+
+Suggested implementation order
+
+1. Add posted-row action menu on remediation page
+2. Build PostedRemediationDialog
+3. Wire reverse_and_replace flow
+4. Wire adjusting_entry flow
+5. Add proper invalidations + redirects/toasts
+6. Bundle the two micro-cleanups
+7. Smoke test:
+    * posted row opens dialog
+    * forbidden user blocked
+    * period lock returns 409 message
+    * successful correction clears/updates queue
+
+⸻
+
+Done looks like
+
+Finance can open a posted integrity failure from the remediation queue, choose the right corrective path, submit it with a required note, and the system resolves it through the hardened accounting services with full audit trail and no direct mutation of posted rows.
+
+After that, the next sensible slice is:
+
+* stronger remediation drilldowns and source context polish, or
+* broader copilot reconciliation hardening if that is still queued.

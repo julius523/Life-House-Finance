@@ -199,7 +199,10 @@ export default function AccountingPage() {
     data: activeThreadData,
     isFetching: loadingActiveThread,
     error: activeThreadError,
-  } = useGetCopilotThread(activeThreadId ?? 0, {
+  } = useGetCopilotThread(activeThreadId as number, {
+    // Hook is disabled when no thread is selected; the cast keeps the
+    // generated id parameter (number) honest without the misleading `?? 0`
+    // sentinel that would otherwise pollute the query cache key.
     query: { enabled: activeThreadId !== null },
   });
   useEffect(() => {
