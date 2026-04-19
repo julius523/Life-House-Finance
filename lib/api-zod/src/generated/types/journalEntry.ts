@@ -5,6 +5,7 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { AccountingPeriodSummary } from "./accountingPeriodSummary";
 import type { JournalEntryActor } from "./journalEntryActor";
 import type { JournalEntryLine } from "./journalEntryLine";
 import type { JournalEntrySource } from "./journalEntrySource";
@@ -36,5 +37,6 @@ export interface JournalEntry {
   lines?: JournalEntryLine[];
   source?: JournalEntrySource;
   originatingExpense?: OriginatingExpenseSummary | null;
+  period?: AccountingPeriodSummary | null;
   [key: string]: unknown;
 }

@@ -34,7 +34,11 @@ import {
   useListJournalEntries,
   useListJournalEntryDrafts,
   useDeleteJournalEntryDraft,
+  useListAccountingPeriods,
+  useCreateAccountingPeriod,
+  useCloseAccountingPeriod,
   getListJournalEntryDraftsQueryKey,
+  getListAccountingPeriodsQueryKey,
   ListJournalEntriesStatus,
   ListJournalEntriesSource,
   type ListJournalEntriesParams,
@@ -49,9 +53,11 @@ import {
   Download,
   FileEdit,
   Filter,
+  Lock,
   Plus,
   Sparkles,
   Trash2,
+  Unlock,
   User,
 } from "lucide-react";
 
@@ -89,6 +95,23 @@ type JournalEntry = {
     eventType: "accrual" | "payment";
     vendorName: string;
   } | null;
+  // Task #48 — covering accounting period (if any). When status is
+  // "closed", the entry is locked and corrections must go through a
+  // reversing entry.
+  period?: {
+    id: number;
+    label: string;
+    status: "open" | "closed";
+  } | null;
+};
+
+type AccountingPeriod = {
+  id: number;
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  status: "open" | "closed";
+  closedAt: string | null;
 };
 
 function actorName(a: EntryActor | null): string {
@@ -182,6 +205,73 @@ export default function JournalEntriesListPage() {
 
   const queryClient = useQueryClient();
   const deleteDraftMut = useDeleteJournalEntryDraft();
+
+  // Task #48 — accounting periods admin block. Only admins can create or
+  // close periods, but approvers can also view them so they understand
+  // why a post might be rejected.
+  const isAdmin = user?.role === "admin";
+  const { data: periodsData } = useListAccountingPeriods({
+    query: { enabled: canView },
+  });
+  const periods = ((periodsData as { periods?: AccountingPeriod[] } | undefined)
+    ?.periods ?? []) as AccountingPeriod[];
+  const createPeriodMut = useCreateAccountingPeriod();
+  const closePeriodMut = useCloseAccountingPeriod();
+  const [periodLabel, setPeriodLabel] = useState("");
+  const [periodStart, setPeriodStart] = useState("");
+  const [periodEnd, setPeriodEnd] = useState("");
+
+  const refreshPeriods = () => {
+    queryClient.invalidateQueries({
+      queryKey: getListAccountingPeriodsQueryKey(),
+    });
+  };
+
+  const createPeriod = async () => {
+    if (!periodLabel || !periodStart || !periodEnd) return;
+    try {
+      await createPeriodMut.mutateAsync({
+        data: {
+          label: periodLabel,
+          periodStart,
+          periodEnd,
+        },
+      });
+      toast({ title: "Period created" });
+      setPeriodLabel("");
+      setPeriodStart("");
+      setPeriodEnd("");
+      refreshPeriods();
+    } catch (e) {
+      toast({
+        title: "Could not create period",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const closePeriod = async (id: number, label: string) => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Close period "${label}"? Posts dated within this period will be rejected.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await closePeriodMut.mutateAsync({ id });
+      toast({ title: "Period closed" });
+      refreshPeriods();
+    } catch (e) {
+      toast({
+        title: "Could not close period",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
 
   const [includeLines, setIncludeLines] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -450,6 +540,144 @@ export default function JournalEntriesListPage() {
         </CardContent>
       </Card>
 
+      <Card data-testid="card-accounting-periods">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Lock className="h-4 w-4 text-muted-foreground" />
+            Accounting periods
+          </CardTitle>
+          <CardDescription>
+            Closed periods are locked: posts dated inside them are rejected
+            and corrections must go through reversing entries.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {isAdmin && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+              <div className="space-y-1.5">
+                <Label htmlFor="period-label">Label</Label>
+                <Input
+                  id="period-label"
+                  placeholder="e.g. 2026-04"
+                  value={periodLabel}
+                  onChange={(e) => setPeriodLabel(e.target.value)}
+                  data-testid="input-period-label"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="period-start">Start</Label>
+                <Input
+                  id="period-start"
+                  type="date"
+                  value={periodStart}
+                  onChange={(e) => setPeriodStart(e.target.value)}
+                  data-testid="input-period-start"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="period-end">End</Label>
+                <Input
+                  id="period-end"
+                  type="date"
+                  value={periodEnd}
+                  onChange={(e) => setPeriodEnd(e.target.value)}
+                  data-testid="input-period-end"
+                />
+              </div>
+              <Button
+                onClick={createPeriod}
+                disabled={
+                  !periodLabel ||
+                  !periodStart ||
+                  !periodEnd ||
+                  createPeriodMut.isPending
+                }
+                data-testid="button-create-period"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                {createPeriodMut.isPending ? "Creating…" : "Add period"}
+              </Button>
+            </div>
+          )}
+          {periods.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              No accounting periods defined yet.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[140px]">Label</TableHead>
+                    <TableHead className="w-[140px]">Start</TableHead>
+                    <TableHead className="w-[140px]">End</TableHead>
+                    <TableHead className="w-[120px]">Status</TableHead>
+                    <TableHead className="w-[180px]">Closed at</TableHead>
+                    <TableHead className="w-[120px] text-right" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {periods.map((p) => (
+                    <TableRow
+                      key={p.id}
+                      data-testid={`row-period-${p.id}`}
+                    >
+                      <TableCell className="font-medium">{p.label}</TableCell>
+                      <TableCell>
+                        {format(parseDateOnly(p.periodStart), "MMM d, yyyy")}
+                      </TableCell>
+                      <TableCell>
+                        {format(parseDateOnly(p.periodEnd), "MMM d, yyyy")}
+                      </TableCell>
+                      <TableCell>
+                        {p.status === "closed" ? (
+                          <Badge
+                            variant="destructive"
+                            className="gap-1"
+                            data-testid={`badge-period-status-${p.id}`}
+                          >
+                            <Lock className="h-3 w-3" />
+                            Closed
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="secondary"
+                            className="gap-1"
+                            data-testid={`badge-period-status-${p.id}`}
+                          >
+                            <Unlock className="h-3 w-3" />
+                            Open
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {p.closedAt
+                          ? format(new Date(p.closedAt), "MMM d, p")
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {isAdmin && p.status === "open" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => closePeriod(p.id, p.label)}
+                            disabled={closePeriodMut.isPending}
+                            data-testid={`button-close-period-${p.id}`}
+                          >
+                            <Lock className="h-4 w-4 mr-1" />
+                            Close
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card id="drafts" className="scroll-mt-20">
         <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2">
           <div>
@@ -676,6 +904,7 @@ export default function JournalEntriesListPage() {
                     <TableHead>Memo</TableHead>
                     <TableHead className="w-[140px] text-right">Total</TableHead>
                     <TableHead className="w-[110px]">Source</TableHead>
+                    <TableHead className="w-[140px]">Period</TableHead>
                     <TableHead className="w-[110px]">Status</TableHead>
                     <TableHead className="w-[160px]">Posted</TableHead>
                     <TableHead className="w-[180px]">Posted by</TableHead>
@@ -766,6 +995,29 @@ export default function JournalEntriesListPage() {
                               <User className="h-3 w-3" />
                               Manual
                             </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell data-testid={`text-period-${e.id}`}>
+                          {e.period ? (
+                            e.period.status === "closed" ? (
+                              <Badge
+                                variant="destructive"
+                                className="gap-1"
+                                title="This period is closed — entries within it are locked."
+                              >
+                                <Lock className="h-3 w-3" />
+                                {e.period.label}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="gap-1">
+                                <Unlock className="h-3 w-3" />
+                                {e.period.label}
+                              </Badge>
+                            )
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              —
+                            </span>
                           )}
                         </TableCell>
                         <TableCell>

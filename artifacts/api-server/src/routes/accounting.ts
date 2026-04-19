@@ -1690,12 +1690,19 @@ type OriginatingExpenseSummary = {
   approvedAt: string | null;
 };
 
+type AccountingPeriodSummary = {
+  id: number;
+  label: string;
+  status: "open" | "closed";
+};
+
 function serializeJournalEntry(
   je: typeof journalEntriesTable.$inferSelect,
   lines?: Array<typeof journalEntryLinesTable.$inferSelect>,
   users?: Map<number, typeof usersTable.$inferSelect>,
   originatingExpense?: OriginatingExpenseSummary | null,
   originatingBill?: OriginatingBillSummary | null,
+  period?: AccountingPeriodSummary | null,
 ) {
   return {
     id: je.id,
@@ -1729,8 +1736,48 @@ function serializeJournalEntry(
     originatingExpense: originatingExpense ?? null,
     // Task #63 — bill-sourced entries set this; otherwise null.
     originatingBill: originatingBill ?? null,
+    // Task #48 — surface the accounting period this entry falls into so
+    // the UI can show whether it's locked. Null when no period covers
+    // entryDate (e.g. legacy data posted before period coverage).
+    period: period ?? null,
     ...(lines ? { lines } : {}),
   };
+}
+
+/**
+ * Task #48 — load all accounting periods once and resolve a covering
+ * period for each entry by date in JS. Periods are non-overlapping and
+ * few in number (usually one per month), so a single SELECT is cheaper
+ * than per-entry lookups.
+ */
+async function loadPeriodsByEntryDate(
+  entryDates: string[],
+): Promise<Map<string, AccountingPeriodSummary>> {
+  const out = new Map<string, AccountingPeriodSummary>();
+  if (entryDates.length === 0) return out;
+  const rows = await db
+    .select({
+      id: accountingPeriodsTable.id,
+      label: accountingPeriodsTable.label,
+      status: accountingPeriodsTable.status,
+      periodStart: accountingPeriodsTable.periodStart,
+      periodEnd: accountingPeriodsTable.periodEnd,
+    })
+    .from(accountingPeriodsTable);
+  const distinct = Array.from(new Set(entryDates));
+  for (const d of distinct) {
+    const hit = rows.find(
+      (r) => r.periodStart <= d && r.periodEnd >= d,
+    );
+    if (hit) {
+      out.set(d, {
+        id: hit.id,
+        label: hit.label,
+        status: (hit.status === "closed" ? "closed" : "open"),
+      });
+    }
+  }
+  return out;
 }
 
 function deriveJournalEntrySource(
@@ -2589,6 +2636,11 @@ router.get(
     const billsByJeId = await loadOriginatingBillsForJournalEntries(
       rows.map((r) => ({ id: r.id, manualDraftId: r.manualDraftId })),
     );
+    // Task #48 — surface the covering accounting period so the UI can
+    // show whether each entry is now locked behind a closed period.
+    const periodsByDate = await loadPeriodsByEntryDate(
+      rows.map((r) => r.entryDate),
+    );
     res.json({
       entries: rows.map((r) =>
         serializeJournalEntry(
@@ -2597,6 +2649,7 @@ router.get(
           users,
           byJournalEntryId.get(r.id) ?? null,
           billsByJeId.get(r.id) ?? null,
+          periodsByDate.get(r.entryDate) ?? null,
         ),
       ),
       total: totalRow[0]?.count ?? 0,
@@ -2711,6 +2764,7 @@ router.get(
     const billsByJeId = await loadOriginatingBillsForJournalEntries(
       [{ id: je.id, manualDraftId: je.manualDraftId }],
     );
+    const periodsByDate = await loadPeriodsByEntryDate([je.entryDate]);
     res.json({
       journalEntry: serializeJournalEntry(
         je,
@@ -2718,6 +2772,7 @@ router.get(
         users,
         byJournalEntryId.get(je.id) ?? null,
         billsByJeId.get(je.id) ?? null,
+        periodsByDate.get(je.entryDate) ?? null,
       ),
     });
   },

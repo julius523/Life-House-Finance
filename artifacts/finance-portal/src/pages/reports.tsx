@@ -3,6 +3,7 @@ import {
   useGetFinancialSummaryReport,
   useGetTrialBalanceReport,
   useGetAccountActivityReport,
+  useListAccountingPeriods,
 } from "@workspace/api-client-react";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -10,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Printer, BarChart3 } from "lucide-react";
+import { Printer, BarChart3, Lock } from "lucide-react";
 import { format } from "date-fns";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PeriodDraftsBanner } from "@/components/period-drafts-banner";
@@ -46,6 +47,29 @@ export default function ReportsPage() {
     .split("T")[0]!;
   const [fromDate, setFromDate] = useState<string>(monthAgo);
   const [toDate, setToDate] = useState<string>(today);
+
+  // Task #48 — show a banner when the report range overlaps any closed
+  // accounting period so reviewers know those numbers are locked.
+  const { data: periodsData } = useListAccountingPeriods();
+  const closedOverlaps = useMemo(() => {
+    const all = (periodsData as
+      | {
+          periods?: Array<{
+            id: number;
+            label: string;
+            periodStart: string;
+            periodEnd: string;
+            status: "open" | "closed";
+          }>;
+        }
+      | undefined)?.periods ?? [];
+    return all.filter(
+      (p) =>
+        p.status === "closed" &&
+        p.periodStart <= toDate &&
+        p.periodEnd >= fromDate,
+    );
+  }, [periodsData, fromDate, toDate]);
 
   const iso = (d: Date) => d.toISOString().split("T")[0]!;
   const setRange = (from: Date, to: Date) => {
@@ -284,6 +308,27 @@ export default function ReportsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
+          {closedOverlaps.length > 0 && (
+            <div
+              className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm"
+              data-testid="banner-closed-period-overlap"
+            >
+              <Lock className="h-4 w-4 mt-0.5 text-destructive shrink-0" />
+              <div>
+                <div className="font-medium">
+                  This range overlaps closed periods
+                </div>
+                <div className="text-muted-foreground">
+                  Numbers in{" "}
+                  {closedOverlaps
+                    .map((p) => p.label)
+                    .join(", ")}{" "}
+                  are locked. Corrections must be made via reversing entries
+                  in an open period.
+                </div>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
             <div className="space-y-1.5">
               <Label htmlFor="from">From</Label>

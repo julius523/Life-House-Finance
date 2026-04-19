@@ -36,11 +36,14 @@ import type {
   ChartOfAccountDetailResponse,
   ChartOfAccountListResponse,
   ChartOfAccountResponse,
+  CloseAccountingPeriod200,
   ContactBody,
   ConvertTransactionToBill200,
   ConvertTransactionToBillBody,
   ConvertTransactionToExpense200,
   ConvertTransactionToExpenseBody,
+  CreateAccountingPeriod201,
+  CreateAccountingPeriodBody,
   CreateBillBody,
   CreateChartOfAccountBody,
   CreateCopilotThread200,
@@ -103,6 +106,7 @@ import type {
   LinkTransactionToBillBody,
   LinkTransactionToExpenseBody,
   LinkTransactionToProgramBody,
+  ListAccountingPeriods200,
   ListAdminUsers200,
   ListAgentActions200,
   ListAgentActionsParams,
@@ -10131,6 +10135,258 @@ export const useCancelAgentAction = <
   TContext
 > => {
   return useMutation(getCancelAgentActionMutationOptions(options));
+};
+
+/**
+ * @summary List accounting periods (admin/approver only)
+ */
+export const getListAccountingPeriodsUrl = () => {
+  return `/api/accounting/periods`;
+};
+
+export const listAccountingPeriods = async (
+  options?: RequestInit,
+): Promise<ListAccountingPeriods200> => {
+  return customFetch<ListAccountingPeriods200>(getListAccountingPeriodsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAccountingPeriodsQueryKey = () => {
+  return [`/api/accounting/periods`] as const;
+};
+
+export const getListAccountingPeriodsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAccountingPeriods>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAccountingPeriods>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListAccountingPeriodsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAccountingPeriods>>
+  > = ({ signal }) => listAccountingPeriods({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAccountingPeriods>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAccountingPeriodsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAccountingPeriods>>
+>;
+export type ListAccountingPeriodsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List accounting periods (admin/approver only)
+ */
+
+export function useListAccountingPeriods<
+  TData = Awaited<ReturnType<typeof listAccountingPeriods>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAccountingPeriods>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAccountingPeriodsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create an accounting period (admin only)
+ */
+export const getCreateAccountingPeriodUrl = () => {
+  return `/api/accounting/periods`;
+};
+
+export const createAccountingPeriod = async (
+  createAccountingPeriodBody: CreateAccountingPeriodBody,
+  options?: RequestInit,
+): Promise<CreateAccountingPeriod201> => {
+  return customFetch<CreateAccountingPeriod201>(
+    getCreateAccountingPeriodUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createAccountingPeriodBody),
+    },
+  );
+};
+
+export const getCreateAccountingPeriodMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAccountingPeriod>>,
+    TError,
+    { data: BodyType<CreateAccountingPeriodBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createAccountingPeriod>>,
+  TError,
+  { data: BodyType<CreateAccountingPeriodBody> },
+  TContext
+> => {
+  const mutationKey = ["createAccountingPeriod"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createAccountingPeriod>>,
+    { data: BodyType<CreateAccountingPeriodBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createAccountingPeriod(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateAccountingPeriodMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createAccountingPeriod>>
+>;
+export type CreateAccountingPeriodMutationBody =
+  BodyType<CreateAccountingPeriodBody>;
+export type CreateAccountingPeriodMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create an accounting period (admin only)
+ */
+export const useCreateAccountingPeriod = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAccountingPeriod>>,
+    TError,
+    { data: BodyType<CreateAccountingPeriodBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createAccountingPeriod>>,
+  TError,
+  { data: BodyType<CreateAccountingPeriodBody> },
+  TContext
+> => {
+  return useMutation(getCreateAccountingPeriodMutationOptions(options));
+};
+
+/**
+ * @summary Close an accounting period (admin only)
+ */
+export const getCloseAccountingPeriodUrl = (id: number) => {
+  return `/api/accounting/periods/${id}/close`;
+};
+
+export const closeAccountingPeriod = async (
+  id: number,
+  options?: RequestInit,
+): Promise<CloseAccountingPeriod200> => {
+  return customFetch<CloseAccountingPeriod200>(
+    getCloseAccountingPeriodUrl(id),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getCloseAccountingPeriodMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof closeAccountingPeriod>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof closeAccountingPeriod>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["closeAccountingPeriod"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof closeAccountingPeriod>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return closeAccountingPeriod(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CloseAccountingPeriodMutationResult = NonNullable<
+  Awaited<ReturnType<typeof closeAccountingPeriod>>
+>;
+
+export type CloseAccountingPeriodMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Close an accounting period (admin only)
+ */
+export const useCloseAccountingPeriod = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof closeAccountingPeriod>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof closeAccountingPeriod>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getCloseAccountingPeriodMutationOptions(options));
 };
 
 /**

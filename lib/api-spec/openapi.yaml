@@ -2640,6 +2640,80 @@ paths:
                 type: object
                 additionalProperties: true
 
+  /accounting/periods:
+    get:
+      operationId: listAccountingPeriods
+      tags: [accounting]
+      summary: List accounting periods (admin/approver only)
+      responses:
+        "200":
+          description: Periods
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  periods:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AccountingPeriod"
+                required: [periods]
+    post:
+      operationId: createAccountingPeriod
+      tags: [accounting]
+      summary: Create an accounting period (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+                periodStart:
+                  type: string
+                periodEnd:
+                  type: string
+                status:
+                  type: string
+                  enum: [open, closed]
+              required: [label, periodStart, periodEnd]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period:
+                    $ref: "#/components/schemas/AccountingPeriod"
+                required: [period]
+
+  /accounting/periods/{id}/close:
+    post:
+      operationId: closeAccountingPeriod
+      tags: [accounting]
+      summary: Close an accounting period (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Closed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period:
+                    $ref: "#/components/schemas/AccountingPeriod"
+                required: [period]
+
   /accounting/journal-entries:
     post:
       operationId: createJournalEntry
@@ -5973,11 +6047,52 @@ components:
         originatingExpense:
           $ref: "#/components/schemas/OriginatingExpenseSummary"
           nullable: true
+        period:
+          $ref: "#/components/schemas/AccountingPeriodSummary"
+          nullable: true
       required:
         - id
         - entryNo
         - entryDate
         - status
+
+    AccountingPeriodSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        status:
+          type: string
+          enum: [open, closed]
+      required: [id, label, status]
+
+    AccountingPeriod:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        periodStart:
+          type: string
+        periodEnd:
+          type: string
+        status:
+          type: string
+          enum: [open, closed]
+        closedAt:
+          type: string
+          nullable: true
+        closedByUserId:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+      required: [id, label, periodStart, periodEnd, status]
 
     ApprovalEvent:
       type: object

@@ -1697,6 +1697,20 @@ export const JournalEntrySource = {
   expense: "expense",
 } as const;
 
+export type AccountingPeriodSummaryStatus =
+  (typeof AccountingPeriodSummaryStatus)[keyof typeof AccountingPeriodSummaryStatus];
+
+export const AccountingPeriodSummaryStatus = {
+  open: "open",
+  closed: "closed",
+} as const;
+
+export interface AccountingPeriodSummary {
+  id: number;
+  label: string;
+  status: AccountingPeriodSummaryStatus;
+}
+
 export interface JournalEntry {
   id: number;
   entryNo: string;
@@ -1722,7 +1736,27 @@ export interface JournalEntry {
   lines?: JournalEntryLine[];
   source?: JournalEntrySource;
   originatingExpense?: OriginatingExpenseSummary | null;
+  period?: AccountingPeriodSummary | null;
   [key: string]: unknown;
+}
+
+export type AccountingPeriodStatus =
+  (typeof AccountingPeriodStatus)[keyof typeof AccountingPeriodStatus];
+
+export const AccountingPeriodStatus = {
+  open: "open",
+  closed: "closed",
+} as const;
+
+export interface AccountingPeriod {
+  id: number;
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  status: AccountingPeriodStatus;
+  closedAt?: string | null;
+  closedByUserId?: number | null;
+  createdAt?: string;
 }
 
 export interface ApprovalEvent {
@@ -2500,6 +2534,33 @@ export type ApproveAgentAction200 = { [key: string]: unknown };
 export type RejectAgentAction200 = { [key: string]: unknown };
 
 export type CancelAgentAction200 = { [key: string]: unknown };
+
+export type ListAccountingPeriods200 = {
+  periods: AccountingPeriod[];
+};
+
+export type CreateAccountingPeriodBodyStatus =
+  (typeof CreateAccountingPeriodBodyStatus)[keyof typeof CreateAccountingPeriodBodyStatus];
+
+export const CreateAccountingPeriodBodyStatus = {
+  open: "open",
+  closed: "closed",
+} as const;
+
+export type CreateAccountingPeriodBody = {
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  status?: CreateAccountingPeriodBodyStatus;
+};
+
+export type CreateAccountingPeriod201 = {
+  period: AccountingPeriod;
+};
+
+export type CloseAccountingPeriod200 = {
+  period: AccountingPeriod;
+};
 
 export type ListJournalEntriesParams = {
   status?: ListJournalEntriesStatus;

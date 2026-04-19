@@ -4114,6 +4114,54 @@ export const CancelAgentActionResponse = zod.record(
 );
 
 /**
+ * @summary List accounting periods (admin/approver only)
+ */
+export const ListAccountingPeriodsResponse = zod.object({
+  periods: zod.array(
+    zod.object({
+      id: zod.number(),
+      label: zod.string(),
+      periodStart: zod.string(),
+      periodEnd: zod.string(),
+      status: zod.enum(["open", "closed"]),
+      closedAt: zod.string().nullish(),
+      closedByUserId: zod.number().nullish(),
+      createdAt: zod.string().optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Create an accounting period (admin only)
+ */
+export const CreateAccountingPeriodBody = zod.object({
+  label: zod.string(),
+  periodStart: zod.string(),
+  periodEnd: zod.string(),
+  status: zod.enum(["open", "closed"]).optional(),
+});
+
+/**
+ * @summary Close an accounting period (admin only)
+ */
+export const CloseAccountingPeriodParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const CloseAccountingPeriodResponse = zod.object({
+  period: zod.object({
+    id: zod.number(),
+    label: zod.string(),
+    periodStart: zod.string(),
+    periodEnd: zod.string(),
+    status: zod.enum(["open", "closed"]),
+    closedAt: zod.string().nullish(),
+    closedByUserId: zod.number().nullish(),
+    createdAt: zod.string().optional(),
+  }),
+});
+
+/**
  * @summary Post a manual journal entry (admin/approver only)
  */
 export const CreateJournalEntryHeader = zod.object({
@@ -4234,6 +4282,13 @@ export const ListJournalEntriesResponse = zod.object({
           approvedAt: zod.string().nullish(),
         })
         .nullish(),
+      period: zod
+        .object({
+          id: zod.number(),
+          label: zod.string(),
+          status: zod.enum(["open", "closed"]),
+        })
+        .nullish(),
     }),
   ),
   total: zod.number(),
@@ -4317,6 +4372,13 @@ export const GetJournalEntryResponse = zod.object({
           })
           .nullish(),
         approvedAt: zod.string().nullish(),
+      })
+      .nullish(),
+    period: zod
+      .object({
+        id: zod.number(),
+        label: zod.string(),
+        status: zod.enum(["open", "closed"]),
       })
       .nullish(),
   }),
