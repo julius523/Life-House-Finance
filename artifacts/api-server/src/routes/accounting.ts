@@ -23,6 +23,8 @@ import {
   chartOfAccountsTable,
   expenseCategoriesTable,
   expenseCategoryPaymentMethodRulesTable,
+  expensesTable,
+  accountingSourceLinksTable,
   type ManualJournalEntryDraftRow,
   type CopilotMessageRow,
   type CopilotThreadRow,
@@ -1656,10 +1658,25 @@ async function loadJournalEntryActors(
   return map;
 }
 
+/**
+ * Task #53 — compact summary of an originating expense, surfaced on
+ * journal-entry and draft responses so reviewers can jump back to the
+ * source document without an extra round-trip. Bills (sourceType='bill')
+ * will plug in here later as a no-op on the read side.
+ */
+type OriginatingExpenseSummary = {
+  id: number;
+  merchant: string;
+  amount: number;
+  expenseDate: string;
+  status: string;
+};
+
 function serializeJournalEntry(
   je: typeof journalEntriesTable.$inferSelect,
   lines?: Array<typeof journalEntryLinesTable.$inferSelect>,
   users?: Map<number, typeof usersTable.$inferSelect>,
+  originatingExpense?: OriginatingExpenseSummary | null,
 ) {
   return {
     id: je.id,
@@ -1683,8 +1700,102 @@ function serializeJournalEntry(
     reversalReason: je.reversalReason,
     manualDraftId: je.manualDraftId,
     createdAt: je.createdAt,
+    // Task #53 — derived from accounting_source_links + agent_action_id so
+    // the UI can render a Source badge ('expense' | 'manual' | 'copilot')
+    // without recomputing the rule client-side.
+    source: deriveJournalEntrySource(je, originatingExpense ?? null),
+    originatingExpense: originatingExpense ?? null,
     ...(lines ? { lines } : {}),
   };
+}
+
+function deriveJournalEntrySource(
+  je: typeof journalEntriesTable.$inferSelect,
+  originatingExpense: OriginatingExpenseSummary | null,
+): "manual" | "copilot" | "expense" {
+  if (je.agentActionId !== null) return "copilot";
+  if (originatingExpense) return "expense";
+  return "manual";
+}
+
+/**
+ * Task #53 — batch-load the originating expense (if any) for a set of
+ * journal entries and/or manual drafts. Goes through the
+ * accounting_source_links bridge table so bills can reuse the same
+ * mechanism later. Returns separate maps because a single expense can
+ * have both a draft link AND a posted-JE link, but each map keyed by
+ * the consumer's id.
+ */
+async function loadOriginatingExpenses(opts: {
+  journalEntryIds?: number[];
+  manualDraftIds?: number[];
+}): Promise<{
+  byJournalEntryId: Map<number, OriginatingExpenseSummary>;
+  byManualDraftId: Map<number, OriginatingExpenseSummary>;
+}> {
+  const jeIds = (opts.journalEntryIds ?? []).filter((n) => Number.isInteger(n));
+  const draftIds = (opts.manualDraftIds ?? []).filter((n) =>
+    Number.isInteger(n),
+  );
+  const byJournalEntryId = new Map<number, OriginatingExpenseSummary>();
+  const byManualDraftId = new Map<number, OriginatingExpenseSummary>();
+  if (jeIds.length === 0 && draftIds.length === 0) {
+    return { byJournalEntryId, byManualDraftId };
+  }
+  const conds = [eq(accountingSourceLinksTable.sourceType, "expense")];
+  const orParts = [];
+  if (jeIds.length > 0) {
+    orParts.push(inArray(accountingSourceLinksTable.journalEntryId, jeIds));
+  }
+  if (draftIds.length > 0) {
+    orParts.push(
+      inArray(
+        accountingSourceLinksTable.manualJournalEntryDraftId,
+        draftIds,
+      ),
+    );
+  }
+  // OR over the two id sets — drizzle's `or(...)` handles the empty case
+  // poorly, so we inline a sql fragment.
+  conds.push(
+    orParts.length === 1
+      ? orParts[0]!
+      : sql`(${orParts[0]} OR ${orParts[1]})`,
+  );
+  const rows = await db
+    .select({
+      sourceId: accountingSourceLinksTable.sourceId,
+      journalEntryId: accountingSourceLinksTable.journalEntryId,
+      manualJournalEntryDraftId:
+        accountingSourceLinksTable.manualJournalEntryDraftId,
+      expenseId: expensesTable.id,
+      merchant: expensesTable.merchant,
+      amount: expensesTable.amount,
+      expenseDate: expensesTable.expenseDate,
+      status: expensesTable.status,
+    })
+    .from(accountingSourceLinksTable)
+    .innerJoin(
+      expensesTable,
+      eq(expensesTable.id, accountingSourceLinksTable.sourceId),
+    )
+    .where(and(...conds));
+  for (const r of rows) {
+    const summary: OriginatingExpenseSummary = {
+      id: r.expenseId,
+      merchant: r.merchant,
+      amount: parseFloat(r.amount),
+      expenseDate: r.expenseDate,
+      status: r.status,
+    };
+    if (r.journalEntryId !== null) {
+      byJournalEntryId.set(r.journalEntryId, summary);
+    }
+    if (r.manualJournalEntryDraftId !== null) {
+      byManualDraftId.set(r.manualJournalEntryDraftId, summary);
+    }
+  }
+  return { byJournalEntryId, byManualDraftId };
 }
 
 router.post(
@@ -2056,7 +2167,25 @@ router.get(
     if (source === "copilot") {
       conds.push(sql`${journalEntriesTable.agentActionId} IS NOT NULL`);
     } else if (source === "manual") {
+      // Task #53 — "manual" now excludes expense-sourced entries so the
+      // three source buckets ('manual'|'copilot'|'expense') don't overlap.
       conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
+      conds.push(sql`NOT EXISTS (
+        SELECT 1 FROM ${accountingSourceLinksTable}
+        WHERE ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
+          AND ${accountingSourceLinksTable.sourceType} = 'expense'
+      )`);
+    } else if (source === "expense") {
+      // Task #53 — keep buckets mutually exclusive: deriveJournalEntrySource
+      // gives copilot precedence over expense, so an entry with both an
+      // agentActionId and an accounting_source_links row serializes as
+      // 'copilot'. The expense filter must mirror that precedence.
+      conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
+      conds.push(sql`EXISTS (
+        SELECT 1 FROM ${accountingSourceLinksTable}
+        WHERE ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
+          AND ${accountingSourceLinksTable.sourceType} = 'expense'
+      )`);
     }
     if (from) {
       conds.push(sql`${journalEntriesTable.entryDate} >= ${from}`);
@@ -2080,8 +2209,13 @@ router.get(
         .where(whereExpr),
     ]);
     const users = await loadJournalEntryActors(rows);
+    const { byJournalEntryId } = await loadOriginatingExpenses({
+      journalEntryIds: rows.map((r) => r.id),
+    });
     res.json({
-      entries: rows.map((r) => serializeJournalEntry(r, undefined, users)),
+      entries: rows.map((r) =>
+        serializeJournalEntry(r, undefined, users, byJournalEntryId.get(r.id) ?? null),
+      ),
       total: totalRow[0]?.count ?? 0,
       limit,
       offset,
@@ -2149,10 +2283,25 @@ router.get(
     if (status === "posted" || status === "reversed") {
       conds.push(eq(journalEntriesTable.status, status));
     }
+    // Task #53 — keep CSV filter semantics in lock-step with the JSON list
+    // endpoint, including the new 'expense' bucket. Without this, exporting
+    // with source=expense from the UI silently fell back to "all sources".
     if (source === "copilot") {
       conds.push(sql`${journalEntriesTable.agentActionId} IS NOT NULL`);
     } else if (source === "manual") {
       conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
+      conds.push(sql`NOT EXISTS (
+        SELECT 1 FROM ${accountingSourceLinksTable}
+        WHERE ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
+          AND ${accountingSourceLinksTable.sourceType} = 'expense'
+      )`);
+    } else if (source === "expense") {
+      conds.push(sql`${journalEntriesTable.agentActionId} IS NULL`);
+      conds.push(sql`EXISTS (
+        SELECT 1 FROM ${accountingSourceLinksTable}
+        WHERE ${accountingSourceLinksTable.journalEntryId} = ${journalEntriesTable.id}
+          AND ${accountingSourceLinksTable.sourceType} = 'expense'
+      )`);
     }
     if (from) {
       conds.push(sql`${journalEntriesTable.entryDate} >= ${from}`);
@@ -2325,7 +2474,17 @@ router.get(
       .where(eq(journalEntryLinesTable.journalEntryId, je.id))
       .orderBy(asc(journalEntryLinesTable.lineNo));
     const users = await loadJournalEntryActors([je]);
-    res.json({ journalEntry: serializeJournalEntry(je, lines, users) });
+    const { byJournalEntryId } = await loadOriginatingExpenses({
+      journalEntryIds: [je.id],
+    });
+    res.json({
+      journalEntry: serializeJournalEntry(
+        je,
+        lines,
+        users,
+        byJournalEntryId.get(je.id) ?? null,
+      ),
+    });
   },
 );
 
@@ -2444,7 +2603,10 @@ function canAccessDraft(
   return user.role === "admin" || user.role === "approver";
 }
 
-function serializeDraft(d: ManualJournalEntryDraftRow) {
+function serializeDraft(
+  d: ManualJournalEntryDraftRow,
+  originatingExpense?: OriginatingExpenseSummary | null,
+) {
   return {
     id: d.id,
     createdByUserId: d.createdByUserId,
@@ -2465,7 +2627,25 @@ function serializeDraft(d: ManualJournalEntryDraftRow) {
     version: d.version,
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
+    // Task #53 — surface the originating expense (via accounting_source_links)
+    // so the draft detail page can show "From expense #N" without a second
+    // round-trip. Null for hand-rolled drafts.
+    originatingExpense: originatingExpense ?? null,
   };
+}
+
+/**
+ * Task #53 — convenience for endpoints that produce one draft. Looks up
+ * the originating expense (if any) so the response shape stays
+ * consistent across detail/patch/submit/approve/reject/post.
+ */
+async function originatingExpenseForDraft(
+  draftId: number,
+): Promise<OriginatingExpenseSummary | null> {
+  const { byManualDraftId } = await loadOriginatingExpenses({
+    manualDraftIds: [draftId],
+  });
+  return byManualDraftId.get(draftId) ?? null;
 }
 
 /**
@@ -2622,9 +2802,12 @@ router.get(
       .where(conds.length ? and(...conds) : undefined)
       .orderBy(desc(manualJournalEntryDraftsTable.updatedAt))
       .limit(200);
+    const { byManualDraftId } = await loadOriginatingExpenses({
+      manualDraftIds: rows.map((r) => r.draft.id),
+    });
     res.json({
       drafts: rows.map((r) => ({
-        ...serializeDraft(r.draft),
+        ...serializeDraft(r.draft, byManualDraftId.get(r.draft.id) ?? null),
         createdBy: {
           id: r.draft.createdByUserId,
           email: r.createdByEmail,
@@ -2705,7 +2888,7 @@ router.get(
       res.status(403).json({ error: "Draft is owned by another user" });
       return;
     }
-    res.json({ draft: serializeDraft(draft) });
+    res.json({ draft: serializeDraft(draft, await originatingExpenseForDraft(draft.id)) });
   },
 );
 
@@ -2792,7 +2975,7 @@ router.patch(
       user,
       `${actorLabel(user)} edited manual JE draft #${updated!.id}`,
     );
-    res.json({ draft: serializeDraft(updated!) });
+    res.json({ draft: serializeDraft(updated!, await originatingExpenseForDraft(updated!.id)) });
   },
 );
 
@@ -3051,7 +3234,7 @@ router.post(
       user,
       `${actorLabel(user)} submitted manual JE draft #${updated!.id} for approval`,
     );
-    res.json({ draft: serializeDraft(updated!) });
+    res.json({ draft: serializeDraft(updated!, await originatingExpenseForDraft(updated!.id)) });
   },
 );
 
@@ -3134,7 +3317,7 @@ router.post(
       user,
       `${actorLabel(user)} approved manual JE draft #${updated!.id}`,
     );
-    res.json({ draft: serializeDraft(updated!) });
+    res.json({ draft: serializeDraft(updated!, await originatingExpenseForDraft(updated!.id)) });
   },
 );
 
@@ -3218,7 +3401,7 @@ router.post(
       // free-text description.
       { reason: parsed.data.reason },
     );
-    res.json({ draft: serializeDraft(updated!) });
+    res.json({ draft: serializeDraft(updated!, await originatingExpenseForDraft(updated!.id)) });
   },
 );
 

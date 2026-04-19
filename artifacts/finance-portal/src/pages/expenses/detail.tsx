@@ -39,6 +39,7 @@ import {
   Trash2,
   Replace,
   Plus,
+  BookOpen,
 } from "lucide-react";
 import { format } from "date-fns";
 import { RejectDialog } from "@/components/reject-dialog";
@@ -555,6 +556,92 @@ export default function ExpenseDetail() {
               </div>
             </CardContent>
           </Card>
+
+          {/*
+            Task #53 — Accounting bridge card. Renders only when the
+            backend has populated `accountingLink` (i.e. an
+            accounting_source_links row exists for this expense). Shows
+            the draft + posted journal entry status with deep links.
+          */}
+          {expense.accountingLink && (
+            <Card data-testid="card-accounting-link">
+              <CardHeader className="pb-4">
+                <CardTitle className="flex items-center gap-2">
+                  <BookOpen className="h-4 w-4" />
+                  Accounting
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                {expense.accountingLink.draftId !== null &&
+                  expense.accountingLink.draftId !== undefined && (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-muted-foreground">Draft</div>
+                        <Link
+                          href={`/accounting/journal-entry-drafts/${expense.accountingLink.draftId}`}
+                          className="font-medium text-primary hover:underline"
+                          data-testid="link-accounting-draft"
+                        >
+                          #{expense.accountingLink.draftId}
+                        </Link>
+                      </div>
+                      {expense.accountingLink.draftStatus && (
+                        <Badge variant="secondary" className="capitalize">
+                          {expense.accountingLink.draftStatus}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                {expense.accountingLink.journalEntryId !== null &&
+                  expense.accountingLink.journalEntryId !== undefined && (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-muted-foreground">
+                          Journal entry
+                        </div>
+                        <Link
+                          href={`/accounting/journal-entries/${expense.accountingLink.journalEntryId}`}
+                          className="font-medium text-primary hover:underline"
+                          data-testid="link-accounting-journal-entry"
+                        >
+                          {expense.accountingLink.journalEntryNo ??
+                            `#${expense.accountingLink.journalEntryId}`}
+                        </Link>
+                        {expense.accountingLink.journalEntryDate && (
+                          <div className="text-xs text-muted-foreground">
+                            {format(
+                              new Date(
+                                expense.accountingLink.journalEntryDate,
+                              ),
+                              "MMM d, yyyy",
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      {expense.accountingLink.journalEntryStatus && (
+                        <Badge
+                          variant={
+                            expense.accountingLink.journalEntryStatus ===
+                            "reversed"
+                              ? "destructive"
+                              : "default"
+                          }
+                          className="capitalize"
+                        >
+                          {expense.accountingLink.journalEntryStatus}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                {expense.accountingLink.draftId === null &&
+                  expense.accountingLink.journalEntryId === null && (
+                    <div className="text-muted-foreground">
+                      Bridge present but no draft/entry yet.
+                    </div>
+                  )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
 

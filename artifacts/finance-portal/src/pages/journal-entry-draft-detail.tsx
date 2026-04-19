@@ -80,6 +80,15 @@ type DraftRecord = {
   version: number;
   createdAt: string;
   updatedAt: string;
+  // Task #53 — populated when this draft was auto-generated from an
+  // approved expense (via accounting_source_links).
+  originatingExpense?: {
+    id: number;
+    merchant: string;
+    amount: number;
+    expenseDate: string;
+    status: string;
+  } | null;
 };
 
 type UserSummary = {
@@ -475,6 +484,59 @@ export default function JournalEntryDraftDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/*
+        Task #53 — Originating expense card. Renders only when this draft
+        was auto-generated from an approved expense (via accounting_source_links).
+      */}
+      {draft.originatingExpense && (
+        <Card data-testid="card-originating-expense">
+          <CardHeader>
+            <CardTitle className="text-base">Originating expense</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Expense
+              </div>
+              <Link
+                href={`/expenses/${draft.originatingExpense.id}`}
+                className="font-medium text-primary hover:underline"
+                data-testid="link-originating-expense"
+              >
+                #{draft.originatingExpense.id}
+              </Link>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Vendor
+              </div>
+              <div className="font-medium">
+                {draft.originatingExpense.merchant}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Date
+              </div>
+              <div className="font-medium">
+                {format(
+                  parseDateOnly(draft.originatingExpense.expenseDate),
+                  "MMM d, yyyy",
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Amount
+              </div>
+              <div className="font-medium font-mono">
+                ${draft.originatingExpense.amount.toFixed(2)}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Lines */}
       <Card>

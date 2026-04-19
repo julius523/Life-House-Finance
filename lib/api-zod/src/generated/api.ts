@@ -166,6 +166,21 @@ export const ListExpensesResponse = zod.object({
         ])
         .nullish(),
       accountingGeneratedAt: zod.coerce.date().nullish(),
+      accountingLink: zod
+        .object({
+          draftId: zod.number().nullish(),
+          draftStatus: zod
+            .enum(["draft", "submitted", "approved", "rejected", "posted"])
+            .nullish(),
+          journalEntryId: zod.number().nullish(),
+          journalEntryNo: zod.string().nullish(),
+          journalEntryDate: zod.coerce.date().nullish(),
+          journalEntryStatus: zod.enum(["posted", "reversed"]).nullish(),
+        })
+        .optional()
+        .describe(
+          "Task #53 — populated by the detail endpoint when an\naccounting_source_links row exists for this expense. Lets\nthe UI link out to the generated draft and (once posted)\nthe journal entry without a second round-trip.\n",
+        ),
       duplicateDismissed: zod
         .boolean()
         .optional()
@@ -271,6 +286,21 @@ export const GetExpenseResponse = zod.object({
     ])
     .nullish(),
   accountingGeneratedAt: zod.coerce.date().nullish(),
+  accountingLink: zod
+    .object({
+      draftId: zod.number().nullish(),
+      draftStatus: zod
+        .enum(["draft", "submitted", "approved", "rejected", "posted"])
+        .nullish(),
+      journalEntryId: zod.number().nullish(),
+      journalEntryNo: zod.string().nullish(),
+      journalEntryDate: zod.coerce.date().nullish(),
+      journalEntryStatus: zod.enum(["posted", "reversed"]).nullish(),
+    })
+    .optional()
+    .describe(
+      "Task #53 — populated by the detail endpoint when an\naccounting_source_links row exists for this expense. Lets\nthe UI link out to the generated draft and (once posted)\nthe journal entry without a second round-trip.\n",
+    ),
   duplicateDismissed: zod
     .boolean()
     .optional()
@@ -374,6 +404,21 @@ export const UpdateExpenseResponse = zod.object({
     ])
     .nullish(),
   accountingGeneratedAt: zod.coerce.date().nullish(),
+  accountingLink: zod
+    .object({
+      draftId: zod.number().nullish(),
+      draftStatus: zod
+        .enum(["draft", "submitted", "approved", "rejected", "posted"])
+        .nullish(),
+      journalEntryId: zod.number().nullish(),
+      journalEntryNo: zod.string().nullish(),
+      journalEntryDate: zod.coerce.date().nullish(),
+      journalEntryStatus: zod.enum(["posted", "reversed"]).nullish(),
+    })
+    .optional()
+    .describe(
+      "Task #53 — populated by the detail endpoint when an\naccounting_source_links row exists for this expense. Lets\nthe UI link out to the generated draft and (once posted)\nthe journal entry without a second round-trip.\n",
+    ),
   duplicateDismissed: zod
     .boolean()
     .optional()
@@ -460,6 +505,21 @@ export const ApproveExpenseResponse = zod
       ])
       .nullish(),
     accountingGeneratedAt: zod.coerce.date().nullish(),
+    accountingLink: zod
+      .object({
+        draftId: zod.number().nullish(),
+        draftStatus: zod
+          .enum(["draft", "submitted", "approved", "rejected", "posted"])
+          .nullish(),
+        journalEntryId: zod.number().nullish(),
+        journalEntryNo: zod.string().nullish(),
+        journalEntryDate: zod.coerce.date().nullish(),
+        journalEntryStatus: zod.enum(["posted", "reversed"]).nullish(),
+      })
+      .optional()
+      .describe(
+        "Task #53 — populated by the detail endpoint when an\naccounting_source_links row exists for this expense. Lets\nthe UI link out to the generated draft and (once posted)\nthe journal entry without a second round-trip.\n",
+      ),
     duplicateDismissed: zod
       .boolean()
       .optional()
@@ -586,6 +646,21 @@ export const DismissExpenseDuplicateResponse = zod.object({
     ])
     .nullish(),
   accountingGeneratedAt: zod.coerce.date().nullish(),
+  accountingLink: zod
+    .object({
+      draftId: zod.number().nullish(),
+      draftStatus: zod
+        .enum(["draft", "submitted", "approved", "rejected", "posted"])
+        .nullish(),
+      journalEntryId: zod.number().nullish(),
+      journalEntryNo: zod.string().nullish(),
+      journalEntryDate: zod.coerce.date().nullish(),
+      journalEntryStatus: zod.enum(["posted", "reversed"]).nullish(),
+    })
+    .optional()
+    .describe(
+      "Task #53 — populated by the detail endpoint when an\naccounting_source_links row exists for this expense. Lets\nthe UI link out to the generated draft and (once posted)\nthe journal entry without a second round-trip.\n",
+    ),
   duplicateDismissed: zod
     .boolean()
     .optional()
@@ -672,6 +747,21 @@ export const RejectExpenseResponse = zod.object({
     ])
     .nullish(),
   accountingGeneratedAt: zod.coerce.date().nullish(),
+  accountingLink: zod
+    .object({
+      draftId: zod.number().nullish(),
+      draftStatus: zod
+        .enum(["draft", "submitted", "approved", "rejected", "posted"])
+        .nullish(),
+      journalEntryId: zod.number().nullish(),
+      journalEntryNo: zod.string().nullish(),
+      journalEntryDate: zod.coerce.date().nullish(),
+      journalEntryStatus: zod.enum(["posted", "reversed"]).nullish(),
+    })
+    .optional()
+    .describe(
+      "Task #53 — populated by the detail endpoint when an\naccounting_source_links row exists for this expense. Lets\nthe UI link out to the generated draft and (once posted)\nthe journal entry without a second round-trip.\n",
+    ),
   duplicateDismissed: zod
     .boolean()
     .optional()
@@ -1303,6 +1393,21 @@ export const ConvertTransactionToExpenseResponse = zod.object({
       ])
       .nullish(),
     accountingGeneratedAt: zod.coerce.date().nullish(),
+    accountingLink: zod
+      .object({
+        draftId: zod.number().nullish(),
+        draftStatus: zod
+          .enum(["draft", "submitted", "approved", "rejected", "posted"])
+          .nullish(),
+        journalEntryId: zod.number().nullish(),
+        journalEntryNo: zod.string().nullish(),
+        journalEntryDate: zod.coerce.date().nullish(),
+        journalEntryStatus: zod.enum(["posted", "reversed"]).nullish(),
+      })
+      .optional()
+      .describe(
+        "Task #53 — populated by the detail endpoint when an\naccounting_source_links row exists for this expense. Lets\nthe UI link out to the generated draft and (once posted)\nthe journal entry without a second round-trip.\n",
+      ),
     duplicateDismissed: zod
       .boolean()
       .optional()

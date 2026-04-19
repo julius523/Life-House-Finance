@@ -1925,6 +1925,35 @@ components:
           type: string
           format: date-time
           nullable: true
+        accountingLink:
+          type: object
+          description: |
+            Task #53 — populated by the detail endpoint when an
+            accounting_source_links row exists for this expense. Lets
+            the UI link out to the generated draft and (once posted)
+            the journal entry without a second round-trip.
+          properties:
+            draftId:
+              type: integer
+              nullable: true
+            draftStatus:
+              type: string
+              nullable: true
+              enum: [draft, submitted, approved, rejected, posted]
+            journalEntryId:
+              type: integer
+              nullable: true
+            journalEntryNo:
+              type: string
+              nullable: true
+            journalEntryDate:
+              type: string
+              format: date
+              nullable: true
+            journalEntryStatus:
+              type: string
+              nullable: true
+              enum: [posted, reversed]
         duplicateDismissed:
           type: boolean
           description: True when the user has confirmed this is not a duplicate.

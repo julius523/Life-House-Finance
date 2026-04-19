@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ExpenseAccountingBlockReason } from "./expenseAccountingBlockReason";
+import type { ExpenseAccountingLink } from "./expenseAccountingLink";
 import type { ExpenseAccountingStatus } from "./expenseAccountingStatus";
 import type { ExpensePaymentMethod } from "./expensePaymentMethod";
 import type { ExpenseStatus } from "./expenseStatus";
@@ -35,6 +36,12 @@ export interface Expense {
   accountingStatus?: ExpenseAccountingStatus;
   accountingBlockReason?: ExpenseAccountingBlockReason;
   accountingGeneratedAt?: Date | null;
+  /** Task #53 — populated by the detail endpoint when an
+accounting_source_links row exists for this expense. Lets
+the UI link out to the generated draft and (once posted)
+the journal entry without a second round-trip.
+ */
+  accountingLink?: ExpenseAccountingLink;
   /** True when the user has confirmed this is not a duplicate. */
   duplicateDismissed?: boolean;
   /** Other expense ids with matching date + amount. */

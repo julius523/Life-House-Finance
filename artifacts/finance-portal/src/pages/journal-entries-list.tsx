@@ -65,6 +65,9 @@ type JournalEntry = {
   reversesJournalEntryId: number | null;
   postedBy: EntryActor | null;
   approver: EntryActor | null;
+  // Task #53 — backend-derived source: 'expense' wins over 'copilot'
+  // wins over 'manual'. Use this instead of the agentActionId heuristic.
+  source?: "manual" | "copilot" | "expense";
 };
 
 function actorName(a: EntryActor | null): string {
@@ -74,7 +77,7 @@ function actorName(a: EntryActor | null): string {
 }
 
 type StatusFilter = "all" | "posted" | "reversed";
-type SourceFilter = "all" | "manual" | "copilot";
+type SourceFilter = "all" | "manual" | "copilot" | "expense";
 type DraftScope = "mine" | "all";
 type DraftStatus =
   | "draft"
@@ -131,8 +134,10 @@ function formatCents(cents: number): string {
   });
 }
 
-function entrySource(e: JournalEntry): "manual" | "copilot" {
-  return e.agentActionId !== null ? "copilot" : "manual";
+function entrySource(e: JournalEntry): "manual" | "copilot" | "expense" {
+  // Task #53 — backend now returns the resolved source (expense > copilot
+  // > manual). Fall back to the legacy heuristic for older payloads.
+  return e.source ?? (e.agentActionId !== null ? "copilot" : "manual");
 }
 
 // Parse "YYYY-MM-DD" as a local-time date so format() doesn't render the
@@ -419,6 +424,7 @@ export default function JournalEntriesListPage() {
                 <SelectItem value="all">All sources</SelectItem>
                 <SelectItem value="manual">Manual</SelectItem>
                 <SelectItem value="copilot">Copilot</SelectItem>
+                <SelectItem value="expense">Expense</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -691,6 +697,10 @@ export default function JournalEntriesListPage() {
                             <Badge variant="secondary" className="gap-1">
                               <Sparkles className="h-3 w-3" />
                               Copilot
+                            </Badge>
+                          ) : src === "expense" ? (
+                            <Badge variant="secondary" className="gap-1">
+                              Expense
                             </Badge>
                           ) : (
                             <Badge variant="outline" className="gap-1">

@@ -6,6 +6,9 @@ import {
   programsTable,
   activityLogTable,
   expenseCategoriesTable,
+  accountingSourceLinksTable,
+  manualJournalEntryDraftsTable,
+  journalEntriesTable,
 } from "@workspace/db";
 import { eq, and, desc, count, sql, ne, inArray } from "drizzle-orm";
 import { createNotification, findUserByEmail } from "../lib/notifications";
@@ -52,11 +55,99 @@ async function getProgramName(programId: number | null | undefined): Promise<str
   return prog?.name;
 }
 
+/**
+ * Task #53 — compact accounting bridge summary surfaced on the expense
+ * detail response so the UI can render an "Accounting" card linking
+ * back to the generated draft and (once posted) the journal entry.
+ * Built from accounting_source_links so future bill bridges reuse the
+ * same shape on the read side.
+ */
+type AccountingLinkSummary = {
+  draftId: number | null;
+  draftStatus:
+    | "draft"
+    | "submitted"
+    | "approved"
+    | "rejected"
+    | "posted"
+    | null;
+  journalEntryId: number | null;
+  journalEntryNo: string | null;
+  journalEntryDate: string | null;
+  journalEntryStatus: "posted" | "reversed" | null;
+};
+
+async function loadAccountingLinkForExpense(
+  expenseId: number,
+): Promise<AccountingLinkSummary | null> {
+  const links = await db
+    .select({
+      draftId: accountingSourceLinksTable.manualJournalEntryDraftId,
+      journalEntryId: accountingSourceLinksTable.journalEntryId,
+    })
+    .from(accountingSourceLinksTable)
+    .where(
+      and(
+        eq(accountingSourceLinksTable.sourceType, "expense"),
+        eq(accountingSourceLinksTable.sourceId, expenseId),
+      ),
+    );
+  if (links.length === 0) return null;
+  // Prefer the link with a posted journal entry; fall back to the draft
+  // link. In practice an expense has at most one of each.
+  const draftId =
+    links.find((l) => l.draftId !== null)?.draftId ?? null;
+  const journalEntryId =
+    links.find((l) => l.journalEntryId !== null)?.journalEntryId ?? null;
+
+  let draftStatus: AccountingLinkSummary["draftStatus"] = null;
+  if (draftId !== null) {
+    const [d] = await db
+      .select({ status: manualJournalEntryDraftsTable.status })
+      .from(manualJournalEntryDraftsTable)
+      .where(eq(manualJournalEntryDraftsTable.id, draftId))
+      .limit(1);
+    draftStatus =
+      (d?.status as AccountingLinkSummary["draftStatus"]) ?? null;
+  }
+
+  let journalEntryNo: string | null = null;
+  let journalEntryDate: string | null = null;
+  let journalEntryStatus: AccountingLinkSummary["journalEntryStatus"] = null;
+  if (journalEntryId !== null) {
+    const [je] = await db
+      .select({
+        entryNo: journalEntriesTable.entryNo,
+        entryDate: journalEntriesTable.entryDate,
+        status: journalEntriesTable.status,
+      })
+      .from(journalEntriesTable)
+      .where(eq(journalEntriesTable.id, journalEntryId))
+      .limit(1);
+    if (je) {
+      journalEntryNo = je.entryNo;
+      journalEntryDate = je.entryDate;
+      journalEntryStatus =
+        je.status as AccountingLinkSummary["journalEntryStatus"];
+    }
+  }
+
+  return {
+    draftId,
+    draftStatus,
+    journalEntryId,
+    journalEntryNo,
+    journalEntryDate,
+    journalEntryStatus,
+  };
+}
+
 function formatExpense(
   e: typeof expensesTable.$inferSelect,
   programName?: string,
   potentialDuplicateIds: number[] = [],
   categoryName?: string | null,
+  accountingLink?: AccountingLinkSummary | null,
 ) {
   return {
     id: e.id,
@@ -91,6 +182,9 @@ function formatExpense(
       | "not_applicable",
     accountingBlockReason: e.accountingBlockReason ?? undefined,
     accountingGeneratedAt: e.accountingGeneratedAt?.toISOString(),
+    // Task #53 — populated only by the detail endpoint. Null when no
+    // accounting_source_links row exists yet (e.g. expense still in 'pending').
+    accountingLink: accountingLink ?? undefined,
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString(),
   };
@@ -264,6 +358,7 @@ router.get("/expenses/:id", async (req, res): Promise<void> => {
       .limit(1);
     cName = c?.name ?? null;
   }
+  const accountingLink = await loadAccountingLinkForExpense(expense.id);
   res.json(
     GetExpenseResponse.parse(
       formatExpense(
@@ -271,6 +366,7 @@ router.get("/expenses/:id", async (req, res): Promise<void> => {
         programName,
         dups.map((d) => d.id),
         cName,
+        accountingLink,
       ),
     ),
   );

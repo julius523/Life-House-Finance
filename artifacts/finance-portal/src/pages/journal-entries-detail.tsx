@@ -66,6 +66,17 @@ type JournalEntry = {
   manualDraftId: number | null;
   createdAt: string;
   lines: JournalEntryLine[];
+  // Task #53 — populated by the backend from accounting_source_links
+  // (and the legacy agentActionId fallback). Use this directly instead
+  // of inferring from agentActionId so 'expense' surfaces correctly.
+  source?: "manual" | "copilot" | "expense";
+  originatingExpense?: {
+    id: number;
+    merchant: string;
+    amount: number;
+    expenseDate: string;
+    status: string;
+  } | null;
 };
 
 function actorName(a: EntryActor | null): string {
@@ -242,8 +253,11 @@ export default function JournalEntryDetailPage() {
     );
   }
 
-  const source: "manual" | "copilot" =
-    entry.agentActionId !== null ? "copilot" : "manual";
+  // Task #53 — prefer the backend's `source` field (manual|copilot|expense)
+  // over the legacy agentActionId heuristic so expense-derived entries
+  // surface as such.
+  const source: "manual" | "copilot" | "expense" =
+    entry.source ?? (entry.agentActionId !== null ? "copilot" : "manual");
 
   const evidenceJson =
     entry.evidenceSnapshot !== null && entry.evidenceSnapshot !== undefined
@@ -298,6 +312,10 @@ export default function JournalEntryDetailPage() {
                 <Badge variant="secondary" className="gap-1">
                   <Sparkles className="h-3 w-3" />
                   Copilot
+                </Badge>
+              ) : source === "expense" ? (
+                <Badge variant="secondary" className="gap-1">
+                  Expense
                 </Badge>
               ) : (
                 <Badge variant="outline" className="gap-1">
@@ -379,6 +397,59 @@ export default function JournalEntryDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/*
+        Task #53 — Originating expense card. Renders only when this
+        entry was posted from an expense (via accounting_source_links).
+      */}
+      {entry.originatingExpense && (
+        <Card data-testid="card-originating-expense">
+          <CardHeader>
+            <CardTitle className="text-base">Originating expense</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Expense
+              </div>
+              <Link
+                href={`/expenses/${entry.originatingExpense.id}`}
+                className="font-medium text-primary hover:underline"
+                data-testid="link-originating-expense"
+              >
+                #{entry.originatingExpense.id}
+              </Link>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Vendor
+              </div>
+              <div className="font-medium">
+                {entry.originatingExpense.merchant}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Date
+              </div>
+              <div className="font-medium">
+                {format(
+                  parseDateOnly(entry.originatingExpense.expenseDate),
+                  "MMM d, yyyy",
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Amount
+              </div>
+              <div className="font-medium font-mono">
+                ${entry.originatingExpense.amount.toFixed(2)}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

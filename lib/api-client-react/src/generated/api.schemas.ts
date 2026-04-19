@@ -142,6 +142,43 @@ export const ExpenseAccountingBlockReason = {
   other: "other",
 } as const;
 
+export type ExpenseAccountingLinkDraftStatus =
+  | (typeof ExpenseAccountingLinkDraftStatus)[keyof typeof ExpenseAccountingLinkDraftStatus]
+  | null;
+
+export const ExpenseAccountingLinkDraftStatus = {
+  draft: "draft",
+  submitted: "submitted",
+  approved: "approved",
+  rejected: "rejected",
+  posted: "posted",
+} as const;
+
+export type ExpenseAccountingLinkJournalEntryStatus =
+  | (typeof ExpenseAccountingLinkJournalEntryStatus)[keyof typeof ExpenseAccountingLinkJournalEntryStatus]
+  | null;
+
+export const ExpenseAccountingLinkJournalEntryStatus = {
+  posted: "posted",
+  reversed: "reversed",
+} as const;
+
+/**
+ * Task #53 — populated by the detail endpoint when an
+accounting_source_links row exists for this expense. Lets
+the UI link out to the generated draft and (once posted)
+the journal entry without a second round-trip.
+
+ */
+export type ExpenseAccountingLink = {
+  draftId?: number | null;
+  draftStatus?: ExpenseAccountingLinkDraftStatus;
+  journalEntryId?: number | null;
+  journalEntryNo?: string | null;
+  journalEntryDate?: string | null;
+  journalEntryStatus?: ExpenseAccountingLinkJournalEntryStatus;
+};
+
 export interface Expense {
   id: number;
   submittedBy: string;
@@ -167,6 +204,12 @@ export interface Expense {
   accountingStatus?: ExpenseAccountingStatus;
   accountingBlockReason?: ExpenseAccountingBlockReason;
   accountingGeneratedAt?: string | null;
+  /** Task #53 — populated by the detail endpoint when an
+accounting_source_links row exists for this expense. Lets
+the UI link out to the generated draft and (once posted)
+the journal entry without a second round-trip.
+ */
+  accountingLink?: ExpenseAccountingLink;
   /** True when the user has confirmed this is not a duplicate. */
   duplicateDismissed?: boolean;
   /** Other expense ids with matching date + amount. */
