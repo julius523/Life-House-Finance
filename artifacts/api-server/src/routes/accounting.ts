@@ -2169,14 +2169,15 @@ const DraftPayloadSchema = z.object({
   lines: z.array(DraftLineSchema).min(1).max(100),
 });
 
-const SaveDraftBody = z.object({
+// Task #44 — POST (create) does not need a version because the row does
+// not exist yet. PATCH (update) MUST send the last-seen version so we
+// can reject stale writes atomically.
+const CreateDraftBody = z.object({
   payload: DraftPayloadSchema,
-  /**
-   * Task #44 — last-seen draft version for optimistic locking on PATCH.
-   * Ignored on POST (creating a new draft). Optional for backward compat
-   * during deploy windows; once the UI is updated this is always sent.
-   */
-  expectedVersion: z.number().int().nonnegative().optional(),
+});
+const UpdateDraftBody = z.object({
+  payload: DraftPayloadSchema,
+  expectedVersion: z.number().int().nonnegative(),
 });
 
 function canAccessDraft(
@@ -2212,21 +2213,19 @@ function serializeDraft(d: ManualJournalEntryDraftRow) {
 }
 
 /**
- * Task #44 — parse a client-supplied expectedVersion off a request body
- * or query string. Returns:
+ * Task #44 — parse a REQUIRED client-supplied expectedVersion off a
+ * request body or query string. Returns:
  *   - { ok: true, value: number }   when present and valid (>= 0)
- *   - { ok: true, value: null }     when absent (legacy clients, no check)
- *   - { ok: false }                 when present but malformed
+ *   - { ok: false }                 when absent or malformed
  *
- * Absent is intentionally allowed so a deploy that lands the server change
- * before the client change does not start rejecting in-flight requests.
- * Once all clients are sending the version, mismatches still surface as
- * 409 from the conditional UPDATE.
+ * Required for every draft mutation (PATCH, DELETE, submit, approve,
+ * reject, post) so a stale client cannot bypass optimistic locking by
+ * simply omitting the field. Callers translate `ok: false` into a 400.
  */
 function parseExpectedVersion(raw: unknown):
-  | { ok: true; value: number | null }
+  | { ok: true; value: number }
   | { ok: false } {
-  if (raw === undefined || raw === null) return { ok: true, value: null };
+  if (raw === undefined || raw === null) return { ok: false };
   const n = typeof raw === "string" ? Number(raw) : raw;
   if (typeof n !== "number" || !Number.isInteger(n) || n < 0) {
     return { ok: false };
@@ -2376,7 +2375,7 @@ router.post(
       res.status(403).json({ error: "Admins or approvers only" });
       return;
     }
-    const parsed = SaveDraftBody.safeParse(req.body ?? {});
+    const parsed = CreateDraftBody.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({
         error: parsed.error.issues[0]?.message ?? "Invalid body",
@@ -2454,7 +2453,7 @@ router.patch(
       res.status(400).json({ error: "Invalid id" });
       return;
     }
-    const parsed = SaveDraftBody.safeParse(req.body ?? {});
+    const parsed = UpdateDraftBody.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({
         error: parsed.error.issues[0]?.message ?? "Invalid body",
@@ -2494,16 +2493,9 @@ router.patch(
       return;
     }
     const summary = summarizeDraftHeader(payload);
-    // Task #44 — atomic conditional update guarded by version. If the
-    // expected version was supplied and no longer matches, the UPDATE
-    // returns zero rows and we surface 409 with the live version so the
-    // client can refetch and rebase.
-    const conds = [eq(manualJournalEntryDraftsTable.id, id)];
-    if (parsed.data.expectedVersion !== undefined) {
-      conds.push(
-        eq(manualJournalEntryDraftsTable.version, parsed.data.expectedVersion),
-      );
-    }
+    // Task #44 — atomic conditional update guarded by version. The
+    // UPDATE returns zero rows when the version has moved; we surface
+    // 409 with the live version so the client can refetch and rebase.
     const updateResult = await db
       .update(manualJournalEntryDraftsTable)
       .set({
@@ -2513,7 +2505,12 @@ router.patch(
         version: sql`${manualJournalEntryDraftsTable.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(and(...conds))
+      .where(
+        and(
+          eq(manualJournalEntryDraftsTable.id, id),
+          eq(manualJournalEntryDraftsTable.version, parsed.data.expectedVersion),
+        ),
+      )
       .returning();
     if (updateResult.length === 0) {
       versionConflictResponse(res, existing);
@@ -2568,26 +2565,25 @@ router.delete(
       return;
     }
     // Task #44 — version on DELETE travels via query string (?expectedVersion=N)
-    // because DELETE bodies are awkward across our fetch helpers. Same
-    // semantics as the other write paths: missing = legacy/no-check,
-    // present-but-stale = 409.
+    // because DELETE bodies are awkward across our fetch helpers. Required:
+    // missing or malformed → 400; stale → 409.
     const expected = parseExpectedVersion(req.query["expectedVersion"]);
     if (!expected.ok) {
       res.status(400).json({
-        error: "Invalid expectedVersion",
+        error:
+          "expectedVersion query parameter is required (Task #44 optimistic lock)",
         code: "INVALID_PAYLOAD",
       });
       return;
     }
-    const delConds = [eq(manualJournalEntryDraftsTable.id, id)];
-    if (expected.value !== null) {
-      delConds.push(
-        eq(manualJournalEntryDraftsTable.version, expected.value),
-      );
-    }
     const deleted = await db
       .delete(manualJournalEntryDraftsTable)
-      .where(and(...delConds))
+      .where(
+        and(
+          eq(manualJournalEntryDraftsTable.id, id),
+          eq(manualJournalEntryDraftsTable.version, expected.value),
+        ),
+      )
       .returning({ id: manualJournalEntryDraftsTable.id });
     if (deleted.length === 0) {
       versionConflictResponse(res, existing);
@@ -2692,14 +2688,13 @@ router.post(
       });
       return;
     }
-    // Task #44 — optimistic-lock check, parsed off the (currently empty)
-    // submit body. Same semantics as PATCH/DELETE: missing = legacy/no-check.
+    // Task #44 — optimistic-lock check. Required.
     const submitExpected = parseExpectedVersion(
       (req.body ?? {})["expectedVersion"],
     );
     if (!submitExpected.ok) {
       res.status(400).json({
-        error: "Invalid expectedVersion",
+        error: "expectedVersion is required (Task #44 optimistic lock)",
         code: "INVALID_PAYLOAD",
       });
       return;
@@ -2754,12 +2749,6 @@ router.post(
         });
         return;
     }
-    const submitConds = [eq(manualJournalEntryDraftsTable.id, id)];
-    if (submitExpected.value !== null) {
-      submitConds.push(
-        eq(manualJournalEntryDraftsTable.version, submitExpected.value),
-      );
-    }
     const submitResult = await db
       .update(manualJournalEntryDraftsTable)
       .set({
@@ -2775,7 +2764,12 @@ router.post(
         version: sql`${manualJournalEntryDraftsTable.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(and(...submitConds))
+      .where(
+        and(
+          eq(manualJournalEntryDraftsTable.id, id),
+          eq(manualJournalEntryDraftsTable.version, submitExpected.value),
+        ),
+      )
       .returning();
     if (submitResult.length === 0) {
       versionConflictResponse(res, existing);
@@ -2839,16 +2833,10 @@ router.post(
     );
     if (!approveExpected.ok) {
       res.status(400).json({
-        error: "Invalid expectedVersion",
+        error: "expectedVersion is required (Task #44 optimistic lock)",
         code: "INVALID_PAYLOAD",
       });
       return;
-    }
-    const approveConds = [eq(manualJournalEntryDraftsTable.id, id)];
-    if (approveExpected.value !== null) {
-      approveConds.push(
-        eq(manualJournalEntryDraftsTable.version, approveExpected.value),
-      );
     }
     const approveResult = await db
       .update(manualJournalEntryDraftsTable)
@@ -2859,7 +2847,12 @@ router.post(
         version: sql`${manualJournalEntryDraftsTable.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(and(...approveConds))
+      .where(
+        and(
+          eq(manualJournalEntryDraftsTable.id, id),
+          eq(manualJournalEntryDraftsTable.version, approveExpected.value),
+        ),
+      )
       .returning();
     if (approveResult.length === 0) {
       versionConflictResponse(res, existing);
@@ -2879,7 +2872,7 @@ router.post(
 const RejectDraftBody = z.object({
   reason: z.string().trim().min(5).max(500),
   /** Task #44 — last-seen draft version for optimistic locking. */
-  expectedVersion: z.number().int().nonnegative().optional(),
+  expectedVersion: z.number().int().nonnegative(),
 });
 
 router.post(
@@ -2921,15 +2914,6 @@ router.post(
       });
       return;
     }
-    const rejectConds = [eq(manualJournalEntryDraftsTable.id, id)];
-    if (parsed.data.expectedVersion !== undefined) {
-      rejectConds.push(
-        eq(
-          manualJournalEntryDraftsTable.version,
-          parsed.data.expectedVersion,
-        ),
-      );
-    }
     const rejectResult = await db
       .update(manualJournalEntryDraftsTable)
       .set({
@@ -2940,7 +2924,15 @@ router.post(
         version: sql`${manualJournalEntryDraftsTable.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(and(...rejectConds))
+      .where(
+        and(
+          eq(manualJournalEntryDraftsTable.id, id),
+          eq(
+            manualJournalEntryDraftsTable.version,
+            parsed.data.expectedVersion,
+          ),
+        ),
+      )
       .returning();
     if (rejectResult.length === 0) {
       versionConflictResponse(res, existing);
@@ -3015,24 +3007,24 @@ router.post(
     }
     // Task #44 — version pre-check. We do this BEFORE the heavy posting
     // service call so a stale post attempt fails fast and does not waste
-    // a JE insert. The final mark-posted update below is unconditional
-    // because by this point we own the draft (it was 'approved', the
-    // version matched, and concurrent /post calls are deduped by the
-    // service-level idempotency key derived from the draft id).
+    // a JE insert. The final mark-posted update below is *also* gated by
+    // the same expected version so that two concurrent /post requests
+    // on the same draft cannot both flip status='posted' and double-bump
+    // the version: the loser's conditional UPDATE returns zero rows and
+    // we fall through to the idempotent-replay branch (the service-level
+    // idempotency key on the JE side already prevents duplicate ledger
+    // rows).
     const postExpected = parseExpectedVersion(
       (req.body ?? {})["expectedVersion"],
     );
     if (!postExpected.ok) {
       res.status(400).json({
-        error: "Invalid expectedVersion",
+        error: "expectedVersion is required (Task #44 optimistic lock)",
         code: "INVALID_PAYLOAD",
       });
       return;
     }
-    if (
-      postExpected.value !== null &&
-      postExpected.value !== existing.version
-    ) {
+    if (postExpected.value !== existing.version) {
       versionConflictResponse(res, existing);
       return;
     }
@@ -3128,19 +3120,37 @@ router.post(
         // 'approved' (retryable). On idempotent replay we still want
         // status='posted' / postedJournalEntryId set in case the prior
         // attempt died between insert and this update.
-        const [updatedDraft] = await db
+        // Task #44 — gate the terminal mark-posted update with the same
+        // (id, version) optimistic lock used by every other mutation.
+        // If a concurrent /post call won the race we get zero rows back;
+        // refetch the now-posted draft and treat this call as idempotent
+        // (the service-level idempotency key already ensured both calls
+        // share the same JE).
+        const updatedRows = await db
           .update(manualJournalEntryDraftsTable)
           .set({
             status: "posted",
             postedJournalEntryId: result.journalEntry.id,
-            // Task #44 — bump the version on the terminal transition too,
-            // so any client still holding the pre-post version sees a
-            // 409 if it tries to act on the now-posted draft.
             version: sql`${manualJournalEntryDraftsTable.version} + 1`,
             updatedAt: new Date(),
           })
-          .where(eq(manualJournalEntryDraftsTable.id, existing.id))
+          .where(
+            and(
+              eq(manualJournalEntryDraftsTable.id, existing.id),
+              eq(manualJournalEntryDraftsTable.version, postExpected.value),
+            ),
+          )
           .returning();
+        let updatedDraft = updatedRows[0];
+        let isIdempotent = result.idempotent;
+        if (!updatedDraft) {
+          const [reread] = await db
+            .select()
+            .from(manualJournalEntryDraftsTable)
+            .where(eq(manualJournalEntryDraftsTable.id, existing.id));
+          updatedDraft = reread;
+          isIdempotent = true;
+        }
         if (!result.idempotent) {
           await logDraftActivity(
             "manual_je_draft_posted",
@@ -3156,13 +3166,13 @@ router.post(
             },
           );
         }
-        res.status(result.idempotent ? 200 : 201).json({
+        res.status(isIdempotent ? 200 : 201).json({
           draft: serializeDraft(updatedDraft!),
           journalEntry: serializeJournalEntry(
             result.journalEntry,
             result.lines,
           ),
-          idempotent: result.idempotent,
+          idempotent: isIdempotent,
         });
         return;
       }
