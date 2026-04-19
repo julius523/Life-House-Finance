@@ -237,20 +237,22 @@ export default function JournalEntryDraftDetailPage() {
     );
   }
 
-  // Role/status gating — mirror server (artifacts/api-server/src/routes/accounting.ts:
-  // /submit & /reject only require admin/approver + draft access; only /approve
-  // and /post additionally enforce the no-self-approval rule when separation of
-  // duties is on).
+  // Role/ownership/status gating per Task #42 acceptance: action buttons
+  // are RENDERED (not just disabled) only when the actor is allowed to use
+  // them. This is stricter than the server contract on purpose — the server
+  // remains the authority and rejects anything that slips through.
+  //   submit  → owner & status=draft
+  //   approve → admin/approver & status=submitted & not submitter
+  //   reject  → admin/approver & status=submitted & not submitter
+  //   post    → admin/approver & status=approved & not submitter
   const isOwner = draft.createdByUserId === user!.id;
   const isReviewer = user!.role === "admin" || user!.role === "approver";
   const isSubmitter = draft.submittedByUserId === user!.id;
-  const canSubmit =
-    isReviewer && (draft.status === "draft" || draft.status === "rejected");
-  const canApprove =
+  const showSubmit = isOwner && draft.status === "draft";
+  const showApprove =
     isReviewer && draft.status === "submitted" && !isSubmitter;
-  const canReject =
-    isReviewer && draft.status === "submitted";
-  const canPost =
+  const showReject = showApprove;
+  const showPost =
     isReviewer && draft.status === "approved" && !isSubmitter;
 
   const runAction = async (
@@ -540,64 +542,46 @@ export default function JournalEntryDraftDetailPage() {
           )}
 
           <div className="flex flex-wrap gap-2">
-            {/* Submit */}
-            {(draft.status === "draft" || draft.status === "rejected") && (
-              <>
-                <Button
-                  onClick={() => runAction("submit")}
-                  disabled={!canSubmit || busy !== null}
-                  data-testid="button-submit-draft"
-                  title={
-                    !isOwner
-                      ? "Only the draft author can submit it for review."
-                      : ""
-                  }
-                >
-                  <Send className="h-4 w-4 mr-1" />
-                  {busy === "submit" ? "Submitting…" : "Submit for review"}
-                </Button>
-                {(draft.status === "draft" || draft.status === "rejected") &&
-                  isOwner && (
-                    <Button asChild variant="outline">
-                      <Link
-                        href={`/accounting/journal-entries/new?draft=${draft.id}`}
-                      >
-                        <FileEdit className="h-4 w-4 mr-1" />
-                        Edit
-                      </Link>
-                    </Button>
-                  )}
-              </>
+            {showSubmit && (
+              <Button
+                onClick={() => runAction("submit")}
+                disabled={busy !== null}
+                data-testid="button-submit-draft"
+              >
+                <Send className="h-4 w-4 mr-1" />
+                {busy === "submit" ? "Submitting…" : "Submit for review"}
+              </Button>
             )}
 
-            {/* Approve */}
-            {draft.status === "submitted" && (
+            {/* Owner can edit while draft is editable on the server. The
+                editor route enforces its own access rules, but we mirror
+                the server's editable set here. */}
+            {isOwner &&
+              (draft.status === "draft" || draft.status === "rejected") && (
+                <Button asChild variant="outline">
+                  <Link href={`/accounting/journal-entries/new?draft=${draft.id}`}>
+                    <FileEdit className="h-4 w-4 mr-1" />
+                    Edit
+                  </Link>
+                </Button>
+              )}
+
+            {showApprove && (
               <Button
                 onClick={() => runAction("approve")}
-                disabled={!canApprove || busy !== null}
+                disabled={busy !== null}
                 data-testid="button-approve-draft"
-                title={
-                  isSubmitter
-                    ? "You submitted this draft and cannot also approve it."
-                    : ""
-                }
               >
                 <CheckCircle2 className="h-4 w-4 mr-1" />
                 {busy === "approve" ? "Approving…" : "Approve"}
               </Button>
             )}
 
-            {/* Post */}
-            {draft.status === "approved" && (
+            {showPost && (
               <Button
                 onClick={() => runAction("post")}
-                disabled={!canPost || busy !== null}
+                disabled={busy !== null}
                 data-testid="button-post-draft"
-                title={
-                  isSubmitter
-                    ? "You submitted this draft and cannot also post it."
-                    : ""
-                }
               >
                 <Upload className="h-4 w-4 mr-1" />
                 {busy === "post" ? "Posting…" : "Post to ledger"}
@@ -618,8 +602,9 @@ export default function JournalEntryDraftDetailPage() {
             )}
           </div>
 
-          {/* Reject form */}
-          {draft.status === "submitted" && (
+          {/* Reject form — only visible to a reviewer who is not the
+              submitter, when the draft is awaiting review. */}
+          {showReject && (
             <div className="border-t pt-4 space-y-2">
               <Label htmlFor="reject-reason">
                 Rejection reason (required, ≥ 5 characters)
@@ -635,17 +620,26 @@ export default function JournalEntryDraftDetailPage() {
               <Button
                 variant="destructive"
                 onClick={() => runAction("reject")}
-                disabled={
-                  !canReject ||
-                  busy !== null ||
-                  rejectReason.trim().length < 5
-                }
+                disabled={busy !== null || rejectReason.trim().length < 5}
                 data-testid="button-reject-draft"
               >
                 <XCircle className="h-4 w-4 mr-1" />
                 {busy === "reject" ? "Rejecting…" : "Reject and return"}
               </Button>
             </div>
+          )}
+
+          {/* When the user is the submitter of a still-pending draft, show
+              an explanatory note instead of approve/reject buttons so they
+              understand why no actions are available. */}
+          {draft.status === "submitted" && isSubmitter && (
+            <p
+              className="text-sm text-muted-foreground border-t pt-4"
+              data-testid="text-submitter-waiting"
+            >
+              You submitted this draft. A different reviewer must approve or
+              reject it (separation of duties).
+            </p>
           )}
         </CardContent>
       </Card>
