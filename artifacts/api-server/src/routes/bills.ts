@@ -447,7 +447,9 @@ router.post(
 
     const vendorName = await getVendorName(bill.vendorId);
     await db.insert(activityLogTable).values({
-      type: "bill_created",
+      // Task #63 — distinct activity type so loadOriginatingBills can
+      // recover the approval timestamp for bill-origin draft / JE cards.
+      type: "bill_approved",
       description: `Bill approved by ${bodyParsed.data.approvedBy}`,
       actor: bodyParsed.data.approvedBy,
       actorUserId: req.authUser?.id ?? null,
