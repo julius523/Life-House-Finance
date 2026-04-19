@@ -1,0 +1,403 @@
+#63 - Bills → accounting bridge (draft JE, A/P split)
+
+What & Why
+
+Bills are still operational only. They can be created, approved, linked to transactions, and converted from transactions, but none of that creates a controlled accounting artifact. That leaves a gap between operations and the ledger: expenses already generate draft journal entries through the approval workflow, while bills still rely on manual accounting follow-up.
+
+This task closes that gap using the same accounting bridge pattern already proven for expenses:
+
+no direct posting from bill flows
+generate draft JEs only
+reuse the existing manual JE draft → submit → approve → reject → post workflow
+use the shared accounting_source_links table as the canonical bridge
+preserve idempotency and auditability at the DB and API layers
+
+Bills require one extra accounting concept that expenses did not: two accounting events instead of one.
+
+Accrual event: when a bill becomes approved/recognized, create a draft JE for
+Dr expense / Cr accounts payable
+Payment event: when that bill is paid or linked to a payment transaction, create a separate draft JE for
+Dr accounts payable / Cr cash or bank
+
+Those two events must remain distinct. No shortcut may post a ledger row directly from a bill action or transaction-link action. Everything must still flow through draft JEs and the existing approval controls.
+
+Done looks like
+Core bridge behavior
+
+When a bill reaches the configured operational state for recognition, the server generates exactly one accrual draft JE for that bill event.
+
+When a bill payment is recorded through the supported payment/link flow, the server generates exactly one payment draft JE for that bill payment event.
+
+Both draft types are stored as normal manual_journal_entry_drafts rows in draft status. They are not posted automatically and are not auto-submitted.
+
+Both draft types are linked through the shared accounting_source_links table using:
+
+sourceType='bill'
+sourceId=<bill.id>
+eventType='accrual' | 'payment'
+
+The bridge table enforces DB-level uniqueness so the same bill event cannot create duplicate drafts during retries, double-clicks, or concurrent requests.
+
+Accounting shape
+
+Accrual draft JE:
+
+debit = mapped bill expense account
+credit = mapped A/P liability account
+entry date = bill date or recognition date per existing bill semantics
+memo = deterministic summary derived from vendor + description + bill reference
+
+Payment draft JE:
+
+debit = mapped A/P liability account
+credit = mapped cash/bank/clearing account based on the payment path
+entry date = payment/link date
+memo = deterministic summary derived from vendor + description + bill reference + payment reference where available
+
+Program or dimension fields already supported by the draft payload are carried through consistently on both lines where applicable.
+
+Controls
+
+Generated bill drafts use the existing manual JE workflow unchanged:
+
+optimistic locking
+submit / approve / reject / post state machine
+no-self-approval when separation of duties is enabled
+existing Task #25A hardened posting path
+idempotent post path
+period-lock validation
+audit trail and approval history
+
+There is no second posting implementation for bills.
+
+Failure handling
+
+If the server cannot resolve a valid mapping for a bill accounting event, it does not block operational bill progress.
+
+Instead, the bill is marked with accounting-side blocked state using stable fields and reason codes, and no draft is created for that event.
+
+Blocked reasons use a stable enum:
+
+missing_category
+missing_mapping
+archived_account
+non_postable_account
+invalid_payment_method_rule
+other
+
+Accounting status values are pinned:
+
+pending
+draft_created
+posted
+blocked
+not_applicable
+
+A blocked bill remains visible in the unified blocked accounting queue and can be retried after finance fixes the mapping or account configuration.
+
+Read-side traceability
+
+From the bill detail page, users can see linked accounting drafts and posted JEs for both legs:
+
+accrual leg
+payment leg
+
+From draft JE detail and posted JE detail, users can see the originating bill when the draft/JE came from a bill bridge row.
+
+The JE list can label source rows appropriately, including bill-sourced entries.
+
+Audit trail
+
+Activity log rows are written for:
+
+bill accrual draft auto-generated
+bill payment draft auto-generated
+bill accounting blocked
+bill accounting retry
+bill marked accounting not applicable
+
+These activity rows must be queryable without string-parsing hacks and must remain consistent with how the unified blocked queue reads expense + bill bridge events.
+
+Out of scope
+auto-submitting generated bill drafts
+direct posting from bill flows
+rewriting the manual JE workflow
+bill-specific report drilldowns
+vendor-level or program-level override matrix beyond the defined mapping model
+notifications when bills become blocked
+payment batching logic beyond generating the draft for the supported payment/link action
+changes to expense bridge behavior except where shared bridge logic is intentionally generalized
+Hard constraints
+No bill-only posting shortcut
+
+No route under bills, transactions, link-bill, convert-to-bill, or payment actions may insert directly into journal_entries as a substitute for the bridge.
+
+Those flows may only:
+
+resolve mapping
+create or return the proper draft JE through the shared bridge
+update bill accounting state
+write audit events
+
+Actual posting to the ledger must still occur only through the existing manual JE post workflow.
+
+Shared bridge table only
+
+Use the shared accounting_source_links table as the canonical bridge.
+
+Do not scatter new sourceType/sourceId columns onto drafts or JEs for this work.
+
+DB-level idempotency is the real fence
+
+Use the bridge table’s unique constraint as the authoritative duplicate-prevention mechanism for bill event generation.
+
+API-level checks are useful, but DB uniqueness must be what actually guarantees safety under concurrency.
+
+Existing expense links must remain readable
+
+Any schema or backfill changes required for bills must not break existing expense bridge rows or expense traceability screens.
+
+Steps
+1) Schema
+
+Add the minimal schema needed to support bill bridge events through the shared link model.
+
+Update accounting_source_links so it can distinguish multiple accounting events for the same operational source:
+
+add eventType text or enum
+supported values for this task: primary for legacy/default rows, accrual, payment
+
+Add or update a unique constraint so the bridge enforces one row per:
+
+sourceType
+sourceId
+eventType
+
+Backfill legacy rows so existing expense links remain readable. Any existing rows without event typing should be normalized to eventType='primary'.
+
+Add or confirm bill accounting tracking fields so the UI and queue can distinguish state cleanly for the bill bridge events. If one shared status is insufficient for dual-leg visibility, model it explicitly enough that both accrual and payment legs can be understood without ambiguity.
+
+At minimum, the bill read model must be able to express:
+
+accrual pending / draft created / posted / blocked / not applicable
+payment pending / draft created / posted / blocked / not applicable
+
+If the existing bill schema already has partial accounting fields, extend rather than duplicate.
+
+2) Mapping resolution
+
+Reuse the same finance-owned mapping strategy used for the expense bridge wherever possible.
+
+For accrual generation, the server must resolve:
+
+bill category or equivalent expense-side classification
+debit expense account
+A/P liability account
+
+For payment generation, the server must resolve:
+
+A/P liability account
+credit cash/bank/clearing account based on the payment or transaction path
+
+All referenced accounts must be revalidated server-side:
+
+active
+manual-postable where required by the existing posting rules
+not archived
+not system-forbidden
+
+UI filtering is not enough.
+
+3) Generator service
+
+Create or extend a shared service module that handles bill draft generation.
+
+Suggested shape:
+
+generateDraftFromBillAccrual(billId, actor)
+generateDraftFromBillPayment(billId, actor, paymentContext)
+
+Each service should:
+
+load the bill and required related rows
+resolve mappings
+validate accounts
+build the deterministic draft payload
+create or return the proper manual_journal_entry_drafts row
+upsert or return the accounting_source_links row using DB uniqueness
+update bill accounting status fields
+write structured activity log rows
+return a structured result indicating created vs reused vs blocked
+4) Trigger points
+
+Wire the generator into the correct operational bill flows.
+
+Accrual generation should run when the bill reaches the approved/recognized state defined by current operational semantics.
+
+Payment generation should run when the supported payment/link flow occurs.
+
+This includes any route that currently:
+
+marks a bill paid
+links a transaction to a bill
+converts a transaction into a bill and immediately completes the payment-side action
+otherwise records the payment leg operationally
+
+Every such path must call the generator, not post directly.
+
+5) Retry and blocked handling
+
+Add or extend retry endpoints so finance can rerun failed bill bridge generation after fixing configuration.
+
+Retry must:
+
+preserve prior blocked audit history
+promote blocked → draft_created when successful
+remain idempotent under repeated or concurrent calls
+never generate duplicate drafts for the same bill event
+
+Add or extend mark-not-applicable handling for bills where an accounting leg should intentionally never hit the ledger, with a required note and audit log row.
+
+6) Read APIs
+
+Extend bill, draft, and JE read APIs so traceability is complete.
+
+Bill detail response should include:
+
+linked accrual draft summary
+linked accrual posted JE summary if present
+linked payment draft summary
+linked payment posted JE summary if present
+blocked reason(s) in stable code form plus human-readable text where helpful
+
+Draft detail and JE detail responses should include originating bill summary when the bridge row source is a bill.
+
+JE list response should support source labeling for bill-originated rows and filtering by bill source.
+
+7) UI
+
+Extend existing traceability surfaces rather than inventing a separate bill-accounting subsystem.
+
+Bill detail page:
+
+show accounting section for both accrual and payment legs
+show status badge(s)
+show links to draft and JE detail pages
+show block reasons
+allow retry / mark-not-applicable where the user has permission
+
+Draft detail page:
+
+show originating bill card when linked
+
+JE detail page:
+
+show originating bill card when linked
+
+JE list:
+
+show bill source labels
+allow filtering to bill-sourced rows
+
+Blocked queue:
+
+unify expense + bill blocked bridge rows on the same page
+make bill rows fully actionable with retry / mark-not-applicable
+8) OpenAPI + typed client
+
+Update openapi.yaml for:
+
+new bill bridge fields
+new eventType-aware link shapes
+retry endpoints
+read-model additions
+blocked queue unions or bill row variants
+source filter additions for bill rows
+
+Regenerate the typed client and use it in UI updates.
+
+Validation / acceptance gate
+
+Do not mark this complete unless all of the following are proven.
+
+Idempotency
+repeated calls for the same bill accrual event return the same draft/link
+repeated calls for the same bill payment event return the same draft/link
+concurrent calls converge to one bridge row and one draft per event
+DB uniqueness is the actual safety fence, not just optimistic application logic
+No shortcut posting
+link-bill
+convert-to-bill
+mark-paid
+transaction-side helpers
+
+must not write directly to journal_entries for bill bridge behavior
+
+These flows may only generate drafts.
+
+Blocked states
+mapping/account validation failures set blocked accounting state
+operational bill progress still succeeds where intended
+retry after mapping repair promotes blocked → draft_created
+prior blocked audit rows remain queryable
+Traceability
+bill detail shows linked draft and posted JE for each leg when present
+draft detail shows originating bill
+JE detail shows originating bill
+JE list labels bill-sourced rows correctly
+existing expense bridge traceability still works after the bridge-table eventType backfill
+Workflow reuse
+
+Generated bill drafts behave like normal manual drafts:
+
+submit
+approve
+reject
+post
+optimistic locking
+no-self-approval
+approval history
+hardened posting path reuse
+Audit trail
+
+The correct activity-log rows exist with stable actor linkage and enough metadata to support queue screens and provenance screens without brittle string parsing.
+
+Relevant files
+lib/db/src/schema/bills.ts
+lib/db/src/schema/accounting_source_links.ts
+lib/db/src/schema/manual_journal_entry_drafts.ts
+artifacts/api-server/src/routes/bills.ts
+artifacts/api-server/src/routes/transactions.ts
+artifacts/api-server/src/routes/accounting.ts
+artifacts/api-server/src/lib/*bill*
+artifacts/api-server/src/lib/activityLog.ts
+artifacts/api-server/src/lib/postingService.ts
+artifacts/api-server/src/lib/ensureSchema.ts
+lib/api-spec/openapi.yaml
+artifacts/finance-portal/src/pages/bills/detail.tsx
+artifacts/finance-portal/src/pages/journal-entry-draft-detail.tsx
+artifacts/finance-portal/src/pages/journal-entries-detail.tsx
+artifacts/finance-portal/src/pages/journal-entries-list.tsx
+artifacts/finance-portal/src/pages/accounting-blocked-expenses.tsx
+or the unified blocked-bridge page if already renamed/generalized
+artifacts/finance-portal/src/components/AppNav.tsx
+Dependencies
+expense mapping bridge foundation complete
+manual JE workflow complete
+traceability screens complete enough to extend
+blocked queue foundation complete enough to unify
+hardened posting path already in place and must be reused
+Revision instructions
+
+If this needs revision, revise the entire task description, not just fragments.
+
+Keep these locked decisions intact:
+
+shared accounting_source_links table is the canonical bridge
+event-typed bill links use accrual and payment
+no direct posting shortcut from bill or transaction flows
+generated bill accounting artifacts are draft JEs only
+DB-level uniqueness is the real idempotency fence
+blocked reasons remain stable enum values
+accounting statuses remain stable enum values
+existing expense bridge behavior must remain readable and intact after any bridge-table generalization
