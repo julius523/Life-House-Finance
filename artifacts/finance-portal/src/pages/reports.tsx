@@ -13,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Printer, BarChart3, Lock, AlertTriangle } from "lucide-react";
-import { format } from "date-fns";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PeriodDraftsBanner } from "@/components/period-drafts-banner";
 import { PanelErrorBoundary } from "@/components/error-boundary";
