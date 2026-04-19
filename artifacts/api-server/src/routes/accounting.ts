@@ -2805,6 +2805,10 @@ router.post(
       updated!.id,
       user,
       `${actorLabel(user)} rejected manual JE draft #${updated!.id}: ${parsed.data.reason}`,
+      // Task #43 — persist the rejection reason in structured metadata
+      // so the approval-history UI can render it without parsing the
+      // free-text description.
+      { reason: parsed.data.reason },
     );
     res.json({ draft: serializeDraft(updated!) });
   },

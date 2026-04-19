@@ -454,15 +454,28 @@ export default function JournalEntryDetailPage() {
                 data-testid="list-approval-history"
               >
                 {history.map((ev) => {
-                  const reason =
-                    ev.type === "manual_je_draft_rejected" &&
-                    ev.metadata &&
-                    typeof (ev.metadata as Record<string, unknown>)["reason"] ===
-                      "string"
-                      ? ((ev.metadata as Record<string, unknown>)[
-                          "reason"
-                        ] as string)
-                      : null;
+                  let reason: string | null = null;
+                  if (ev.type === "manual_je_draft_rejected") {
+                    const fromMeta =
+                      ev.metadata &&
+                      typeof (ev.metadata as Record<string, unknown>)[
+                        "reason"
+                      ] === "string"
+                        ? ((ev.metadata as Record<string, unknown>)[
+                            "reason"
+                          ] as string)
+                        : null;
+                    if (fromMeta) {
+                      reason = fromMeta;
+                    } else {
+                      // Fallback for events logged before the metadata.reason
+                      // field was added: parse from the description, which
+                      // is shaped "<actor> rejected manual JE draft #N: <reason>".
+                      const idx = ev.description.indexOf(": ");
+                      reason =
+                        idx >= 0 ? ev.description.slice(idx + 2).trim() : null;
+                    }
+                  }
                   const dotClass =
                     ev.type === "manual_je_draft_rejected"
                       ? "bg-destructive"
