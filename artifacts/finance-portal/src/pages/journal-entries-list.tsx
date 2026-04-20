@@ -258,6 +258,18 @@ function buildFiltersSearch(f: {
   return p.toString();
 }
 
+// Task #82 — page index is also part of the shareable link. We use a
+// 1-based `page` query param (so `?page=2` reads naturally), but keep
+// the in-component representation 0-based to match the offset math the
+// list API expects. page=1 is the default and stays out of the URL.
+function readPageFromSearch(search: string): number {
+  const p = new URLSearchParams(search);
+  const raw = p.get("page");
+  if (!raw || !/^\d+$/.test(raw)) return 0;
+  const n = Number(raw);
+  return n >= 1 ? n - 1 : 0;
+}
+
 export default function JournalEntriesListPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -271,18 +283,36 @@ export default function JournalEntriesListPage() {
   // ping-pong, and a shared link hydrates the controls on first render.
   const filters = useMemo(() => readFiltersFromSearch(search), [search]);
   const { status, source, from, to, postedBy: postedByFilter, approver: approverFilter } = filters;
-  const [page, setPage] = useState(0);
+  // Task #82 — page index lives in the URL alongside the filters so a
+  // shared link lands on the same page the sender was looking at.
+  const page = useMemo(() => readPageFromSearch(search), [search]);
 
   const updateFilters = useCallback(
     (
       patch: Partial<ReturnType<typeof readFiltersFromSearch>>,
       opts: { replace?: boolean } = {},
     ) => {
+      // Task #82 — changing any filter resets to page 1. We do this by
+      // simply not carrying the `page` param forward in the rebuilt URL.
       const next = buildFiltersSearch({ ...filters, ...patch });
       const path = window.location.pathname;
       setLocation(next ? `${path}?${next}` : path, { replace: opts.replace });
     },
     [filters, setLocation],
+  );
+
+  const setPage = useCallback(
+    (updater: number | ((p: number) => number)) => {
+      const nextPage =
+        typeof updater === "function" ? updater(page) : updater;
+      const filterStr = buildFiltersSearch(filters);
+      const params = new URLSearchParams(filterStr);
+      if (nextPage > 0) params.set("page", String(nextPage + 1));
+      const path = window.location.pathname;
+      const qs = params.toString();
+      setLocation(qs ? `${path}?${qs}` : path);
+    },
+    [filters, page, setLocation],
   );
 
   const setStatus = useCallback(
@@ -492,10 +522,9 @@ export default function JournalEntriesListPage() {
     }
   };
 
-  // Reset to first page when filters change.
-  useEffect(() => {
-    setPage(0);
-  }, [status, source, from, to, postedByFilter, approverFilter]);
+  // Task #82 — no effect needed to reset the page on filter change:
+  // updateFilters rebuilds the URL without the `page` param, so the
+  // derived page index naturally falls back to 0.
 
   // Task #50 — fetch the distinct posters/approvers so the pickers show
   // only people who have actually touched a journal entry.
