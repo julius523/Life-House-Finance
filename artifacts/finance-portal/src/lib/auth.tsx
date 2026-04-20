@@ -5,16 +5,19 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import {
+  login as apiLogin,
+  logout as apiLogout,
+  getCurrentUser,
+  listAdminUsers,
+  createAdminUser,
+  changeAdminUserPassword,
+  type AuthUser as ApiAuthUser,
+  type AuthUserRole,
+} from "@workspace/api-client-react";
 
-export type UserRole = "admin" | "approver" | "submitter";
-
-export type AuthUser = {
-  id: number;
-  email: string;
-  firstName: string;
-  lastName: string;
-  role: UserRole;
-};
+export type UserRole = AuthUserRole;
+export type AuthUser = ApiAuthUser;
 
 type AuthState = {
   user: AuthUser | null;
@@ -26,45 +29,13 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
-const API_BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "") + "/api";
-
-async function apiJson<T>(
-  path: string,
-  init?: RequestInit & { body?: unknown },
-): Promise<T> {
-  const body =
-    init?.body && typeof init.body !== "string"
-      ? JSON.stringify(init.body)
-      : (init?.body as string | undefined);
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    body,
-    credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
-  if (!res.ok) {
-    let message = `${res.status}`;
-    try {
-      const data = await res.json();
-      if (data?.error) message = data.error;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(message);
-  }
-  return (await res.json()) as T;
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = async () => {
     try {
-      const data = await apiJson<{ user: AuthUser }>("/auth/me");
+      const data = await getCurrentUser();
       setUser(data.user);
     } catch {
       setUser(null);
@@ -78,16 +49,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    const data = await apiJson<{ user: AuthUser }>("/auth/login", {
-      method: "POST",
-      body: { email, password },
-    });
+    const data = await apiLogin({ email, password });
     setUser(data.user);
   };
 
   const logout = async () => {
     try {
-      await apiJson("/auth/logout", { method: "POST" });
+      await apiLogout();
     } catch {
       /* ignore */
     }
@@ -146,7 +114,7 @@ const SUBMITTER_SECTIONS = new Set<Section>([
 export type AdminUserListItem = AuthUser & { isActive?: boolean };
 
 export async function listUsers(): Promise<AuthUser[]> {
-  const data = await apiJson<{ users: AuthUser[] }>("/admin/users");
+  const data = await listAdminUsers();
   return data.users;
 }
 
@@ -157,10 +125,7 @@ export async function createUser(input: {
   role: UserRole;
   password: string;
 }): Promise<AuthUser> {
-  const data = await apiJson<{ user: AuthUser }>("/admin/users", {
-    method: "POST",
-    body: input,
-  });
+  const data = await createAdminUser(input);
   return data.user;
 }
 
@@ -168,8 +133,5 @@ export async function changeUserPassword(
   userId: number,
   password: string,
 ): Promise<void> {
-  await apiJson(`/admin/users/${userId}/password`, {
-    method: "POST",
-    body: { password },
-  });
+  await changeAdminUserPassword(userId, { password });
 }

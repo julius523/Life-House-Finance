@@ -5,8 +5,8 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
-import type { AuthUser } from "./authUser";
 
-export type ListAdminUsers200 = {
-  users: AuthUser[];
-};
+export interface ChangeAdminUserPasswordBody {
+  /** @minLength 6 */
+  password: string;
+}

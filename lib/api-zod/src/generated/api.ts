@@ -15,6 +15,91 @@ export const HealthCheckResponse = zod.object({
 });
 
 /**
+ * @summary Sign in with email and password
+ */
+
+export const LoginBody = zod.object({
+  email: zod.string().email(),
+  password: zod.string().min(1),
+});
+
+export const LoginResponse = zod.object({
+  user: zod.object({
+    id: zod.number(),
+    email: zod.string(),
+    firstName: zod.string(),
+    lastName: zod.string(),
+    role: zod.enum(["admin", "approver", "submitter"]),
+  }),
+});
+
+/**
+ * @summary End the current session
+ */
+export const LogoutResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary Get the currently authenticated user
+ */
+export const GetCurrentUserResponse = zod.object({
+  user: zod.object({
+    id: zod.number(),
+    email: zod.string(),
+    firstName: zod.string(),
+    lastName: zod.string(),
+    role: zod.enum(["admin", "approver", "submitter"]),
+  }),
+});
+
+/**
+ * @summary List all user accounts (admin only)
+ */
+export const ListAdminUsersResponse = zod.object({
+  users: zod.array(
+    zod.object({
+      id: zod.number(),
+      email: zod.string(),
+      firstName: zod.string(),
+      lastName: zod.string(),
+      role: zod.enum(["admin", "approver", "submitter"]),
+    }),
+  ),
+});
+
+/**
+ * @summary Create a new user account (admin only)
+ */
+
+export const createAdminUserBodyPasswordMin = 6;
+
+export const CreateAdminUserBody = zod.object({
+  email: zod.string().email(),
+  firstName: zod.string().min(1),
+  lastName: zod.string().min(1),
+  role: zod.enum(["admin", "approver", "submitter"]),
+  password: zod.string().min(createAdminUserBodyPasswordMin),
+});
+
+/**
+ * @summary Change a user account password (admin only)
+ */
+export const ChangeAdminUserPasswordParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const changeAdminUserPasswordBodyPasswordMin = 6;
+
+export const ChangeAdminUserPasswordBody = zod.object({
+  password: zod.string().min(changeAdminUserPasswordBodyPasswordMin),
+});
+
+export const ChangeAdminUserPasswordResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
  * @summary Get overall financial dashboard summary
  */
 export const GetDashboardSummaryResponse = zod.object({
@@ -4022,21 +4107,6 @@ export const DeleteProgramContactParams = zod.object({
 
 export const DeleteProgramContactResponse = zod.object({
   ok: zod.boolean(),
-});
-
-/**
- * @summary List all users (admin only)
- */
-export const ListAdminUsersResponse = zod.object({
-  users: zod.array(
-    zod.object({
-      id: zod.number(),
-      email: zod.string(),
-      firstName: zod.string(),
-      lastName: zod.string(),
-      role: zod.enum(["admin", "approver", "submitter"]),
-    }),
-  ),
 });
 
 /**

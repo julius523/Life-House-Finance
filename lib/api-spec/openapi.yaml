@@ -32,6 +32,10 @@ tags:
     description: In-app notifications for the current user
   - name: accounting
     description: Chart of Accounts, accounting settings, and ledger status
+  - name: auth
+    description: Session authentication for the current user
+  - name: admin
+    description: Admin-only endpoints (user management, email settings, etc.)
 
 paths:
   /healthz:
@@ -46,6 +50,106 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Sign in with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginBody"
+      responses:
+        "200":
+          description: Authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUserResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: End the current session
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      summary: Get the currently authenticated user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUserResponse"
+
+  /admin/users:
+    get:
+      operationId: listAdminUsers
+      tags: [admin]
+      summary: List all user accounts (admin only)
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserListResponse"
+    post:
+      operationId: createAdminUser
+      tags: [admin]
+      summary: Create a new user account (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAdminUserBody"
+      responses:
+        "201":
+          description: Created user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUserResponse"
+
+  /admin/users/{id}/password:
+    post:
+      operationId: changeAdminUserPassword
+      tags: [admin]
+      summary: Change a user account password (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeAdminUserPasswordBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
 
   /dashboard/summary:
     get:
@@ -2441,25 +2545,6 @@ paths:
                   ok:
                     type: boolean
                 required: [ok]
-
-  /admin/users:
-    get:
-      operationId: listAdminUsers
-      tags: [admin]
-      summary: List all users (admin only)
-      responses:
-        "200":
-          description: Users
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  users:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/AuthUser"
-                required: [users]
 
   /accounting/threads:
     get:
@@ -6523,6 +6608,61 @@ components:
         - firstName
         - lastName
         - role
+
+    AuthUserResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/AuthUser"
+      required: [user]
+
+    LoginBody:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 1
+      required: [email, password]
+
+    AdminUserListResponse:
+      type: object
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthUser"
+      required: [users]
+
+    CreateAdminUserBody:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+          minLength: 1
+        role:
+          type: string
+          enum: [admin, approver, submitter]
+        password:
+          type: string
+          minLength: 6
+      required: [email, firstName, lastName, role, password]
+
+    ChangeAdminUserPasswordBody:
+      type: object
+      properties:
+        password:
+          type: string
+          minLength: 6
+      required: [password]
 
     CopilotThread:
       type: object

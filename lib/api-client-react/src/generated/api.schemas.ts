@@ -1812,6 +1812,45 @@ export interface AuthUser {
   role: AuthUserRole;
 }
 
+export interface AuthUserResponse {
+  user: AuthUser;
+}
+
+export interface LoginBody {
+  email: string;
+  /** @minLength 1 */
+  password: string;
+}
+
+export interface AdminUserListResponse {
+  users: AuthUser[];
+}
+
+export type CreateAdminUserBodyRole =
+  (typeof CreateAdminUserBodyRole)[keyof typeof CreateAdminUserBodyRole];
+
+export const CreateAdminUserBodyRole = {
+  admin: "admin",
+  approver: "approver",
+  submitter: "submitter",
+} as const;
+
+export interface CreateAdminUserBody {
+  email: string;
+  /** @minLength 1 */
+  firstName: string;
+  /** @minLength 1 */
+  lastName: string;
+  role: CreateAdminUserBodyRole;
+  /** @minLength 6 */
+  password: string;
+}
+
+export interface ChangeAdminUserPasswordBody {
+  /** @minLength 6 */
+  password: string;
+}
+
 export interface CopilotThread {
   id: number;
   title?: string | null;
@@ -2941,10 +2980,6 @@ export type UpdateProgramContact200 = {
 
 export type DeleteProgramContact200 = {
   ok: boolean;
-};
-
-export type ListAdminUsers200 = {
-  users: AuthUser[];
 };
 
 export type ListCopilotThreads200 = {
