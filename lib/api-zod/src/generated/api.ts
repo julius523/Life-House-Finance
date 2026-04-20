@@ -5225,7 +5225,19 @@ export const ListJournalEntryExportSchedulesResponse = zod.object({
         .enum(["copilot", "manual", "expense", "bill"])
         .nullish(),
       filterPostedByUserId: zod.number().nullish(),
+      filterPostedByUserLabel: zod
+        .string()
+        .nullish()
+        .describe(
+          'Server-resolved \"Display Name <email>\" for filterPostedByUserId, or null when no filter is set. Falls back to \"User #<id>\" if the user row was deleted. Lets the email body and schedules table show a friendly name without the client needing to load the actors list.\n',
+        ),
       filterApproverUserId: zod.number().nullish(),
+      filterApproverUserLabel: zod
+        .string()
+        .nullish()
+        .describe(
+          'Server-resolved \"Display Name <email>\" for filterApproverUserId, or null when no filter is set. See filterPostedByUserLabel.\n',
+        ),
       includeLines: zod.boolean(),
       createdByUserId: zod.number().nullish(),
       createdAt: zod.string(),
@@ -5285,7 +5297,19 @@ export const UpdateJournalEntryExportScheduleResponse = zod.object({
     filterStatus: zod.enum(["posted", "reversed"]).nullish(),
     filterSource: zod.enum(["copilot", "manual", "expense", "bill"]).nullish(),
     filterPostedByUserId: zod.number().nullish(),
+    filterPostedByUserLabel: zod
+      .string()
+      .nullish()
+      .describe(
+        'Server-resolved \"Display Name <email>\" for filterPostedByUserId, or null when no filter is set. Falls back to \"User #<id>\" if the user row was deleted. Lets the email body and schedules table show a friendly name without the client needing to load the actors list.\n',
+      ),
     filterApproverUserId: zod.number().nullish(),
+    filterApproverUserLabel: zod
+      .string()
+      .nullish()
+      .describe(
+        'Server-resolved \"Display Name <email>\" for filterApproverUserId, or null when no filter is set. See filterPostedByUserLabel.\n',
+      ),
     includeLines: zod.boolean(),
     createdByUserId: zod.number().nullish(),
     createdAt: zod.string(),

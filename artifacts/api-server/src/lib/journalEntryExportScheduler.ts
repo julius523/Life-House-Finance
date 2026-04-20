@@ -7,7 +7,7 @@ import {
   type JournalEntryExportSchedule,
   type ExportCadence,
 } from "@workspace/db";
-import { eq, lte, isNotNull, and } from "drizzle-orm";
+import { eq, lte, isNotNull, and, inArray } from "drizzle-orm";
 import { logger } from "./logger";
 import { generateJournalEntryCsv } from "./journalEntryCsvService";
 import { createNotification, deliverEmail } from "./notifications";
@@ -120,6 +120,41 @@ export function computeExportRange(
 
 function isExportCadence(value: unknown): value is ExportCadence {
   return value === "daily" || value === "weekly" || value === "monthly";
+}
+
+/**
+ * Task #81 — resolve a set of user IDs to "Display Name <email>" labels in
+ * a single round-trip. Used by both the schedule list endpoint (to enrich
+ * each row's posted-by/approver filters) and `runSchedule` (to render the
+ * filter section of the outgoing email body). Falls back to "User #<id>"
+ * when the row was deleted so the audit trail still points at *some*
+ * recognizable identifier instead of an opaque integer.
+ */
+export async function resolveUserLabels(
+  userIds: ReadonlyArray<number>,
+): Promise<Map<number, string>> {
+  const unique = Array.from(new Set(userIds.filter((n) => Number.isInteger(n) && n > 0)));
+  if (unique.length === 0) return new Map();
+  const rows = await db
+    .select({
+      id: usersTable.id,
+      email: usersTable.email,
+      firstName: usersTable.firstName,
+      lastName: usersTable.lastName,
+    })
+    .from(usersTable)
+    .where(inArray(usersTable.id, unique));
+  const found = new Map<number, string>();
+  for (const r of rows) {
+    const name = [r.firstName, r.lastName].filter(Boolean).join(" ").trim();
+    found.set(r.id, name ? `${name} <${r.email}>` : r.email);
+  }
+  // Backfill missing IDs (deleted users) with a stable placeholder so callers
+  // can render *something* rather than checking for undefined everywhere.
+  for (const id of unique) {
+    if (!found.has(id)) found.set(id, `User #${id}`);
+  }
+  return found;
 }
 
 /**
@@ -283,14 +318,34 @@ export async function runSchedule(
     const subject = `[Life House] Journal entries ${range.from}${
       range.from === range.to ? "" : ` to ${range.to}`
     } (${rowCount} entr${rowCount === 1 ? "y" : "ies"})`;
+    // Task #81 — resolve user-id filters to "Display Name <email>" so the
+    // email reads as an audit trail instead of leaking opaque integers.
+    const labels = await resolveUserLabels([
+      ...(schedule.filterPostedByUserId != null
+        ? [schedule.filterPostedByUserId]
+        : []),
+      ...(schedule.filterApproverUserId != null
+        ? [schedule.filterApproverUserId]
+        : []),
+    ]);
+    const postedByLabel =
+      schedule.filterPostedByUserId != null
+        ? labels.get(schedule.filterPostedByUserId) ??
+          `User #${schedule.filterPostedByUserId}`
+        : "anyone";
+    const approverLabel =
+      schedule.filterApproverUserId != null
+        ? labels.get(schedule.filterApproverUserId) ??
+          `User #${schedule.filterApproverUserId}`
+        : "anyone";
     const body =
       `Scheduled CSV export for "${schedule.name}".\n\n` +
       `Cadence: ${schedule.cadence}\n` +
       `Date range: ${range.from} → ${range.to}\n` +
       `Status filter: ${filterStatus ?? "all"}\n` +
       `Source filter: ${filterSource ?? "all"}\n` +
-      `Posted by filter: ${schedule.filterPostedByUserId ?? "anyone"}\n` +
-      `Approver filter: ${schedule.filterApproverUserId ?? "anyone"}\n` +
+      `Posted by filter: ${postedByLabel}\n` +
+      `Approver filter: ${approverLabel}\n` +
       `Include lines: ${schedule.includeLines ? "yes" : "no"}\n` +
       `Entries in export: ${rowCount}\n\n` +
       (rowCount === 0

@@ -23,8 +23,42 @@ import {
   applyRunOutcome,
   buildScheduleCsv,
   computeNextRunAt,
+  resolveUserLabels,
   runSchedule,
 } from "../lib/journalEntryExportScheduler";
+
+type ScheduleRow = typeof journalEntryExportSchedulesTable.$inferSelect;
+
+/**
+ * Task #81 — attach the friendly user labels for the posted-by/approver
+ * filter ids to each schedule row. Done as a single batched lookup so the
+ * list endpoint stays a flat O(1) round-trip regardless of how many rows
+ * point at the same user.
+ */
+async function enrichSchedules(rows: ScheduleRow[]): Promise<
+  Array<ScheduleRow & {
+    filterPostedByUserLabel: string | null;
+    filterApproverUserLabel: string | null;
+  }>
+> {
+  const ids: number[] = [];
+  for (const r of rows) {
+    if (r.filterPostedByUserId != null) ids.push(r.filterPostedByUserId);
+    if (r.filterApproverUserId != null) ids.push(r.filterApproverUserId);
+  }
+  const labels = await resolveUserLabels(ids);
+  return rows.map((r) => ({
+    ...r,
+    filterPostedByUserLabel:
+      r.filterPostedByUserId != null
+        ? labels.get(r.filterPostedByUserId) ?? `User #${r.filterPostedByUserId}`
+        : null,
+    filterApproverUserLabel:
+      r.filterApproverUserId != null
+        ? labels.get(r.filterApproverUserId) ?? `User #${r.filterApproverUserId}`
+        : null,
+  }));
+}
 
 const router: IRouter = Router();
 router.use("/journal-entry-export-schedules", requireAuth, requireRole("admin"));
@@ -70,7 +104,7 @@ router.get(
         desc(journalEntryExportSchedulesTable.enabled),
         desc(journalEntryExportSchedulesTable.createdAt),
       );
-    res.json({ schedules: rows });
+    res.json({ schedules: await enrichSchedules(rows) });
   },
 );
 
@@ -106,7 +140,8 @@ router.post(
         nextRunAt,
       })
       .returning();
-    res.status(201).json({ schedule: row });
+    const [enriched] = await enrichSchedules([row]);
+    res.status(201).json({ schedule: enriched });
   },
 );
 
@@ -180,7 +215,8 @@ router.patch(
       .set(next)
       .where(eq(journalEntryExportSchedulesTable.id, id))
       .returning();
-    res.json({ schedule: row });
+    const [enriched] = await enrichSchedules([row]);
+    res.json({ schedule: enriched });
   },
 );
 

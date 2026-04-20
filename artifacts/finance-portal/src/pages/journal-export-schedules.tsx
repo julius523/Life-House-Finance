@@ -555,39 +555,53 @@ export default function JournalExportSchedulesPage() {
                           {s.filterSource ?? "any source"}
                         </span>
                         {s.filterPostedByUserId != null ? (
-                          <Badge variant="outline" className="mr-1">
+                          <Badge
+                            variant="outline"
+                            className="mr-1"
+                            data-testid={`filter-posted-by-${s.id}`}
+                          >
                             posted:{" "}
-                            {(() => {
-                              const u = posters.find(
-                                (p) => p.id === s.filterPostedByUserId,
-                              );
-                              return u
-                                ? actorName({
-                                    id: u.id,
-                                    firstName: u.firstName ?? null,
-                                    lastName: u.lastName ?? null,
-                                    email: u.email ?? null,
-                                  })
-                                : `#${s.filterPostedByUserId}`;
-                            })()}
+                            {/* Task #81 — prefer the server-resolved label so
+                              * the row reads correctly even before the actors
+                              * picker query has loaded (or when the filtered
+                              * user is no longer in the actors list). */}
+                            {s.filterPostedByUserLabel ??
+                              (() => {
+                                const u = posters.find(
+                                  (p) => p.id === s.filterPostedByUserId,
+                                );
+                                return u
+                                  ? actorName({
+                                      id: u.id,
+                                      firstName: u.firstName ?? null,
+                                      lastName: u.lastName ?? null,
+                                      email: u.email ?? null,
+                                    })
+                                  : `#${s.filterPostedByUserId}`;
+                              })()}
                           </Badge>
                         ) : null}
                         {s.filterApproverUserId != null ? (
-                          <Badge variant="outline" className="mr-1">
+                          <Badge
+                            variant="outline"
+                            className="mr-1"
+                            data-testid={`filter-approver-${s.id}`}
+                          >
                             approver:{" "}
-                            {(() => {
-                              const u = approvers.find(
-                                (a) => a.id === s.filterApproverUserId,
-                              );
-                              return u
-                                ? actorName({
-                                    id: u.id,
-                                    firstName: u.firstName ?? null,
-                                    lastName: u.lastName ?? null,
-                                    email: u.email ?? null,
-                                  })
-                                : `#${s.filterApproverUserId}`;
-                            })()}
+                            {s.filterApproverUserLabel ??
+                              (() => {
+                                const u = approvers.find(
+                                  (a) => a.id === s.filterApproverUserId,
+                                );
+                                return u
+                                  ? actorName({
+                                      id: u.id,
+                                      firstName: u.firstName ?? null,
+                                      lastName: u.lastName ?? null,
+                                      email: u.email ?? null,
+                                    })
+                                  : `#${s.filterApproverUserId}`;
+                              })()}
                           </Badge>
                         ) : null}
                         {s.includeLines ? (

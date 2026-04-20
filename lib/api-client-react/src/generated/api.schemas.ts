@@ -2239,7 +2239,13 @@ export interface JournalEntryExportSchedule {
   filterStatus?: JournalEntryExportScheduleFilterStatus;
   filterSource?: JournalEntryExportScheduleFilterSource;
   filterPostedByUserId?: number | null;
+  /** Server-resolved "Display Name <email>" for filterPostedByUserId, or null when no filter is set. Falls back to "User #<id>" if the user row was deleted. Lets the email body and schedules table show a friendly name without the client needing to load the actors list.
+   */
+  filterPostedByUserLabel?: string | null;
   filterApproverUserId?: number | null;
+  /** Server-resolved "Display Name <email>" for filterApproverUserId, or null when no filter is set. See filterPostedByUserLabel.
+   */
+  filterApproverUserLabel?: string | null;
   includeLines: boolean;
   createdByUserId?: number | null;
   createdAt: string;
