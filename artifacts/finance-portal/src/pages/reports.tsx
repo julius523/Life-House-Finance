@@ -1099,24 +1099,47 @@ export default function ReportsPage() {
       setBulkDownloading(null);
     }
   };
-  const collectTrialBalanceAccounts = (): BulkAccount[] => {
-    if (!tb) return [];
-    const out: BulkAccount[] = [];
+  const collectTrialBalanceAccounts = (): {
+    mapped: BulkAccount[];
+    unmapped: { code: string; name: string; debits: string; credits: string }[];
+  } => {
+    if (!tb) return { mapped: [], unmapped: [] };
+    const mapped: BulkAccount[] = [];
+    const unmapped: {
+      code: string;
+      name: string;
+      debits: string;
+      credits: string;
+    }[] = [];
     for (const r of tb.rows) {
-      if (r.accountId == null) continue;
-      out.push({
-        accountId: r.accountId,
-        code: r.code,
-        name: r.name,
-        group: r.type ?? "Unclassified",
-      });
+      if (r.accountId == null) {
+        // Lines whose ledger account doesn't map to a current Chart-of-Accounts
+        // row (legacy "(unmapped)" bucket on the Trial Balance). The
+        // /reports/account-activity endpoint requires a numeric accountId so
+        // we can't fetch their per-line activity, but we still surface them
+        // as a section in the bulk CSV with the TB-level totals so the
+        // workbook represents every row visible in the Trial Balance.
+        unmapped.push({
+          code: r.code,
+          name: r.name,
+          debits: r.debits,
+          credits: r.credits,
+        });
+      } else {
+        mapped.push({
+          accountId: r.accountId,
+          code: r.code,
+          name: r.name,
+          group: r.type ?? "Unclassified",
+        });
+      }
     }
-    return out;
+    return { mapped, unmapped };
   };
   const downloadAllTrialBalanceActivityCsv = async () => {
     if (!tb || bulkDownloading) return;
-    const accounts = collectTrialBalanceAccounts();
-    if (accounts.length === 0) return;
+    const { mapped, unmapped } = collectTrialBalanceAccounts();
+    if (mapped.length === 0 && unmapped.length === 0) return;
     setBulkDownloading("trial-balance");
     try {
       const rows: CsvCell[][] = [
@@ -1125,10 +1148,38 @@ export default function ReportsPage() {
         ["generated", new Date().toISOString()],
         [],
       ];
-      await fetchAndAppendActivity(rows, accounts, {
+      await fetchAndAppendActivity(rows, mapped, {
         from: fromDate,
         to: toDate,
       });
+      // Append unmapped rows as sections with TB-level totals so the workbook
+      // covers every row in the Trial Balance, with a marker explaining why
+      // no per-line activity is listed.
+      for (const u of unmapped) {
+        rows.push(["ACCOUNT", u.code, u.name, "group=unmapped"]);
+        rows.push(ACTIVITY_HEADER);
+        rows.push([
+          "NOTE",
+          "",
+          "",
+          "Per-line activity unavailable: ledger account is not linked to a Chart of Accounts row.",
+          "",
+          "",
+          "",
+          "",
+        ]);
+        rows.push([
+          "TOTALS (from Trial Balance)",
+          "",
+          "",
+          "",
+          "",
+          "",
+          u.debits,
+          u.credits,
+        ]);
+        rows.push([]);
+      }
       downloadCsv(
         `trial-balance_all-activity_${csvSafeDateRange(fromDate, toDate)}.csv`,
         rows,
@@ -1823,21 +1874,31 @@ export default function ReportsPage() {
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
-                    {(tb?.rows.some((r) => r.accountId != null) ?? false) && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={downloadAllTrialBalanceActivityCsv}
-                        disabled={!tb || tbLoading || bulkDownloading !== null}
-                        className="no-print"
-                        data-testid="export-csv-tb-all-activity"
-                      >
-                        {bulkDownloading === "trial-balance"
-                          ? "Preparing…"
-                          : "Download all activity (CSV)"}
-                      </Button>
-                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={downloadAllTrialBalanceActivityCsv}
+                      disabled={
+                        !tb ||
+                        tbLoading ||
+                        tb.rows.length === 0 ||
+                        bulkDownloading !== null
+                      }
+                      className="no-print"
+                      data-testid="export-csv-tb-all-activity"
+                      title={
+                        !tb || tbLoading
+                          ? "Loading Trial Balance…"
+                          : tb.rows.length === 0
+                            ? "No Trial Balance activity to export"
+                            : undefined
+                      }
+                    >
+                      {bulkDownloading === "trial-balance"
+                        ? "Preparing…"
+                        : "Download all activity (CSV)"}
+                    </Button>
                     <Button
                       type="button"
                       size="sm"

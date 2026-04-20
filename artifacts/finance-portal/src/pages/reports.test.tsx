@@ -234,7 +234,7 @@ describe("Reports page — partial date input regression (Task #65 / #75)", () =
     assertNoInvalidTimeValue();
   });
 
-  it("Trial Balance bulk activity button is hidden when there are no mapped accounts", () => {
+  it("Trial Balance bulk activity button is always rendered, but disabled when there are no rows to export (Task #84)", () => {
     mockTrialBalanceData.current = {
       fromDate: null,
       toDate: null,
@@ -247,9 +247,12 @@ describe("Reports page — partial date input regression (Task #65 / #75)", () =
       },
     };
     render(<ReportsPage />);
-    expect(
-      screen.queryByTestId("export-csv-tb-all-activity"),
-    ).not.toBeInTheDocument();
+    const btn = screen.getByTestId(
+      "export-csv-tb-all-activity",
+    ) as HTMLButtonElement;
+    expect(btn).toBeInTheDocument();
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toMatch(/no trial balance activity/i);
     mockTrialBalanceData.current = undefined;
   });
 
@@ -370,7 +373,14 @@ describe("Reports page — partial date input regression (Task #65 / #75)", () =
       expect(csv).toContain("group=income");
       expect(csv).toContain("JE-101-1");
       expect(csv).toContain("JE-4000-1");
-      expect(csv).not.toContain("(unmapped)");
+      // Unmapped rows are surfaced as their own section with a NOTE marker
+      // and the Trial-Balance-level totals (no per-line activity, since the
+      // activity API requires a numeric accountId).
+      expect(csv).toContain("(unmapped)");
+      expect(csv).toContain("legacy:misc");
+      expect(csv).toContain("group=unmapped");
+      expect(csv).toContain("Per-line activity unavailable");
+      expect(csv).toContain("TOTALS (from Trial Balance)");
     } finally {
       anchorClickSpy.mockRestore();
       revokeObjectURLSpy.mockRestore();
