@@ -27,6 +27,7 @@ import {
 } from "@workspace/db";
 import {
   computeNextRunAt,
+  computeExportRange,
   _tickOnceForTests,
 } from "../journalEntryExportScheduler";
 import type { JournalEntryExportSchedule } from "@workspace/db";
@@ -219,6 +220,139 @@ test("monthly: Dec 31 23:00 → Jan 1 next year (year-roll)", () => {
   assert.equal(
     computeNextRunAt("monthly", iso("2025-12-31T23:00:00.000Z")).toISOString(),
     "2026-01-01T02:00:00.000Z",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Task #80 — computeExportRange — pure function, no DB.
+//
+// Companion to computeNextRunAt: decides *which days of data* the
+// emailed CSV covers for a given runAt. Same month-end / year-end
+// edge sensitivity (a monthly run on Mar 1 must cover all of Feb
+// including Feb 29 in leap years; a daily run on Jan 1 must cover
+// Dec 31 of the previous year). The upper bound is always
+// "yesterday" (UTC) — never the run day itself, because postings
+// may still arrive during the day.
+// ---------------------------------------------------------------------------
+
+test("daily export range: mid-month run covers just yesterday", () => {
+  // Run anchored at 02:00 UTC on the 15th → yesterday is the 14th.
+  assert.deepEqual(
+    computeExportRange("daily", iso("2025-03-15T02:00:00.000Z")),
+    { from: "2025-03-14", to: "2025-03-14" },
+  );
+});
+
+test("daily export range: Mar 1 covers Feb 28 (non-leap)", () => {
+  assert.deepEqual(
+    computeExportRange("daily", iso("2025-03-01T02:00:00.000Z")),
+    { from: "2025-02-28", to: "2025-02-28" },
+  );
+});
+
+test("daily export range: Mar 1 covers Feb 29 in a leap year", () => {
+  assert.deepEqual(
+    computeExportRange("daily", iso("2024-03-01T02:00:00.000Z")),
+    { from: "2024-02-29", to: "2024-02-29" },
+  );
+});
+
+test("daily export range: Jan 1 covers Dec 31 of previous year", () => {
+  assert.deepEqual(
+    computeExportRange("daily", iso("2025-01-01T02:00:00.000Z")),
+    { from: "2024-12-31", to: "2024-12-31" },
+  );
+});
+
+test("weekly export range: mid-month run covers prior 7 days through yesterday", () => {
+  // Yesterday = 2025-03-14, prior 7 days inclusive → 2025-03-08..2025-03-14.
+  assert.deepEqual(
+    computeExportRange("weekly", iso("2025-03-15T02:00:00.000Z")),
+    { from: "2025-03-08", to: "2025-03-14" },
+  );
+});
+
+test("weekly export range: spans Feb→Mar boundary including leap day", () => {
+  // Run on 2024-03-03 → yesterday = 2024-03-02; window =
+  // 2024-02-25..2024-03-02, which crosses the month boundary and
+  // includes the leap-day Feb 29.
+  assert.deepEqual(
+    computeExportRange("weekly", iso("2024-03-03T02:00:00.000Z")),
+    { from: "2024-02-25", to: "2024-03-02" },
+  );
+});
+
+test("weekly export range: spans Feb→Mar boundary in a non-leap year", () => {
+  // Run on 2025-03-03 → yesterday = 2025-03-02; window =
+  // 2025-02-24..2025-03-02 (no Feb 29 because non-leap).
+  assert.deepEqual(
+    computeExportRange("weekly", iso("2025-03-03T02:00:00.000Z")),
+    { from: "2025-02-24", to: "2025-03-02" },
+  );
+});
+
+test("weekly export range: Jan 1 run covers prior 7 days ending Dec 31 of previous year", () => {
+  // The full 7-day window sits entirely in the previous year.
+  assert.deepEqual(
+    computeExportRange("weekly", iso("2025-01-01T02:00:00.000Z")),
+    { from: "2024-12-25", to: "2024-12-31" },
+  );
+});
+
+test("weekly export range: Jan 3 run spans the year boundary Dec→Jan", () => {
+  // Yesterday = 2026-01-02; window = 2025-12-27..2026-01-02 — the
+  // 7-day window straddles the year change.
+  assert.deepEqual(
+    computeExportRange("weekly", iso("2026-01-03T02:00:00.000Z")),
+    { from: "2025-12-27", to: "2026-01-02" },
+  );
+});
+
+test("monthly export range: mid-month run covers the previous calendar month", () => {
+  // Anywhere in March → previous calendar month is all of February.
+  assert.deepEqual(
+    computeExportRange("monthly", iso("2025-03-15T02:00:00.000Z")),
+    { from: "2025-02-01", to: "2025-02-28" },
+  );
+});
+
+test("monthly export range: Mar 1 (non-leap) covers Feb 1..Feb 28", () => {
+  assert.deepEqual(
+    computeExportRange("monthly", iso("2025-03-01T02:00:00.000Z")),
+    { from: "2025-02-01", to: "2025-02-28" },
+  );
+});
+
+test("monthly export range: Mar 1 in a leap year covers Feb 1..Feb 29", () => {
+  // The whole point of this case — we must include Feb 29 in the
+  // previous-month window or the leap-day's postings disappear from
+  // the email.
+  assert.deepEqual(
+    computeExportRange("monthly", iso("2024-03-01T02:00:00.000Z")),
+    { from: "2024-02-01", to: "2024-02-29" },
+  );
+});
+
+test("monthly export range: Jan 1 covers all of December of previous year", () => {
+  assert.deepEqual(
+    computeExportRange("monthly", iso("2025-01-01T02:00:00.000Z")),
+    { from: "2024-12-01", to: "2024-12-31" },
+  );
+});
+
+test("monthly export range: Jan 15 (mid-Jan) still covers all of previous December", () => {
+  // A monthly schedule that fires partway through the month should
+  // still emit the full prior calendar month, not a partial window.
+  assert.deepEqual(
+    computeExportRange("monthly", iso("2025-01-15T02:00:00.000Z")),
+    { from: "2024-12-01", to: "2024-12-31" },
+  );
+});
+
+test("monthly export range: May 1 covers Apr 1..Apr 30 (30-day month)", () => {
+  assert.deepEqual(
+    computeExportRange("monthly", iso("2025-05-01T02:00:00.000Z")),
+    { from: "2025-04-01", to: "2025-04-30" },
   );
 });
 
