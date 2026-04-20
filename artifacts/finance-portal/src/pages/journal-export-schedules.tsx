@@ -110,6 +110,12 @@ function formatDate(iso: string | null | undefined): string {
   }
 }
 
+// Mirrors MAX_CONSECUTIVE_FAILURES in
+// artifacts/api-server/src/lib/journalEntryExportScheduler.ts — kept in
+// sync manually so the table can show "Failures: n/MAX" without an extra
+// API field.
+const MAX_CONSECUTIVE_FAILURES = 3;
+
 function statusBadgeVariant(
   status: string | null | undefined,
 ): "default" | "secondary" | "destructive" | "outline" {
@@ -506,16 +512,32 @@ export default function JournalExportSchedulesPage() {
                     <th className="text-left p-3">Filters</th>
                     <th className="text-left p-3">Next run</th>
                     <th className="text-left p-3">Last run</th>
+                    <th className="text-left p-3">Failures</th>
                     <th className="text-left p-3">Enabled</th>
                     <th className="text-right p-3">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {schedules.map((s) => (
+                  {schedules.map((s) => {
+                    const failures = s.consecutiveFailureCount ?? 0;
+                    // Highlight rows that are 1+ failures away from
+                    // auto-pause. Auto-paused rows already get the
+                    // destructive banner above and the "Off" badge below,
+                    // so the row tint is reserved for the warning state
+                    // (failures > 0 but still enabled / not yet paused).
+                    const nearingPause =
+                      s.enabled &&
+                      failures > 0 &&
+                      failures < MAX_CONSECUTIVE_FAILURES;
+                    return (
                     <tr
                       key={s.id}
                       className={`border-b hover:bg-muted/50 cursor-pointer ${
                         selectedScheduleId === s.id ? "bg-muted/40" : ""
+                      } ${
+                        nearingPause
+                          ? "bg-destructive/5 hover:bg-destructive/10"
+                          : ""
                       }`}
                       onClick={() => setSelectedScheduleId(s.id)}
                       data-testid={`row-schedule-${s.id}`}
@@ -590,6 +612,40 @@ export default function JournalExportSchedulesPage() {
                         </div>
                       </td>
                       <td className="p-3">
+                        {failures === 0 ? (
+                          <span
+                            className="text-muted-foreground"
+                            data-testid={`failures-${s.id}`}
+                          >
+                            0/{MAX_CONSECUTIVE_FAILURES}
+                          </span>
+                        ) : failures >= MAX_CONSECUTIVE_FAILURES ? (
+                          <Badge
+                            variant="destructive"
+                            data-testid={`failures-${s.id}`}
+                            title="Schedule auto-paused after reaching the failure limit"
+                          >
+                            {failures}/{MAX_CONSECUTIVE_FAILURES}
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="destructive"
+                            className="bg-destructive/15 text-destructive hover:bg-destructive/20 border border-destructive/30"
+                            data-testid={`failures-${s.id}`}
+                            title={`${
+                              MAX_CONSECUTIVE_FAILURES - failures
+                            } more failure${
+                              MAX_CONSECUTIVE_FAILURES - failures === 1
+                                ? ""
+                                : "s"
+                            } until this schedule auto-pauses`}
+                          >
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            {failures}/{MAX_CONSECUTIVE_FAILURES}
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="p-3">
                         {s.enabled ? (
                           <Badge>On</Badge>
                         ) : (
@@ -636,7 +692,8 @@ export default function JournalExportSchedulesPage() {
                         ) : null}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
