@@ -27,3 +27,6 @@ Nonprofit bookkeeping monorepo (pnpm workspace).
 ## Test evidence
 - `evidence/step8/`, `evidence/step9/`, `evidence/task25/`, `evidence/task25a/`
 - Runners under `.local/test-evidence/run-*.mjs`
+
+## Running tests locally
+- Backend integration tests: `pnpm --filter @workspace/api-server test` (also runs automatically in `scripts/post-merge.sh` after every merge, so a regression in the journal-entry immutability triggers — or any future backend test — will fail the merge run).
