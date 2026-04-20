@@ -22,7 +22,43 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+
+const { mockTrialBalanceData, getAccountActivityReportMock } = vi.hoisted(
+  () => ({
+    mockTrialBalanceData: {
+      current: undefined as
+        | undefined
+        | {
+            fromDate: string | null;
+            toDate: string | null;
+            rows: Array<{
+              accountId: number | null;
+              code: string;
+              name: string;
+              type: string | null;
+              subtype: string | null;
+              normalBalance: "debit" | "credit";
+              isActive: boolean;
+              debits: string;
+              credits: string;
+              balance: string;
+              balanceSide: "debit" | "credit";
+            }>;
+            totals: {
+              debits: string;
+              credits: string;
+              balanced: boolean;
+              differenceCents: number;
+            };
+          },
+    },
+    getAccountActivityReportMock: vi.fn(async () => ({
+      lines: [],
+      totals: { debits: "0.00", credits: "0.00" },
+    })),
+  }),
+);
 
 vi.mock("@workspace/api-client-react", () => {
   const noopQuery = () => ({
@@ -31,16 +67,66 @@ vi.mock("@workspace/api-client-react", () => {
     error: null,
   });
   return {
-    useGetFinancialSummaryReport: noopQuery,
-    useGetTrialBalanceReport: noopQuery,
+    useGetFinancialSummaryReport: () =>
+      mockTrialBalanceData.current
+        ? {
+            data: {
+              generatedAt: new Date().toISOString(),
+              fromDate: "2025-01-01",
+              toDate: "2025-12-31",
+              expenseTotalsByStatus: [],
+              billTotalsByStatus: [],
+              spendByProgram: [],
+              topVendors: [],
+              missingReceiptCount: 0,
+              missingReceiptAmount: 0,
+              missingReceipts: [],
+              bankReconciliation: {
+                accounts: [],
+                totals: { ledgerBalance: 0, statementBalance: 0, deltaCents: 0 },
+              },
+              profitAndLoss: {
+                totalIncome: 0,
+                totalExpenses: 0,
+                netIncome: 0,
+                incomeByProgram: [],
+                expensesByProgram: [],
+                uncategorizedIncome: 0,
+                uncategorizedExpenses: 0,
+                incomeByAccount: [],
+                expensesByAccount: [],
+              },
+              balanceSheet: {
+                cash: 0,
+                cashOnHand: 0,
+                accountsReceivable: 0,
+                otherAssets: 0,
+                accountsPayable: 0,
+                otherLiabilities: 0,
+                equity: 0,
+                totalAssets: 0,
+                totalLiabilities: 0,
+                cashAccounts: [],
+                accountsReceivableAccounts: [],
+                otherAssetAccounts: [],
+                accountsPayableAccounts: [],
+                otherLiabilityAccounts: [],
+              },
+            },
+            isLoading: false,
+            error: null,
+          }
+        : { data: undefined, isLoading: false, error: null },
+    useGetTrialBalanceReport: () => ({
+      data: mockTrialBalanceData.current,
+      isLoading: false,
+      error: null,
+    }),
     useGetAccountActivityReport: noopQuery,
     useGetReconciliationReport: noopQuery,
     useListAccountingPeriods: noopQuery,
     useListJournalEntryDrafts: noopQuery,
-    getAccountActivityReport: vi.fn(async () => ({
-      lines: [],
-      totals: { debits: "0.00", credits: "0.00" },
-    })),
+    getAccountActivityReport: getAccountActivityReportMock,
     ListJournalEntryDraftsScope: { all: "all", mine: "mine" },
   };
 });
@@ -146,6 +232,151 @@ describe("Reports page — partial date input regression (Task #65 / #75)", () =
     ).toBeInTheDocument();
     expect(screen.getByTestId("banner-invalid-range")).toBeInTheDocument();
     assertNoInvalidTimeValue();
+  });
+
+  it("Trial Balance bulk activity button is hidden when there are no mapped accounts", () => {
+    mockTrialBalanceData.current = {
+      fromDate: null,
+      toDate: null,
+      rows: [],
+      totals: {
+        debits: "0.00",
+        credits: "0.00",
+        balanced: true,
+        differenceCents: 0,
+      },
+    };
+    render(<ReportsPage />);
+    expect(
+      screen.queryByTestId("export-csv-tb-all-activity"),
+    ).not.toBeInTheDocument();
+    mockTrialBalanceData.current = undefined;
+  });
+
+  it("Trial Balance bulk activity button fetches activity for every mapped account and produces a sectioned CSV (Task #84)", async () => {
+    mockTrialBalanceData.current = {
+      fromDate: null,
+      toDate: null,
+      rows: [
+        {
+          accountId: 101,
+          code: "1000",
+          name: "Operating Cash",
+          type: "asset",
+          subtype: "cash",
+          normalBalance: "debit",
+          isActive: true,
+          debits: "500.00",
+          credits: "0.00",
+          balance: "500.00",
+          balanceSide: "debit",
+        },
+        {
+          accountId: 4000,
+          code: "4000",
+          name: "Program Income",
+          type: "income",
+          subtype: null,
+          normalBalance: "credit",
+          isActive: true,
+          debits: "0.00",
+          credits: "500.00",
+          balance: "500.00",
+          balanceSide: "credit",
+        },
+        {
+          accountId: null,
+          code: "(unmapped)",
+          name: "legacy:misc",
+          type: null,
+          subtype: null,
+          normalBalance: "debit",
+          isActive: true,
+          debits: "0.00",
+          credits: "0.00",
+          balance: "0.00",
+          balanceSide: "debit",
+        },
+      ],
+      totals: {
+        debits: "500.00",
+        credits: "500.00",
+        balanced: true,
+        differenceCents: 0,
+      },
+    };
+
+    getAccountActivityReportMock.mockClear();
+    getAccountActivityReportMock.mockImplementation(
+      async ({ accountId }: { accountId: number }) => ({
+        lines: [
+          {
+            entryDate: "2025-01-15",
+            entryNo: `JE-${accountId}-1`,
+            entryMemo: "memo",
+            lineMemo: "line",
+            program: null,
+            fund: null,
+            debit: accountId === 101 ? "500.00" : "0.00",
+            credit: accountId === 101 ? "0.00" : "500.00",
+          },
+        ],
+        totals: {
+          debits: accountId === 101 ? "500.00" : "0.00",
+          credits: accountId === 101 ? "0.00" : "500.00",
+        },
+      }),
+    );
+
+    // Stub anchor click + URL.createObjectURL so downloadCsv doesn't try to
+    // navigate jsdom. Capture the resulting Blob so we can inspect the CSV.
+    const createdBlobs: Blob[] = [];
+    const createObjectURLSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockImplementation((blob: Blob | MediaSource) => {
+        createdBlobs.push(blob as Blob);
+        return "blob:test";
+      });
+    const revokeObjectURLSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    const anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    try {
+      render(<ReportsPage />);
+      const btn = screen.getByTestId("export-csv-tb-all-activity");
+      expect(btn).toBeInTheDocument();
+      fireEvent.click(btn);
+
+      await waitFor(() => {
+        expect(getAccountActivityReportMock).toHaveBeenCalledTimes(2);
+      });
+
+      const calledIds = getAccountActivityReportMock.mock.calls
+        .map((c) => (c[0] as { accountId: number }).accountId)
+        .sort((a, b) => a - b);
+      expect(calledIds).toEqual([101, 4000]);
+
+      await waitFor(() => {
+        expect(createdBlobs.length).toBe(1);
+      });
+      const csv = await createdBlobs[0].text();
+      expect(csv).toContain("Trial Balance — all account activity");
+      expect(csv).toContain("1000,Operating Cash");
+      expect(csv).toContain("4000,Program Income");
+      expect(csv).toContain("group=asset");
+      expect(csv).toContain("group=income");
+      expect(csv).toContain("JE-101-1");
+      expect(csv).toContain("JE-4000-1");
+      expect(csv).not.toContain("(unmapped)");
+    } finally {
+      anchorClickSpy.mockRestore();
+      revokeObjectURLSpy.mockRestore();
+      createObjectURLSpy.mockRestore();
+      mockTrialBalanceData.current = undefined;
+    }
   });
 
   it("shows the inverted-range warning banner when From > To (no crash)", () => {

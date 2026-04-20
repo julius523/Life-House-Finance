@@ -972,7 +972,7 @@ export default function ReportsPage() {
   // the same columns as the per-account export, preceded by an ACCOUNT header
   // row identifying the code/name/group.
   const [bulkDownloading, setBulkDownloading] = useState<
-    null | "pl" | "balance"
+    null | "pl" | "balance" | "trial-balance"
   >(null);
   const ACTIVITY_HEADER: CsvCell[] = [
     "entry_date",
@@ -1093,6 +1093,44 @@ export default function ReportsPage() {
       });
       downloadCsv(
         `profit-and-loss_all-activity_${csvSafeDateRange(fromDate, toDate)}.csv`,
+        rows,
+      );
+    } finally {
+      setBulkDownloading(null);
+    }
+  };
+  const collectTrialBalanceAccounts = (): BulkAccount[] => {
+    if (!tb) return [];
+    const out: BulkAccount[] = [];
+    for (const r of tb.rows) {
+      if (r.accountId == null) continue;
+      out.push({
+        accountId: r.accountId,
+        code: r.code,
+        name: r.name,
+        group: r.type ?? "Unclassified",
+      });
+    }
+    return out;
+  };
+  const downloadAllTrialBalanceActivityCsv = async () => {
+    if (!tb || bulkDownloading) return;
+    const accounts = collectTrialBalanceAccounts();
+    if (accounts.length === 0) return;
+    setBulkDownloading("trial-balance");
+    try {
+      const rows: CsvCell[][] = [
+        ["report", "Trial Balance — all account activity"],
+        ["range", csvSafeDateRange(fromDate, toDate)],
+        ["generated", new Date().toISOString()],
+        [],
+      ];
+      await fetchAndAppendActivity(rows, accounts, {
+        from: fromDate,
+        to: toDate,
+      });
+      downloadCsv(
+        `trial-balance_all-activity_${csvSafeDateRange(fromDate, toDate)}.csv`,
         rows,
       );
     } finally {
@@ -1784,16 +1822,33 @@ export default function ReportsPage() {
                       net debits − credits; credit-normal accounts net credits − debits.
                     </CardDescription>
                   </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={downloadTrialBalanceCsv}
-                    disabled={!tb || tbLoading}
-                    className="no-print"
-                  >
-                    Export CSV
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {(tb?.rows.some((r) => r.accountId != null) ?? false) && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={downloadAllTrialBalanceActivityCsv}
+                        disabled={!tb || tbLoading || bulkDownloading !== null}
+                        className="no-print"
+                        data-testid="export-csv-tb-all-activity"
+                      >
+                        {bulkDownloading === "trial-balance"
+                          ? "Preparing…"
+                          : "Download all activity (CSV)"}
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={downloadTrialBalanceCsv}
+                      disabled={!tb || tbLoading}
+                      className="no-print"
+                    >
+                      Export CSV
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
