@@ -1,0 +1,80 @@
+Go with Option C, with one tiny carveout from Option B only if it is truly a 15–30 minute, low-conflict patch.
+
+Here’s the full direction in one place:
+
+Decision
+
+* Treat #60 as effectively satisfied unless you can reproduce a real crash.
+* Do not spend a full build cycle hardening hypothetical paths that are not failing.
+* Do not rework date typing or any area that just landed in #75.
+* Move next to #61 (P&L drilldown into journal entries).
+* After #61, do #62 (CSV/export parity for the drilldowned reporting path).
+
+Allowed scope for #60 before you move on
+Only do these if they are truly tiny, isolated, and conflict-safe:
+
+1. Add defensive null guards in any remaining CSV click handlers where a partial response could throw.
+2. Add a simple non-admin empty state only if reporting can currently render a broken or blank experience for unauthorized roles.
+3. Add one narrow backend test only if you find a genuinely unguarded partial-response case.
+
+If those are not obviously necessary from code or repro, skip them.
+
+Do not do under #60
+
+* No broad prophylactic refactor.
+* No speculative backend contract reshaping.
+* No overlapping work with #75.
+* No “just in case” churn on stable report panels.
+* No redesign of reports access control unless there is an actual broken path.
+
+What to do next: #61
+Build P&L drilldown into journal entries as the next real slice.
+
+Target outcome:
+
+* Clicking a P&L row opens the underlying posted journal entries for that account and date range.
+* Ledger mode is the source of truth.
+* Filters stay aligned with the report period and account selection.
+* Results are audit-friendly and match the existing accounting model, not operational tables.
+
+Acceptance shape:
+
+* Drilldown works from the P&L page for income and expense rows.
+* The query is account-driven and period-bounded.
+* The returned entries are posted JEs only.
+* Totals reconcile to the selected report row.
+* Empty states are clean.
+* Unauthorized users get the correct access behavior.
+* No white screen from partial failures.
+* Export behavior remains coherent with what the user is viewing.
+
+Implementation guardrails:
+
+* Reuse existing JE list/detail patterns where possible.
+* Prefer extending current read APIs over inventing a parallel reporting-only data model.
+* Keep the source of truth in the ledger.
+* Avoid mixing operational expense/bill tables into the drilldown logic.
+* If there is a question between speed and auditability, choose auditability.
+
+Then do #62
+Once #61 is in:
+
+* Make CSV/export behavior match the drilldowned report state.
+* Exported rows should reflect the same filters, dates, and account scope the user saw on screen.
+* No separate logic path that can drift from the UI query.
+
+Reality check on steps left
+Realistically, from where you are now, this looks like about 5–7 meaningful slices to feel “done enough” for this phase, not 20.
+
+Likely remaining sequence:
+
+1. #61 P&L drilldown to JE
+2. #62 CSV/export parity
+3. integrity sweep / consistency checks
+4. regression pass around reporting + bridge flows
+5. copilot reconciliation foundation
+6. copilot reconciliation UI/workflow
+7. final hardening / cleanup pass
+
+If you want the shortest path to tangible completion, the right move is:
+skip speculative #60 work, do #61 now, then #62.
