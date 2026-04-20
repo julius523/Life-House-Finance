@@ -1,0 +1,149 @@
+Next is #60 — Fix Reports page crash and stabilize reporting surfaces.
+
+Here’s the tight builder-ready version, in the same style as the tracked tasks.
+
+#60 - Fix Reports page crash and stabilize reporting surfaces
+
+What & Why
+
+The accounting bridge is now substantially in place: manual JE workflow, expense bridge, bill bridge, traceability, blocked queues, and Balance Sheet drilldown are all merged. The next bottleneck is the reporting shell itself. Right now the Reports area is not reliable enough to build on cleanly because there is a known crash path and the page is too brittle when data is empty, partially loaded, or shaped slightly differently than the UI expects.
+
+This task is a stabilization pass, not a reporting redesign. The goal is to make the Reports surface safe, predictable, and ready for the next two reporting tasks: P&L drilldown and CSV export.
+
+Done looks like
+
+The Reports page loads successfully for supported users without crashing.
+
+The page remains usable when one panel or one downstream request fails. A single failed dataset must not white-screen the whole route.
+
+Each report panel has explicit and stable states for:
+
+loading
+empty data
+inline error
+permission denied
+
+The page safely handles:
+
+zero posted journal entries
+draft-only accounting activity
+null or missing optional fields
+partial API failures
+unexpected free-form activity/event strings already allowed by the API contract
+filters that produce zero rows
+
+The typed frontend client and the live API contract are aligned. Any stale assumptions in generated types, enum narrowing, or object presence checks that can trigger runtime crashes are removed.
+
+No accounting math is silently changed just to suppress the crash. If a reporting query truly fails, the UI shows that failure clearly.
+
+Out of scope
+adding P&L drilldown
+CSV export
+new report types
+financial statement logic rewrites
+report redesign
+report-to-source drilldowns beyond what already exists
+Hard acceptance gates
+Reports page loads in the normal happy path without runtime crash.
+A single failed report request does not crash the entire page.
+Empty-state rendering is explicit and stable.
+Permission-denied rendering is explicit and stable.
+Null / missing optional fields no longer cause runtime exceptions.
+OpenAPI and generated client match actual runtime response shapes.
+No silent fallback that masks broken accounting data.
+No unintended changes to ledger math or report totals.
+Steps
+1) Reproduce and isolate the crash
+
+Identify the exact failing page, component, request, and response shape.
+
+Pin whether the crash is caused by:
+
+unsafe destructuring
+stale generated types
+closed-enum assumptions
+null object access
+missing array defaults
+one failed query taking down the whole route
+permission mismatch
+chart/table component assumptions
+
+Record the exact failing route and response contract before changing anything.
+
+2) Harden the reporting route and panels
+
+Update the Reports page and any child report components so they tolerate:
+
+undefined / null arrays
+missing optional objects
+zero-row datasets
+partial request failures
+permission failures
+free-form string values where the backend contract is intentionally open
+
+Use panel-level fallback rendering where possible so one broken panel does not poison the whole route.
+
+3) Align API contract and generated client
+
+If the failure is caused by contract drift:
+
+update lib/api-spec/openapi.yaml
+regenerate the typed client
+adjust the reporting UI to the actual response shape
+
+Do not leave behind “runtime works, types lie” debt.
+
+4) Verify supported-role behavior
+
+Verify route behavior for:
+
+admin
+approver
+users without reporting access
+
+Unauthorized users should get a stable access state, not a crash, spinner hang, or empty misleading page.
+
+5) Add regression coverage
+
+Add targeted regression tests for the exact crash path and for at least these stable states:
+
+empty data
+failed panel request
+permission denied
+missing optional field that previously crashed
+Validation / acceptance gate
+
+Do not mark complete unless all of the following are true:
+
+Reports page loads cleanly in the happy path
+known crash path is eliminated
+partial failures render inline without route crash
+permission-denied path renders safely
+empty-state path renders safely
+typed client and API contract are aligned
+no unintended report-math drift was introduced
+Relevant files
+artifacts/finance-portal/src/pages/reports*.tsx
+artifacts/finance-portal/src/components/*report*
+artifacts/api-server/src/routes/accounting.ts
+lib/api-spec/openapi.yaml
+Dependencies
+already unblocked by the merged accounting bridge work
+Revision instructions
+
+If revised, revise the entire task description, not isolated bullets.
+
+Keep these locked decisions intact:
+
+this is a stabilization task, not a reporting-logic rewrite
+partial failures must surface as inline error states
+the page must not white-screen because one dataset fails
+OpenAPI and generated client must match real runtime behavior
+no silent math changes to make the UI “look fixed”
+
+After #60, the next two in order are:
+
+#61 — Profit & Loss drilldown from report rows to underlying journal entries
+#62 — CSV export for report and drilldown tables
+
+If you want, I’ll format #61 and #62 the same exact way right now so you have the full next block in one place.
