@@ -1,0 +1,96 @@
+Nice. The hard part is done.
+
+What’s next
+
+1. Do the posted-dialog context polish
+
+This is the highest-value remaining UX gap.
+
+Add to the posted remediation dialog:
+
+* linked expense summary when present
+* linked bill summary when present
+* source-link chips
+* period-lock badge / lock explanation
+* explicit submit copy:
+    * Reverse and create replacement entry
+    * Create adjusting entry
+* “This will create…” preview text before submit
+
+Acceptance criteria
+
+* Operator can tell, before clicking submit, exactly:
+    * what source record this JE came from
+    * whether the period is locked
+    * whether the action creates a replacement entry or an adjusting entry
+* No extra navigation required to understand impact
+* Works for manual, expense-linked, and bill-linked entries
+* Safe empty states when no source link exists
+
+Files likely touched
+
+* artifacts/finance-portal/src/pages/accounting-remediation.tsx
+* whichever shared JE/source summary helpers already exist in:
+    * expense traceability
+    * bill traceability
+    * JE detail / draft detail pages
+
+Implementation notes
+
+Reuse existing read models. Do not invent a third source-lookup path. Pull source context through the same accounting_source_links bridge already used elsewhere.
+
+⸻
+
+2. Then add the regression suite
+
+Boring, yes. Also exactly what keeps this from breaking next week.
+
+Must-cover tests
+
+* generated-client error parsing uses err.data, not err.body
+* reversal succeeds but replacement fails:
+    * dialog stays open
+    * queue refreshes
+    * counts refresh
+    * user can retry
+* new JE id invalidates cache for:
+    * original entry
+    * replacement/adjusting entry
+* FORBIDDEN shows specific message
+* PERIOD_LOCKED shows specific message
+* required note enforcement
+* archived vs non-postable exclusivity:
+    * archived line should not also count as non-postable
+
+Acceptance criteria
+
+* At least one test for each branch above
+* No generic “something went wrong” fallback swallowing structured errors
+* Partial-success contract locked in
+
+⸻
+
+3. After that, expand integrity coverage one more notch
+
+Only after 1 and 2.
+
+Good next candidates:
+
+* invalid source-link states
+* orphaned accounting_source_links
+* JE lines pointing to deleted/malformed source references
+* “posted row says remediated but replacement missing” consistency checks
+
+That becomes the next reconciliation hardening wave.
+
+Recommended exact order
+
+1. Posted remediation dialog context polish
+2. Regression suite for remediation dialog + integrity exclusivity
+3. Next reconciliation anomaly class expansion
+
+One-line next task
+
+Task #68 — Posted remediation dialog context + regression hardening
+
+That’s the clean next move.
