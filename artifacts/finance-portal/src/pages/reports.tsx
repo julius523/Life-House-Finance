@@ -1215,6 +1215,7 @@ export default function ReportsPage() {
       );
     } finally {
       setBulkDownloading(null);
+      setBulkProgress(null);
     }
   };
   const downloadAllBsActivityCsv = async () => {
