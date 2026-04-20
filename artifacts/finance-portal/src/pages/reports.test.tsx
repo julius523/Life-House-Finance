@@ -389,6 +389,117 @@ describe("Reports page — partial date input regression (Task #65 / #75)", () =
     }
   });
 
+  it("shows 'Preparing N of M…' progress on the bulk activity button while exports are in flight (Task #85)", async () => {
+    mockTrialBalanceData.current = {
+      fromDate: null,
+      toDate: null,
+      rows: [
+        {
+          accountId: 101,
+          code: "1000",
+          name: "Operating Cash",
+          type: "asset",
+          subtype: "cash",
+          normalBalance: "debit",
+          isActive: true,
+          debits: "500.00",
+          credits: "0.00",
+          balance: "500.00",
+          balanceSide: "debit",
+        },
+        {
+          accountId: 4000,
+          code: "4000",
+          name: "Program Income",
+          type: "income",
+          subtype: null,
+          normalBalance: "credit",
+          isActive: true,
+          debits: "0.00",
+          credits: "500.00",
+          balance: "500.00",
+          balanceSide: "credit",
+        },
+      ],
+      totals: {
+        debits: "500.00",
+        credits: "500.00",
+        balanced: true,
+        differenceCents: 0,
+      },
+    };
+
+    // Defer each per-account fetch so the test can observe the button label
+    // updating between fetches.
+    const deferreds: {
+      resolve: (v: unknown) => void;
+      accountId: number;
+    }[] = [];
+    getAccountActivityReportMock.mockClear();
+    getAccountActivityReportMock.mockImplementation(
+      ({ accountId }: { accountId: number }) =>
+        new Promise((resolve) => {
+          deferreds.push({ resolve, accountId });
+        }),
+    );
+
+    const createObjectURLSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockImplementation(() => "blob:test");
+    const revokeObjectURLSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    const anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    try {
+      render(<ReportsPage />);
+      const btn = screen.getByTestId(
+        "export-csv-tb-all-activity",
+      ) as HTMLButtonElement;
+      fireEvent.click(btn);
+
+      // Initial label after click: 0 of 2.
+      await waitFor(() => {
+        expect(btn.textContent).toMatch(/Preparing 0 of 2/);
+      });
+      expect(btn.disabled).toBe(true);
+
+      // Resolve the first fetch -> label should advance to 1 of 2.
+      await waitFor(() => {
+        expect(deferreds.length).toBeGreaterThanOrEqual(1);
+      });
+      const first = deferreds[0]!;
+      first.resolve({
+        lines: [],
+        totals: { debits: "0.00", credits: "0.00" },
+      });
+      await waitFor(() => {
+        expect(btn.textContent).toMatch(/Preparing 1 of 2/);
+      });
+
+      // Resolve the second; the export then completes and the button returns
+      // to its idle label.
+      await waitFor(() => {
+        expect(deferreds.length).toBe(2);
+      });
+      deferreds[1]!.resolve({
+        lines: [],
+        totals: { debits: "0.00", credits: "0.00" },
+      });
+      await waitFor(() => {
+        expect(btn.textContent).toMatch(/Download all activity/);
+      });
+      expect(btn.disabled).toBe(false);
+    } finally {
+      anchorClickSpy.mockRestore();
+      revokeObjectURLSpy.mockRestore();
+      createObjectURLSpy.mockRestore();
+      mockTrialBalanceData.current = undefined;
+    }
+  });
+
   it("shows the inverted-range warning banner when From > To (no crash)", () => {
     render(<ReportsPage />);
     const fromInput = screen.getByLabelText("From") as HTMLInputElement;

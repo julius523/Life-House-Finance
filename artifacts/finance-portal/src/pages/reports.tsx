@@ -974,6 +974,20 @@ export default function ReportsPage() {
   const [bulkDownloading, setBulkDownloading] = useState<
     null | "pl" | "balance" | "trial-balance"
   >(null);
+  // Per-account progress for the bulk activity exports. `current` counts
+  // accounts whose /reports/account-activity fetch has resolved; `total` is
+  // the number of mapped accounts that will be fetched. Drives the
+  // "Preparing N of M…" label on the bulk download buttons (Task #85).
+  const [bulkProgress, setBulkProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
+  const bulkProgressLabel = (): string => {
+    if (!bulkProgress) return "Preparing…";
+    const { current, total } = bulkProgress;
+    if (total <= 0) return "Preparing…";
+    return `Preparing ${Math.min(current, total)} of ${total}…`;
+  };
   const ACTIVITY_HEADER: CsvCell[] = [
     "entry_date",
     "entry_no",
@@ -994,9 +1008,13 @@ export default function ReportsPage() {
     rows: CsvCell[][],
     accounts: BulkAccount[],
     params: { from?: string; to: string },
+    onProgress?: (current: number, total: number) => void,
   ) => {
     // Sequential to keep ordering stable and avoid hammering the API; chart of
     // accounts is small (tens of accounts), so latency is acceptable.
+    const total = accounts.length;
+    onProgress?.(0, total);
+    let done = 0;
     for (const acct of accounts) {
       rows.push([
         "ACCOUNT",
@@ -1015,6 +1033,8 @@ export default function ReportsPage() {
       } catch (e) {
         rows.push(["ERROR", "", "", String((e as Error)?.message ?? e)]);
         rows.push([]);
+        done += 1;
+        onProgress?.(done, total);
         continue;
       }
       for (const l of activity.lines) {
@@ -1040,6 +1060,8 @@ export default function ReportsPage() {
         csvMoney(activity.totals.credits),
       ]);
       rows.push([]);
+      done += 1;
+      onProgress?.(done, total);
     }
   };
   const collectPlAccounts = (): BulkAccount[] => {
@@ -1080,6 +1102,7 @@ export default function ReportsPage() {
     const accounts = collectPlAccounts();
     if (accounts.length === 0) return;
     setBulkDownloading("pl");
+    setBulkProgress({ current: 0, total: accounts.length });
     try {
       const rows: CsvCell[][] = [
         ["report", "Profit & Loss — all account activity"],
@@ -1087,16 +1110,19 @@ export default function ReportsPage() {
         ["generated", new Date().toISOString()],
         [],
       ];
-      await fetchAndAppendActivity(rows, accounts, {
-        from: fromDate,
-        to: toDate,
-      });
+      await fetchAndAppendActivity(
+        rows,
+        accounts,
+        { from: fromDate, to: toDate },
+        (current, total) => setBulkProgress({ current, total }),
+      );
       downloadCsv(
         `profit-and-loss_all-activity_${csvSafeDateRange(fromDate, toDate)}.csv`,
         rows,
       );
     } finally {
       setBulkDownloading(null);
+      setBulkProgress(null);
     }
   };
   const collectTrialBalanceAccounts = (): {
@@ -1141,6 +1167,7 @@ export default function ReportsPage() {
     const { mapped, unmapped } = collectTrialBalanceAccounts();
     if (mapped.length === 0 && unmapped.length === 0) return;
     setBulkDownloading("trial-balance");
+    setBulkProgress({ current: 0, total: mapped.length });
     try {
       const rows: CsvCell[][] = [
         ["report", "Trial Balance — all account activity"],
@@ -1148,10 +1175,12 @@ export default function ReportsPage() {
         ["generated", new Date().toISOString()],
         [],
       ];
-      await fetchAndAppendActivity(rows, mapped, {
-        from: fromDate,
-        to: toDate,
-      });
+      await fetchAndAppendActivity(
+        rows,
+        mapped,
+        { from: fromDate, to: toDate },
+        (current, total) => setBulkProgress({ current, total }),
+      );
       // Append unmapped rows as sections with TB-level totals so the workbook
       // covers every row in the Trial Balance, with a marker explaining why
       // no per-line activity is listed.
@@ -1193,6 +1222,7 @@ export default function ReportsPage() {
     const accounts = collectBsAccounts();
     if (accounts.length === 0) return;
     setBulkDownloading("balance");
+    setBulkProgress({ current: 0, total: accounts.length });
     try {
       const rows: CsvCell[][] = [
         ["report", "Balance Sheet — all account activity"],
@@ -1203,13 +1233,19 @@ export default function ReportsPage() {
       // Balance sheet drilldowns are cumulative-through-toDate (no `from`),
       // matching the per-row drilldown behavior in AccountDrillDownRow so the
       // listed lines net to the displayed balance.
-      await fetchAndAppendActivity(rows, accounts, { to: toDate });
+      await fetchAndAppendActivity(
+        rows,
+        accounts,
+        { to: toDate },
+        (current, total) => setBulkProgress({ current, total }),
+      );
       downloadCsv(
         `balance-sheet_all-activity_as-of_${toDate}.csv`,
         rows,
       );
     } finally {
       setBulkDownloading(null);
+      setBulkProgress(null);
     }
   };
 
@@ -1591,7 +1627,7 @@ export default function ReportsPage() {
                         data-testid="export-csv-pl-all-activity"
                       >
                         {bulkDownloading === "pl"
-                          ? "Preparing…"
+                          ? bulkProgressLabel()
                           : "Download all activity (CSV)"}
                       </Button>
                     )}
@@ -1702,7 +1738,7 @@ export default function ReportsPage() {
                         data-testid="export-csv-bs-all-activity"
                       >
                         {bulkDownloading === "balance"
-                          ? "Preparing…"
+                          ? bulkProgressLabel()
                           : "Download all activity (CSV)"}
                       </Button>
                     )}
@@ -1896,7 +1932,7 @@ export default function ReportsPage() {
                       }
                     >
                       {bulkDownloading === "trial-balance"
-                        ? "Preparing…"
+                        ? bulkProgressLabel()
                         : "Download all activity (CSV)"}
                     </Button>
                     <Button
