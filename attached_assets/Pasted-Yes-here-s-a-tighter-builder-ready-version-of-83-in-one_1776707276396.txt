@@ -1,0 +1,271 @@
+Yes — here’s a tighter, builder-ready version of #83 in one place.
+
+#83 - Sync schedule-editor filters to the URL
+
+What & Why
+
+The CSV export schedule editor lets reviewers configure the same journal-entry filters they use on the live journal-entries page: status, source, posted-by, approver, and date window. Right now those values live only in component state, which means:
+
+a teammate cannot open a shared link and see the same preview state
+browser back/forward does not walk through filter changes
+the schedule editor behaves differently from the journal-entries list even though it uses the same filtering concepts
+
+This task brings the schedule editor in line with Task #72 by making the schedule editor’s filter state URL-driven. A copied link must reopen the editor with the same selections restored, and browser navigation must move between prior filter states cleanly.
+
+This is URL-sync only. It does not change how schedules are saved to the database, how preview data is fetched, or how scheduled jobs actually run.
+
+Done looks like
+The schedule editor’s filter controls round-trip through the URL query string:
+status
+source
+postedBy
+approver
+from
+to
+Opening a shared link with those query params restores the editor with the same filter selections visible in the UI.
+Changing any filter updates the URL immediately without a full page reload.
+Browser back/forward restores prior filter states correctly.
+Clearing a filter removes that query param from the URL rather than leaving empty-string junk behind.
+Invalid query values do not crash the page. They are ignored and normalized back to safe defaults.
+The editor’s preview query uses the URL-sourced normalized filters, so the visible preview and the shareable URL always match.
+Existing schedule loading/editing behavior still works. If the route already has schedule identity params, this task must preserve them and only add/update the filter params.
+The implementation follows the same URL-sync conventions already used on:
+artifacts/finance-portal/src/pages/journal-entries-list.tsx
+Explicit scope
+In scope
+URL query parsing + normalization for schedule-editor filters
+keeping UI controls in sync with URL state
+keeping preview fetches in sync with normalized URL state
+back/forward support
+preserving unrelated query params already used by the editor route, if any
+Out of scope
+changing saved schedule schema in DB
+persisting these filters server-side in a new way
+changing email/send-log behavior
+changing export job execution logic
+adding new filters beyond the existing five plus date window
+changing the journal-entries page itself
+Canonical query params
+
+Use one stable query param per filter. Do not invent alternates.
+
+status
+source
+postedBy
+approver
+from
+to
+Param behavior
+Omit params that are unset
+For single-select filters, store a single scalar value
+For multi-select filters, mirror the existing journal-entries-list convention exactly
+if Task #72 used repeated params, use repeated params here too
+if Task #72 used comma-separated encoding, use the same here too
+from and to must use the same date-string format the preview API already expects
+
+If the schedule editor today uses different internal names, keep those internal names if needed, but the URL contract above should be the public shape unless the journal-entries page already established a different exact contract. If so, match the journal-entries page exactly.
+
+Normalization rules
+
+On initial load and on every URL change:
+
+Parse query params into normalized filter state
+Unknown enum values are ignored
+Empty strings are treated as unset
+Invalid dates are treated as unset
+If only one side of the date range is valid, keep the valid side
+If both dates are present but invalid as a range per existing report/list rules, do not crash
+keep the raw URL stable until the user changes it, or normalize to safe unset values depending on the existing Task #72 pattern
+whichever pattern the journal-entries list already uses, mirror that behavior here
+
+Do not create infinite URL rewrite loops. Only call setSearchParams when the serialized next params actually differ from the current params.
+
+Acceptance gates
+Gate 1 — deep-link restore
+
+Given a schedule-editor URL containing filter params, when the page loads:
+
+every picker reflects those values
+the preview uses those same values
+no extra click is required to “apply” them
+Gate 2 — shareability
+
+Given a user changes filters in the editor:
+
+the URL updates
+copying the URL and opening it in a new tab reproduces the same editor state
+Gate 3 — navigation
+
+Given a user changes filters multiple times:
+
+browser Back restores the immediately prior filter state
+browser Forward restores the next filter state
+Gate 4 — clearing
+
+Given a user clears a picker/date:
+
+the matching query param disappears from the URL
+preview updates accordingly
+Gate 5 — invalid params
+
+Given a URL contains bad values like:
+
+unknown status
+unknown source
+malformed postedBy / approver
+invalid from / to
+the page does not white-screen, and the editor falls back to safe normalized state.
+Gate 6 — no save-path regression
+
+Saving or updating a schedule still works exactly as before. URL filter sync must not break create/edit flows.
+
+Gate 7 — preserved route identity
+
+If the route already includes schedule ID or similar identifying params:
+
+those params remain intact when filters change
+filter updates do not navigate the user away from the editor context
+Implementation steps
+1) Locate the editor page and match the existing pattern
+
+Find the schedule editor under:
+
+artifacts/finance-portal/src/pages/
+
+Likely files:
+
+scheduled-exports-*.tsx
+
+Use this as the pattern reference:
+
+artifacts/finance-portal/src/pages/journal-entries-list.tsx
+
+Do not invent a new URL-sync pattern if the journal-entries page already has a working helper or serializer/parser pair. Reuse it or clone it closely.
+
+2) Introduce URL-backed filter state
+
+Replace purely local component-state ownership for:
+
+status
+source
+postedBy
+approver
+from
+to
+
+with a model like:
+
+derive normalized filter state from useSearchParams()
+render controls from normalized URL state
+on control change, write updated search params back to the URL
+
+If the page still needs transient local state for text inputs or date typing, keep that only where necessary, but the canonical applied filter state must come from the URL.
+
+3) Add parser + serializer helpers
+
+Create small pure helpers near the page or in a shared filter util if one already exists:
+
+parseScheduleEditorFilters(searchParams)
+serializeScheduleEditorFilters(filters, existingSearchParams?)
+
+Responsibilities:
+
+validate enums
+coerce empty/invalid values to unset
+preserve unrelated query params
+remove cleared values cleanly
+output stable ordering to avoid noisy history churn
+
+If the journal-entries list already has equivalent helpers, reuse them instead of creating a parallel dialect.
+
+4) Drive preview queries from normalized URL state
+
+Any preview fetch, preview table, or preview badge in the schedule editor must read from the normalized URL-backed filter object, not stale local state.
+
+That ensures:
+
+visible controls
+current URL
+preview results
+
+all describe the same state.
+
+5) Preserve existing schedule load/save logic
+
+If the schedule editor loads an existing schedule record:
+
+keep that behavior untouched
+do not accidentally overwrite saved schedule configuration just because URL filters are present
+this task is about the editor preview/filtering experience, not changing persisted schedule payload unless the editor already intentionally persists those same filters
+
+If the save payload is already supposed to contain these filters, make sure the saved payload uses the same normalized values the URL reflects. If not, do not broaden save semantics here.
+
+6) Handle back/forward correctly
+
+Use the router/search-param API in a way that allows browser history to reflect meaningful filter changes.
+
+Expectation:
+
+each intentional filter change becomes navigable
+rapid no-op normalizations do not spam history
+no effect loop that repeatedly rewrites params
+
+If the journal-entries page uses replace for some changes and push-history for others, mirror that logic.
+
+7) Add regression coverage
+
+Add focused tests for:
+
+parsing valid query params into editor state
+ignoring invalid enum/date values
+serializing cleared filters by removing params
+restoring editor state from a copied URL
+back/forward navigation between filter states
+preview consuming normalized URL state rather than stale component state
+
+Prefer matching the test style already used for the journal-entries shareable-link work.
+
+Suggested technical shape
+Read path
+const [searchParams, setSearchParams] = useSearchParams()
+const filters = useMemo(() => parseScheduleEditorFilters(searchParams), [searchParams])
+Write path
+
+Each control change:
+
+compute next normalized filter object
+serialize into next search params
+compare before writing
+call setSearchParams(nextParams) only if changed
+Preview path
+usePreviewQuery(filters) or equivalent
+no separate applied-filter state unless there is a specific date-input typing reason
+Edge cases to cover
+shared URL contains only from but not to
+shared URL contains status= blank
+shared URL contains repeated/invalid source values
+shared URL contains user IDs for postedBy/approver that no longer resolve in the picker list
+keep the page stable
+show safe fallback UI
+do not crash the picker
+editor route already has other params; filter updates must preserve them
+opening a saved schedule with no query params still behaves exactly like today
+Relevant files
+artifacts/finance-portal/src/pages/scheduled-exports-*.tsx
+artifacts/finance-portal/src/pages/journal-entries-list.tsx
+
+Potential shared helpers if present:
+
+any existing query-param filter utils used by journal entries
+any picker option helpers shared between schedule editor and JE list
+Dependency
+Show who's filtered when sharing a journal-entries link
+
+This task should mirror that behavior, not invent a second contract.
+
+Builder notes
+Prefer reusing the exact enum/value mapping already used by the journal-entries list.
+Prefer one canonical parser/serializer pair.
+Do not let local state and URL state drift.
+Do not widen scope into schedule persistence changes unless the existing page already couples preview filters to saved schedule filters.
+The win here is boring consistency: shared link in, same editor state out.

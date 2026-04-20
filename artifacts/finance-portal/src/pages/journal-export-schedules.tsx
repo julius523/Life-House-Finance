@@ -7,8 +7,8 @@
  * button stays hidden when role !== "admin".
  */
 
-import { useMemo, useState } from "react";
-import { Link } from "wouter";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useSearch } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Card,
@@ -64,32 +64,114 @@ type Cadence = "daily" | "weekly" | "monthly";
 type FilterStatus = "all" | "posted" | "reversed";
 type FilterSource = "all" | "copilot" | "manual" | "expense" | "bill";
 
-interface FormState {
-  id: number | null;
-  name: string;
-  enabled: boolean;
-  cadence: Cadence;
-  recipientsText: string;
+/**
+ * Task #83 — The schedule editor dialog is a modal layered on top of the
+ * schedules list. To make it deep-linkable (matching the journal-entries
+ * list pattern from Task #72) the dialog open/close state and the filter
+ * pickers live in the URL query string. Non-filter form fields (name,
+ * recipients, enabled, includeLines) stay in local component state because
+ * they're long-form configuration, not filter selections.
+ *
+ * URL contract:
+ *   ?editing=new           -> dialog open in "new schedule" mode
+ *   ?editing=<id>          -> dialog open editing the schedule with that id
+ *   no `editing` param     -> dialog closed
+ *
+ * When `editing` is present, the same filter param names as the
+ * journal-entries page are honored: status, source, postedBy, approver,
+ * plus cadence (the editor's date-window-equivalent control). Defaults
+ * (status=all, source=all, postedBy=any, approver=any, cadence=weekly)
+ * are omitted from the URL so a clean "new schedule" link is just
+ * `?editing=new`.
+ */
+type EditingMode = { mode: "new" } | { mode: "edit"; id: number };
+
+interface EditorUrlState {
+  editing: EditingMode | null;
   filterStatus: FilterStatus;
   filterSource: FilterSource;
-  /** Task #71 — "any" or stringified user id, mirrors journal-entries-list. */
   postedByFilter: string;
   approverFilter: string;
+  cadence: Cadence;
+}
+
+interface NonFilterForm {
+  name: string;
+  enabled: boolean;
+  recipientsText: string;
   includeLines: boolean;
 }
 
-const EMPTY_FORM: FormState = {
-  id: null,
+const EMPTY_NON_FILTER: NonFilterForm = {
   name: "",
   enabled: true,
-  cadence: "weekly",
   recipientsText: "",
+  includeLines: false,
+};
+
+const DEFAULT_EDITOR_STATE: EditorUrlState = {
+  editing: null,
   filterStatus: "all",
   filterSource: "all",
   postedByFilter: "any",
   approverFilter: "any",
-  includeLines: false,
+  cadence: "weekly",
 };
+
+export function readEditorFromSearch(search: string): EditorUrlState {
+  const p = new URLSearchParams(search);
+  const rawEditing = p.get("editing");
+  let editing: EditingMode | null = null;
+  if (rawEditing === "new") editing = { mode: "new" };
+  else if (rawEditing && /^\d+$/.test(rawEditing))
+    editing = { mode: "edit", id: Number(rawEditing) };
+
+  const rawStatus = p.get("status");
+  const filterStatus: FilterStatus =
+    rawStatus === "posted" || rawStatus === "reversed" ? rawStatus : "all";
+
+  const rawSource = p.get("source");
+  const filterSource: FilterSource =
+    rawSource === "copilot" ||
+    rawSource === "manual" ||
+    rawSource === "expense" ||
+    rawSource === "bill"
+      ? rawSource
+      : "all";
+
+  const rawCadence = p.get("cadence");
+  const cadence: Cadence =
+    rawCadence === "daily" || rawCadence === "monthly" ? rawCadence : "weekly";
+
+  const rawPostedBy = p.get("postedBy");
+  const rawApprover = p.get("approver");
+
+  return {
+    editing,
+    filterStatus,
+    filterSource,
+    postedByFilter:
+      rawPostedBy && /^\d+$/.test(rawPostedBy) ? rawPostedBy : "any",
+    approverFilter:
+      rawApprover && /^\d+$/.test(rawApprover) ? rawApprover : "any",
+    cadence,
+  };
+}
+
+export function buildEditorSearch(state: EditorUrlState): string {
+  if (!state.editing) return "";
+  const p = new URLSearchParams();
+  p.set(
+    "editing",
+    state.editing.mode === "new" ? "new" : String(state.editing.id),
+  );
+  if (state.filterStatus !== "all") p.set("status", state.filterStatus);
+  if (state.filterSource !== "all") p.set("source", state.filterSource);
+  if (state.postedByFilter !== "any") p.set("postedBy", state.postedByFilter);
+  if (state.approverFilter !== "any") p.set("approver", state.approverFilter);
+  if (state.cadence !== "weekly") p.set("cadence", state.cadence);
+  return p.toString();
+}
 
 function actorName(a: {
   id: number;
@@ -131,7 +213,36 @@ export default function JournalExportSchedulesPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [editing, setEditing] = useState<FormState | null>(null);
+  const [, setLocation] = useLocation();
+  const search = useSearch();
+
+  // Task #83 — URL is the source of truth for "is the dialog open" plus the
+  // filter pickers inside the dialog. Reading derived state on every render
+  // means a deep link (e.g. ?editing=5&status=posted&postedBy=12) restores
+  // both the dialog and its filter selections, and browser back/forward
+  // replays the editor history without effect ping-pong.
+  const editorState = useMemo<EditorUrlState>(
+    () => readEditorFromSearch(search),
+    [search],
+  );
+  const editingMode = editorState.editing;
+
+  // Task #83 — Track which `editing` URL session this nonFilter belongs to
+  // so back/forward navigation between two different ?editing=<id> URLs
+  // (or new -> edit) re-hydrates instead of leaving stale name/recipients
+  // from the previous session bound to the new schedule's filters.
+  const [nonFilterSession, setNonFilterSession] = useState<{
+    key: string;
+    fields: NonFilterForm;
+  } | null>(null);
+  const nonFilter = nonFilterSession?.fields ?? null;
+  const setNonFilter = useCallback(
+    (fields: NonFilterForm) =>
+      setNonFilterSession((prev) =>
+        prev ? { key: prev.key, fields } : prev,
+      ),
+    [],
+  );
   const [previewing, setPreviewing] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [selectedScheduleId, setSelectedScheduleId] = useState<number | null>(
@@ -180,7 +291,7 @@ export default function JournalExportSchedulesPage() {
       onSuccess: () => {
         invalidateList();
         toast({ title: "Schedule created" });
-        setEditing(null);
+        closeDialog();
       },
       onError: (err: unknown) => {
         toast({
@@ -196,7 +307,7 @@ export default function JournalExportSchedulesPage() {
       onSuccess: () => {
         invalidateList();
         toast({ title: "Schedule updated" });
-        setEditing(null);
+        closeDialog();
       },
       onError: (err: unknown) => {
         toast({
@@ -252,28 +363,108 @@ export default function JournalExportSchedulesPage() {
     },
   });
 
+  // Task #83 — Replace setEditing/setLocation pairs everywhere with these
+  // helpers. updateEditorUrl rewrites the query string from the merged
+  // state; closeDialog drops every editor param so the URL goes back to
+  // the bare schedules path.
+  const updateEditorUrl = useCallback(
+    (patch: Partial<EditorUrlState>, opts: { replace?: boolean } = {}) => {
+      const next: EditorUrlState = { ...editorState, ...patch };
+      const qs = buildEditorSearch(next);
+      const path = window.location.pathname;
+      setLocation(qs ? `${path}?${qs}` : path, { replace: opts.replace });
+    },
+    [editorState, setLocation],
+  );
+
+  const closeDialog = useCallback(() => {
+    updateEditorUrl({ ...DEFAULT_EDITOR_STATE });
+  }, [updateEditorUrl]);
+
   function openCreate() {
-    setEditing({ ...EMPTY_FORM });
+    // Reset both URL filters and local non-filter fields so a fresh "new"
+    // dialog never inherits stale values from a prior edit session.
+    setNonFilterSession({ key: "new", fields: { ...EMPTY_NON_FILTER } });
+    updateEditorUrl({
+      ...DEFAULT_EDITOR_STATE,
+      editing: { mode: "new" },
+    });
   }
   function openEdit(s: JournalEntryExportSchedule) {
-    setEditing({
-      id: s.id,
-      name: s.name,
-      enabled: s.enabled,
-      cadence: s.cadence as Cadence,
-      recipientsText: (s.recipients ?? []).join(", "),
+    setNonFilterSession({
+      key: `edit:${s.id}`,
+      fields: {
+        name: s.name,
+        enabled: s.enabled,
+        recipientsText: (s.recipients ?? []).join(", "),
+        includeLines: s.includeLines,
+      },
+    });
+    updateEditorUrl({
+      editing: { mode: "edit", id: s.id },
       filterStatus: (s.filterStatus ?? "all") as FilterStatus,
       filterSource: (s.filterSource ?? "all") as FilterSource,
       postedByFilter:
         s.filterPostedByUserId != null ? String(s.filterPostedByUserId) : "any",
       approverFilter:
         s.filterApproverUserId != null ? String(s.filterApproverUserId) : "any",
-      includeLines: s.includeLines,
+      cadence: s.cadence as Cadence,
     });
   }
 
-  function buildBody(form: FormState): JournalEntryExportScheduleBody | null {
-    const recipients = form.recipientsText
+  // Task #83 — When a deep link or browser back/forward changes the
+  // `editing` URL param, reconcile the non-filter form fields. We can't
+  // round-trip name/recipients through the URL (too long, contains commas
+  // and emails), so on a deep link we hydrate from the matching schedule
+  // once it loads. The session key is compared with the URL key so that
+  // navigating between two different ?editing=<id> URLs replaces the
+  // stored non-filter fields instead of keeping stale ones.
+  const editingKey =
+    editingMode === null
+      ? "closed"
+      : editingMode.mode === "new"
+        ? "new"
+        : `edit:${editingMode.id}`;
+  useEffect(() => {
+    if (editingMode === null) {
+      if (nonFilterSession !== null) setNonFilterSession(null);
+      return;
+    }
+    // Already initialized for THIS specific URL session — leave the user's
+    // in-progress edits alone.
+    if (nonFilterSession?.key === editingKey) return;
+    if (editingMode.mode === "new") {
+      setNonFilterSession({ key: editingKey, fields: { ...EMPTY_NON_FILTER } });
+      return;
+    }
+    const s = schedules.find((x) => x.id === editingMode.id);
+    if (s) {
+      setNonFilterSession({
+        key: editingKey,
+        fields: {
+          name: s.name,
+          enabled: s.enabled,
+          recipientsText: (s.recipients ?? []).join(", "),
+          includeLines: s.includeLines,
+        },
+      });
+    } else if (!isLoading) {
+      // Schedule referenced by URL doesn't exist (deleted, bad link). Surface
+      // a toast and close the dialog so the URL doesn't get stuck open.
+      toast({
+        title: "Schedule not found",
+        description: `No schedule with id ${editingMode.id}.`,
+        variant: "destructive",
+      });
+      updateEditorUrl({ ...DEFAULT_EDITOR_STATE });
+    }
+    // editingKey changes whenever the URL's editing param changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingKey, schedules, isLoading]);
+
+  function buildBody(): JournalEntryExportScheduleBody | null {
+    if (!nonFilter) return null;
+    const recipients = nonFilter.recipientsText
       .split(/[,\n;]/)
       .map((s) => s.trim())
       .filter(Boolean);
@@ -285,34 +476,36 @@ export default function JournalExportSchedulesPage() {
       });
       return null;
     }
-    if (!form.name.trim()) {
+    if (!nonFilter.name.trim()) {
       toast({ title: "Name required", variant: "destructive" });
       return null;
     }
     const postedByUserId =
-      form.postedByFilter !== "any" && /^\d+$/.test(form.postedByFilter)
-        ? Number(form.postedByFilter)
+      editorState.postedByFilter !== "any" &&
+      /^\d+$/.test(editorState.postedByFilter)
+        ? Number(editorState.postedByFilter)
         : null;
     const approverUserId =
-      form.approverFilter !== "any" && /^\d+$/.test(form.approverFilter)
-        ? Number(form.approverFilter)
+      editorState.approverFilter !== "any" &&
+      /^\d+$/.test(editorState.approverFilter)
+        ? Number(editorState.approverFilter)
         : null;
     return {
-      name: form.name.trim(),
-      enabled: form.enabled,
-      cadence: form.cadence as JournalEntryExportScheduleBodyCadence,
+      name: nonFilter.name.trim(),
+      enabled: nonFilter.enabled,
+      cadence: editorState.cadence as JournalEntryExportScheduleBodyCadence,
       recipients,
       filterStatus:
-        form.filterStatus === "all"
+        editorState.filterStatus === "all"
           ? null
-          : (form.filterStatus as JournalEntryExportScheduleBodyFilterStatus),
+          : (editorState.filterStatus as JournalEntryExportScheduleBodyFilterStatus),
       filterSource:
-        form.filterSource === "all"
+        editorState.filterSource === "all"
           ? null
-          : (form.filterSource as JournalEntryExportScheduleBodyFilterSource),
+          : (editorState.filterSource as JournalEntryExportScheduleBodyFilterSource),
       filterPostedByUserId: postedByUserId,
       filterApproverUserId: approverUserId,
-      includeLines: form.includeLines,
+      includeLines: nonFilter.includeLines,
     };
   }
 
@@ -321,27 +514,29 @@ export default function JournalExportSchedulesPage() {
   // helper the scheduler uses, so the file admins see here is the file
   // the next scheduled email would attach (no need to save first).
   async function previewCsv() {
-    if (!editing) return;
+    if (!editingMode || !nonFilter) return;
     if (previewing) return;
     setPreviewing(true);
     try {
       const postedByUserId =
-        editing.postedByFilter !== "any" && /^\d+$/.test(editing.postedByFilter)
-          ? Number(editing.postedByFilter)
+        editorState.postedByFilter !== "any" &&
+        /^\d+$/.test(editorState.postedByFilter)
+          ? Number(editorState.postedByFilter)
           : null;
       const approverUserId =
-        editing.approverFilter !== "any" && /^\d+$/.test(editing.approverFilter)
-          ? Number(editing.approverFilter)
+        editorState.approverFilter !== "any" &&
+        /^\d+$/.test(editorState.approverFilter)
+          ? Number(editorState.approverFilter)
           : null;
       const body = {
-        cadence: editing.cadence,
+        cadence: editorState.cadence,
         filterStatus:
-          editing.filterStatus === "all" ? null : editing.filterStatus,
+          editorState.filterStatus === "all" ? null : editorState.filterStatus,
         filterSource:
-          editing.filterSource === "all" ? null : editing.filterSource,
+          editorState.filterSource === "all" ? null : editorState.filterSource,
         filterPostedByUserId: postedByUserId,
         filterApproverUserId: approverUserId,
-        includeLines: editing.includeLines,
+        includeLines: nonFilter.includeLines,
       };
       const res = await fetch("/api/journal-entry-export-schedules/preview", {
         method: "POST",
@@ -396,13 +591,13 @@ export default function JournalExportSchedulesPage() {
   }
 
   function submitForm() {
-    if (!editing) return;
-    const body = buildBody(editing);
+    if (!editingMode || !nonFilter) return;
+    const body = buildBody();
     if (!body) return;
-    if (editing.id === null) {
+    if (editingMode.mode === "new") {
       createMut.mutate({ data: body });
     } else {
-      updateMut.mutate({ id: editing.id, data: body });
+      updateMut.mutate({ id: editingMode.id, data: body });
     }
   }
 
@@ -780,30 +975,30 @@ export default function JournalExportSchedulesPage() {
 
       {/* Create / edit dialog */}
       <Dialog
-        open={editing !== null}
+        open={editingMode !== null}
         onOpenChange={(open) => {
-          if (!open) setEditing(null);
+          if (!open) closeDialog();
         }}
       >
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {editing?.id === null ? "New schedule" : "Edit schedule"}
+              {editingMode?.mode === "new" ? "New schedule" : "Edit schedule"}
             </DialogTitle>
             <DialogDescription>
               The scheduler runs at 02:00 UTC each day; cadence determines the
               date range exported.
             </DialogDescription>
           </DialogHeader>
-          {editing ? (
+          {editingMode && nonFilter ? (
             <div className="space-y-3">
               <div className="space-y-1">
                 <Label htmlFor="schedule-name">Name</Label>
                 <Input
                   id="schedule-name"
-                  value={editing.name}
+                  value={nonFilter.name}
                   onChange={(e) =>
-                    setEditing({ ...editing, name: e.target.value })
+                    setNonFilter({ ...nonFilter, name: e.target.value })
                   }
                   placeholder="Weekly to controllers"
                   data-testid="input-name"
@@ -813,9 +1008,9 @@ export default function JournalExportSchedulesPage() {
                 <div className="space-y-1">
                   <Label>Cadence</Label>
                   <Select
-                    value={editing.cadence}
+                    value={editorState.cadence}
                     onValueChange={(v) =>
-                      setEditing({ ...editing, cadence: v as Cadence })
+                      updateEditorUrl({ cadence: v as Cadence })
                     }
                   >
                     <SelectTrigger data-testid="select-cadence">
@@ -831,9 +1026,9 @@ export default function JournalExportSchedulesPage() {
                 <div className="flex items-end gap-2 pb-2">
                   <Checkbox
                     id="schedule-enabled"
-                    checked={editing.enabled}
+                    checked={nonFilter.enabled}
                     onCheckedChange={(v) =>
-                      setEditing({ ...editing, enabled: v === true })
+                      setNonFilter({ ...nonFilter, enabled: v === true })
                     }
                   />
                   <Label htmlFor="schedule-enabled">Enabled</Label>
@@ -845,10 +1040,10 @@ export default function JournalExportSchedulesPage() {
                 </Label>
                 <Textarea
                   id="schedule-recipients"
-                  value={editing.recipientsText}
+                  value={nonFilter.recipientsText}
                   onChange={(e) =>
-                    setEditing({
-                      ...editing,
+                    setNonFilter({
+                      ...nonFilter,
                       recipientsText: e.target.value,
                     })
                   }
@@ -861,12 +1056,9 @@ export default function JournalExportSchedulesPage() {
                 <div className="space-y-1">
                   <Label>Status filter</Label>
                   <Select
-                    value={editing.filterStatus}
+                    value={editorState.filterStatus}
                     onValueChange={(v) =>
-                      setEditing({
-                        ...editing,
-                        filterStatus: v as FilterStatus,
-                      })
+                      updateEditorUrl({ filterStatus: v as FilterStatus })
                     }
                   >
                     <SelectTrigger data-testid="select-status">
@@ -882,12 +1074,9 @@ export default function JournalExportSchedulesPage() {
                 <div className="space-y-1">
                   <Label>Source filter</Label>
                   <Select
-                    value={editing.filterSource}
+                    value={editorState.filterSource}
                     onValueChange={(v) =>
-                      setEditing({
-                        ...editing,
-                        filterSource: v as FilterSource,
-                      })
+                      updateEditorUrl({ filterSource: v as FilterSource })
                     }
                   >
                     <SelectTrigger data-testid="select-source">
@@ -907,9 +1096,9 @@ export default function JournalExportSchedulesPage() {
                 <div className="space-y-1">
                   <Label>Posted by</Label>
                   <Select
-                    value={editing.postedByFilter}
+                    value={editorState.postedByFilter}
                     onValueChange={(v) =>
-                      setEditing({ ...editing, postedByFilter: v })
+                      updateEditorUrl({ postedByFilter: v })
                     }
                   >
                     <SelectTrigger data-testid="select-posted-by">
@@ -937,9 +1126,9 @@ export default function JournalExportSchedulesPage() {
                 <div className="space-y-1">
                   <Label>Approver</Label>
                   <Select
-                    value={editing.approverFilter}
+                    value={editorState.approverFilter}
                     onValueChange={(v) =>
-                      setEditing({ ...editing, approverFilter: v })
+                      updateEditorUrl({ approverFilter: v })
                     }
                   >
                     <SelectTrigger data-testid="select-approver">
@@ -974,9 +1163,9 @@ export default function JournalExportSchedulesPage() {
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="schedule-include-lines"
-                  checked={editing.includeLines}
+                  checked={nonFilter.includeLines}
                   onCheckedChange={(v) =>
-                    setEditing({ ...editing, includeLines: v === true })
+                    setNonFilter({ ...nonFilter, includeLines: v === true })
                   }
                 />
                 <Label htmlFor="schedule-include-lines">
@@ -997,7 +1186,7 @@ export default function JournalExportSchedulesPage() {
               {previewing ? "Preparing…" : "Preview CSV"}
             </Button>
             <div className="flex gap-2">
-              <Button variant="ghost" onClick={() => setEditing(null)}>
+              <Button variant="ghost" onClick={closeDialog}>
                 Cancel
               </Button>
               <Button
@@ -1005,7 +1194,7 @@ export default function JournalExportSchedulesPage() {
                 disabled={createMut.isPending || updateMut.isPending}
                 data-testid="button-save"
               >
-                {editing?.id === null ? "Create" : "Save"}
+                {editingMode?.mode === "new" ? "Create" : "Save"}
               </Button>
             </div>
           </DialogFooter>
