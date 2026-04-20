@@ -29,4 +29,15 @@ Nonprofit bookkeeping monorepo (pnpm workspace).
 - Runners under `.local/test-evidence/run-*.mjs`
 
 ## Running tests locally
-- Backend integration tests: `pnpm --filter @workspace/api-server test` (also runs automatically in `scripts/post-merge.sh` after every merge, so a regression in the journal-entry immutability triggers — or any future backend test — will fail the merge run).
+- Backend integration tests: `pnpm --filter @workspace/api-server test` (also runs automatically in `scripts/post-merge.sh` after every merge, so a regression in the journal-entry immutability triggers — or any future backend test — will fail the merge run). Tests run with `--test-concurrency=1` because two suites globally `DISABLE TRIGGER` during cleanup; parallel runs cause the line-DELETE rejection test to flake.
+
+## Integrity sweep
+- `scripts/integrity/sweep.sql` is a read-only diagnostic: 32 single-row checks across `accounting_source_links` structural integrity, JE↔draft linkage including reciprocal pointer symmetry, JE reversal-pointer symmetry + cardinality, expense+bill bridge state vs link presence, and posted-line account_id invariants. A clean DB returns `n=0` for every row. Last run 2026-04-20: 32/32 OK.
+- One-off repair scripts live under `scripts/integrity/YYYY-MM-DD-*.sql`. Conventions:
+  - One transaction.
+  - Header documents the finding, root cause, and reproduction context.
+  - Bridge inserts: idempotent via `ON CONFLICT (cols) DO NOTHING`.
+  - **Audit rows are driven from `RETURNING` of the actual insert via CTE**, so a replay against an already-fixed DB writes ZERO `activity_log` rows — no phantom "we backfilled this" entries.
+  - `created_by_user_id = NULL` on system-initiated repair rows (preserves portability across environments, and tells one honest provenance story when compared against canonical user-driven rows).
+  - Inline `SELECT COUNT(*)` verification before `COMMIT`.
+- 2026-04-20 backfill closed the only finding (`expense_draft_no_link=3`): expenses 4/6/7 had drafts 52/53/54 but no `accounting_source_links` row — legacy from a brief window before the inserter at `expenseDraftService.ts:318` went live.
