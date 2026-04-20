@@ -3,6 +3,7 @@ import {
   useGetFinancialSummaryReport,
   useGetTrialBalanceReport,
   useGetAccountActivityReport,
+  getAccountActivityReport,
   useGetReconciliationReport,
   useListAccountingPeriods,
 } from "@workspace/api-client-react";
@@ -964,6 +965,165 @@ export default function ReportsPage() {
     );
   };
 
+  // Task #73 — bulk per-account drill-down CSV. Reviewers wanted one file with
+  // every account's posted JE activity instead of expanding rows one at a time.
+  // Only meaningful in `source === "ledger"` (operational mode has no account
+  // breakdowns to drill into). Each account becomes a section in the CSV with
+  // the same columns as the per-account export, preceded by an ACCOUNT header
+  // row identifying the code/name/group.
+  const [bulkDownloading, setBulkDownloading] = useState<
+    null | "pl" | "balance"
+  >(null);
+  const ACTIVITY_HEADER: CsvCell[] = [
+    "entry_date",
+    "entry_no",
+    "entry_memo",
+    "line_memo",
+    "program",
+    "fund",
+    "debit",
+    "credit",
+  ];
+  type BulkAccount = {
+    accountId: number;
+    code: string;
+    name: string;
+    group: string;
+  };
+  const fetchAndAppendActivity = async (
+    rows: CsvCell[][],
+    accounts: BulkAccount[],
+    params: { from?: string; to: string },
+  ) => {
+    // Sequential to keep ordering stable and avoid hammering the API; chart of
+    // accounts is small (tens of accounts), so latency is acceptable.
+    for (const acct of accounts) {
+      rows.push([
+        "ACCOUNT",
+        acct.code,
+        acct.name,
+        `group=${acct.group}`,
+      ]);
+      rows.push(ACTIVITY_HEADER);
+      let activity;
+      try {
+        activity = await getAccountActivityReport({
+          accountId: acct.accountId,
+          ...(params.from ? { from: params.from } : {}),
+          to: params.to,
+        });
+      } catch (e) {
+        rows.push(["ERROR", "", "", String((e as Error)?.message ?? e)]);
+        rows.push([]);
+        continue;
+      }
+      for (const l of activity.lines) {
+        rows.push([
+          l.entryDate,
+          l.entryNo,
+          l.entryMemo ?? "",
+          l.lineMemo ?? "",
+          l.program ?? "",
+          l.fund ?? "",
+          csvMoney(l.debit),
+          csvMoney(l.credit),
+        ]);
+      }
+      rows.push([
+        "TOTALS",
+        "",
+        "",
+        "",
+        "",
+        "",
+        csvMoney(activity.totals.debits),
+        csvMoney(activity.totals.credits),
+      ]);
+      rows.push([]);
+    }
+  };
+  const collectPlAccounts = (): BulkAccount[] => {
+    if (!data) return [];
+    const pl = data.profitAndLoss;
+    const out: BulkAccount[] = [];
+    for (const a of pl.incomeByAccount ?? []) {
+      out.push({ accountId: a.accountId, code: a.code, name: a.name, group: "Income" });
+    }
+    for (const a of pl.expensesByAccount ?? []) {
+      out.push({ accountId: a.accountId, code: a.code, name: a.name, group: "Expense" });
+    }
+    return out;
+  };
+  const collectBsAccounts = (): BulkAccount[] => {
+    if (!data) return [];
+    const bs = data.balanceSheet;
+    const out: BulkAccount[] = [];
+    const push = (
+      group: string,
+      list:
+        | Array<{ accountId: number; code: string; name: string }>
+        | undefined,
+    ) => {
+      for (const a of list ?? []) {
+        out.push({ accountId: a.accountId, code: a.code, name: a.name, group });
+      }
+    };
+    push("Assets:Cash", bs.cashAccounts);
+    push("Assets:Receivable", bs.accountsReceivableAccounts);
+    push("Assets:Other", bs.otherAssetAccounts);
+    push("Liabilities:Payable", bs.accountsPayableAccounts);
+    push("Liabilities:Other", bs.otherLiabilityAccounts);
+    return out;
+  };
+  const downloadAllPlActivityCsv = async () => {
+    if (!data || bulkDownloading) return;
+    const accounts = collectPlAccounts();
+    if (accounts.length === 0) return;
+    setBulkDownloading("pl");
+    try {
+      const rows: CsvCell[][] = [
+        ["report", "Profit & Loss — all account activity"],
+        ["range", csvSafeDateRange(fromDate, toDate)],
+        ["generated", new Date().toISOString()],
+        [],
+      ];
+      await fetchAndAppendActivity(rows, accounts, {
+        from: fromDate,
+        to: toDate,
+      });
+      downloadCsv(
+        `profit-and-loss_all-activity_${csvSafeDateRange(fromDate, toDate)}.csv`,
+        rows,
+      );
+    } finally {
+      setBulkDownloading(null);
+    }
+  };
+  const downloadAllBsActivityCsv = async () => {
+    if (!data || bulkDownloading) return;
+    const accounts = collectBsAccounts();
+    if (accounts.length === 0) return;
+    setBulkDownloading("balance");
+    try {
+      const rows: CsvCell[][] = [
+        ["report", "Balance Sheet — all account activity"],
+        ["as_of", toDate],
+        ["generated", new Date().toISOString()],
+        [],
+      ];
+      // Balance sheet drilldowns are cumulative-through-toDate (no `from`),
+      // matching the per-row drilldown behavior in AccountDrillDownRow so the
+      // listed lines net to the displayed balance.
+      await fetchAndAppendActivity(rows, accounts, { to: toDate });
+      downloadCsv(
+        `balance-sheet_all-activity_as-of_${toDate}.csv`,
+        rows,
+      );
+    } finally {
+      setBulkDownloading(null);
+    }
+  };
+
   const downloadStatusCsv = (
     kind: "expenses" | "bills",
     rowsIn: { status: string; count: number; amount: number }[],
@@ -1327,16 +1487,36 @@ export default function ReportsPage() {
                       : " Switch to the Ledger source above to drill into the posted journal entries behind each row."}
                   </CardDescription>
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={downloadProfitAndLossCsv}
-                  className="no-print"
-                  data-testid="export-csv-pl"
-                >
-                  Export CSV
-                </Button>
+                <div className="flex items-center gap-2">
+                  {source === "ledger" &&
+                    ((data?.profitAndLoss.incomeByAccount?.length ?? 0) +
+                      (data?.profitAndLoss.expensesByAccount?.length ?? 0) >
+                      0) && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={downloadAllPlActivityCsv}
+                        disabled={bulkDownloading !== null}
+                        className="no-print"
+                        data-testid="export-csv-pl-all-activity"
+                      >
+                        {bulkDownloading === "pl"
+                          ? "Preparing…"
+                          : "Download all activity (CSV)"}
+                      </Button>
+                    )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={downloadProfitAndLossCsv}
+                    className="no-print"
+                    data-testid="export-csv-pl"
+                  >
+                    Export CSV
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -1412,16 +1592,42 @@ export default function ReportsPage() {
                       " Click a row to see the underlying accounts."}
                   </CardDescription>
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={downloadBalanceSheetCsv}
-                  className="no-print"
-                  data-testid="export-csv-balance-sheet"
-                >
-                  Export CSV
-                </Button>
+                <div className="flex items-center gap-2">
+                  {source === "ledger" &&
+                    ((data?.balanceSheet.cashAccounts?.length ?? 0) +
+                      (data?.balanceSheet.accountsReceivableAccounts?.length ??
+                        0) +
+                      (data?.balanceSheet.otherAssetAccounts?.length ?? 0) +
+                      (data?.balanceSheet.accountsPayableAccounts?.length ??
+                        0) +
+                      (data?.balanceSheet.otherLiabilityAccounts?.length ??
+                        0) >
+                      0) && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={downloadAllBsActivityCsv}
+                        disabled={bulkDownloading !== null}
+                        className="no-print"
+                        data-testid="export-csv-bs-all-activity"
+                      >
+                        {bulkDownloading === "balance"
+                          ? "Preparing…"
+                          : "Download all activity (CSV)"}
+                      </Button>
+                    )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={downloadBalanceSheetCsv}
+                    className="no-print"
+                    data-testid="export-csv-balance-sheet"
+                  >
+                    Export CSV
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
