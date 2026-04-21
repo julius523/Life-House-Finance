@@ -937,6 +937,10 @@ export default function JournalExportSchedulesPage() {
                       <th className="text-left p-3">Recipients</th>
                       <th className="text-left p-3">Posted by filter</th>
                       <th className="text-left p-3">Approver filter</th>
+                      <th className="text-left p-3">Status filter</th>
+                      <th className="text-left p-3">Source filter</th>
+                      <th className="text-left p-3">Cadence</th>
+                      <th className="text-left p-3">Lines</th>
                       <th className="text-left p-3">Trigger</th>
                       <th className="text-left p-3">Error</th>
                     </tr>
@@ -979,6 +983,49 @@ export default function JournalExportSchedulesPage() {
                           data-testid={`cell-log-approver-${entry.id}`}
                         >
                           {entry.filterApproverUserLabel ?? "anyone"}
+                        </td>
+                        {/* Task #97 — show the non-user filter context that
+                            was active for this run.
+                            - filterStatus / filterSource are nullable on the
+                              schedule itself ("all" = no filter), so we
+                              render null as "all" here to match the email
+                              body convention. This means a pre-#97 row (also
+                              null) is indistinguishable from a real "no
+                              filter" run; that's an accepted limitation —
+                              the audit gap can only be closed for rows
+                              written from #97 onward.
+                            - cadence / includeLines are *required* on every
+                              schedule, so null in those columns can only
+                              come from a pre-#97 row. Render "—" there to
+                              flag "this run predates the snapshot column"
+                              instead of inventing a value. */}
+                        <td
+                          className="p-3 text-muted-foreground"
+                          data-testid={`cell-log-status-${entry.id}`}
+                        >
+                          {entry.filterStatus ?? "all"}
+                        </td>
+                        <td
+                          className="p-3 text-muted-foreground"
+                          data-testid={`cell-log-source-${entry.id}`}
+                        >
+                          {entry.filterSource ?? "all"}
+                        </td>
+                        <td
+                          className="p-3 text-muted-foreground"
+                          data-testid={`cell-log-cadence-${entry.id}`}
+                        >
+                          {entry.cadence ?? "—"}
+                        </td>
+                        <td
+                          className="p-3 text-muted-foreground"
+                          data-testid={`cell-log-include-lines-${entry.id}`}
+                        >
+                          {entry.includeLines == null
+                            ? "—"
+                            : entry.includeLines
+                              ? "yes"
+                              : "no"}
                         </td>
                         <td className="p-3">{entry.triggeredBy}</td>
                         <td className="p-3 text-destructive">

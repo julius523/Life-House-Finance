@@ -2394,6 +2394,18 @@ export interface JournalEntryExportSendLogEntry {
   /** Snapshot of the resolved "Display Name <email>" for the schedule's approver filter at the time this run fired. See filterPostedByUserLabel.
    */
   filterApproverUserLabel?: string | null;
+  /** Task #97 — snapshot of the schedule's status filter (posted / reversed) as it was when this run fired. Null when no filter was set, or for rows written before #97.
+   */
+  filterStatus?: string | null;
+  /** Task #97 — snapshot of the schedule's source filter (copilot / manual / expense / bill) as it was when this run fired. Null when no filter was set, or for rows written before #97.
+   */
+  filterSource?: string | null;
+  /** Task #97 — snapshot of the schedule's cadence (daily / weekly / monthly) at run time. Null only for rows written before #97.
+   */
+  cadence?: string | null;
+  /** Task #97 — snapshot of the schedule's include-lines flag at run time. Null only for rows written before #97.
+   */
+  includeLines?: boolean | null;
 }
 
 export interface JournalEntryExportSendLogListResponse {

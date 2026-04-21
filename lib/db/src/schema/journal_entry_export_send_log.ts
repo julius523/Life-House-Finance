@@ -5,6 +5,7 @@ import {
   integer,
   timestamp,
   date,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { usersTable } from "./users";
 import { journalEntryExportSchedulesTable } from "./journal_entry_export_schedules";
@@ -48,6 +49,19 @@ export const journalEntryExportSendLogTable = pgTable(
      */
     filterPostedByUserLabel: text("filter_posted_by_user_label"),
     filterApproverUserLabel: text("filter_approver_user_label"),
+    /**
+     * Task #97 — snapshot of the schedule's non-user filters as they were
+     * configured at the moment this run fired. Same audit motivation as the
+     * Task #89 user-label snapshots above: editing a schedule's status /
+     * source / cadence / include-lines flag would otherwise silently rewrite
+     * how older send-log rows are interpreted. Persisting them on the row
+     * lets the "Recent send log" table show exactly what each historical run
+     * was configured to export. Nullable for rows written before #97.
+     */
+    filterStatus: text("filter_status"),
+    filterSource: text("filter_source"),
+    cadence: text("cadence"),
+    includeLines: boolean("include_lines"),
   },
 );
 

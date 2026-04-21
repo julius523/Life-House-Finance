@@ -5389,6 +5389,30 @@ export const GetJournalEntryExportScheduleLogResponse = zod.object({
         .describe(
           'Snapshot of the resolved \"Display Name <email>\" for the schedule\'s approver filter at the time this run fired. See filterPostedByUserLabel.\n',
         ),
+      filterStatus: zod
+        .string()
+        .nullish()
+        .describe(
+          "Task #97 — snapshot of the schedule's status filter (posted \/ reversed) as it was when this run fired. Null when no filter was set, or for rows written before #97.\n",
+        ),
+      filterSource: zod
+        .string()
+        .nullish()
+        .describe(
+          "Task #97 — snapshot of the schedule's source filter (copilot \/ manual \/ expense \/ bill) as it was when this run fired. Null when no filter was set, or for rows written before #97.\n",
+        ),
+      cadence: zod
+        .string()
+        .nullish()
+        .describe(
+          "Task #97 — snapshot of the schedule's cadence (daily \/ weekly \/ monthly) at run time. Null only for rows written before #97.\n",
+        ),
+      includeLines: zod
+        .boolean()
+        .nullish()
+        .describe(
+          "Task #97 — snapshot of the schedule's include-lines flag at run time. Null only for rows written before #97.\n",
+        ),
     }),
   ),
 });

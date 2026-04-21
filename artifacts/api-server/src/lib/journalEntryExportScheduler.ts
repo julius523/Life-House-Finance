@@ -409,6 +409,16 @@ export async function runSchedule(
     // schedule points at now.
     filterPostedByUserLabel: snapshotPostedByLabel,
     filterApproverUserLabel: snapshotApproverLabel,
+    // Task #97 — snapshot the non-user filter context onto the row so the
+    // send-log table stays auditable end-to-end after the schedule is edited.
+    // We store the *normalized* status/source (the same values used to build
+    // the CSV above), not the raw schedule fields, so an unrecognized value
+    // ever stored on the schedule row records as null rather than misleading
+    // the audit trail.
+    filterStatus,
+    filterSource,
+    cadence: schedule.cadence,
+    includeLines: schedule.includeLines,
   });
 
   await db.insert(activityLogTable).values({
