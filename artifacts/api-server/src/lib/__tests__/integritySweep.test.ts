@@ -641,6 +641,100 @@ test("key mapping regression: service keys match sweep.sql 1:1", async () => {
   );
 });
 
+test("all-OK contract: with seeded violations removed, sweep returns ok=true / count=0 / sampleRefs=[] for every check", async () => {
+  // Deliberately mutate the DB into a fully-clean state by removing
+  // EVERY violation row this suite seeded, then run the sweep and
+  // assert the locked all-OK presentation. We restore the rows
+  // afterwards so the rest of the suite + after() cleanup stays
+  // consistent. This is the only honest way to assert ok=true given
+  // that node:test's `before()` runs once for the file and we need
+  // seeded violations for the rest of the suite.
+
+  // Snapshot full row data so we can re-insert with the exact same IDs
+  // (preserving the IDs other tests already captured).
+  const seededAslRows = await db
+    .select()
+    .from(accountingSourceLinksTable)
+    .where(inArray(accountingSourceLinksTable.id, seededAslIds));
+  const seededExpenseIds = [
+    blockedNoReasonExpenseId,
+    postedWithBlockExpenseId,
+    postedNoLinkExpenseId,
+    draftNoLinkExpenseId,
+  ];
+  const seededExpenseRows = await db
+    .select()
+    .from(expensesTable)
+    .where(inArray(expensesTable.id, seededExpenseIds));
+  const seededBillRows = await db
+    .select()
+    .from(billsTable)
+    .where(inArray(billsTable.id, [postedNoLinkBillAccrualId]));
+
+  // Tear down (ASLs first — they reference expenses by source_id).
+  await db
+    .delete(accountingSourceLinksTable)
+    .where(inArray(accountingSourceLinksTable.id, seededAslIds));
+  await db
+    .delete(expensesTable)
+    .where(inArray(expensesTable.id, seededExpenseIds));
+  await db
+    .delete(billsTable)
+    .where(inArray(billsTable.id, [postedNoLinkBillAccrualId]));
+
+  try {
+    const report = await runIntegritySweep();
+    // The locked all-OK presentation:
+    assert.equal(report.ok, true, "report.ok must be true on a clean DB");
+    assert.equal(report.failingChecks, 0);
+    assert.equal(report.totalChecks, 32);
+    assert.equal(report.checks.length, 32);
+    for (const c of report.checks) {
+      assert.equal(c.count, 0, `check ${c.key} should have count=0 on clean DB`);
+      assert.deepEqual(
+        c.sampleRefs,
+        [],
+        `check ${c.key} should have empty sampleRefs on clean DB`,
+      );
+    }
+
+    // CLI exit-code parity on a clean DB: still exit 0.
+    const scriptPath = path.resolve(
+      process.cwd(),
+      "src/scripts/integritySweep.ts",
+    );
+    const cliResult = await new Promise<{ code: number | null; stdout: string }>(
+      (resolve, reject) => {
+        const child = spawn("pnpm", ["exec", "tsx", scriptPath], {
+          env: process.env,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        let stdout = "";
+        child.stdout.on("data", (b: Buffer) => (stdout += b.toString("utf-8")));
+        child.on("error", reject);
+        child.on("close", (code) => resolve({ code, stdout }));
+      },
+    );
+    assert.equal(cliResult.code, 0);
+    const cliReport = JSON.parse(cliResult.stdout) as IntegritySweepReport;
+    assert.equal(cliReport.ok, true);
+    assert.equal(cliReport.failingChecks, 0);
+  } finally {
+    // Restore the seeded rows so the rest of the suite + after()
+    // cleanup keep working. Re-insert in dependency order: parents
+    // first (expenses, bills) so ASLs can reference them again.
+    if (seededExpenseRows.length) {
+      await db.insert(expensesTable).values(seededExpenseRows);
+    }
+    if (seededBillRows.length) {
+      await db.insert(billsTable).values(seededBillRows);
+    }
+    if (seededAslRows.length) {
+      await db.insert(accountingSourceLinksTable).values(seededAslRows);
+    }
+  }
+});
+
 test("CLI runner: stdout is parseable JSON matching the locked report shape; exits 0", async () => {
   // Spawn the CLI as a real subprocess so we exercise the bundled
   // contract: human summary → stderr, locked JSON → stdout, exit 0

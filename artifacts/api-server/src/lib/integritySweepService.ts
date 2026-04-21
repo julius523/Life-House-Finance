@@ -71,10 +71,18 @@ type CheckSpec = {
   sampleKind: IntegritySampleKind;
   /**
    * Inner SELECT producing rows with column `_id`. The wrapper computes
-   * the full count and pulls up to {@link INTEGRITY_SAMPLE_CAP} sample
-   * IDs in one round trip.
+   * the full count from this set and (unless overridden) pulls up to
+   * {@link INTEGRITY_SAMPLE_CAP} sample IDs from it in one round trip.
+   *
+   * For checks where the count semantics target a different grain than
+   * the sample IDs (e.g. lines_posted_no_account_id counts FAILING
+   * LINES per sweep.sql, but reports DISTINCT JE IDs as samples),
+   * provide {@link sampleIdsSql} to decouple the two. When provided,
+   * `count` is taken from `matchesSql` and samples come from
+   * `sampleIdsSql` — preserving sweep.sql semantics exactly.
    */
   matchesSql: string;
+  sampleIdsSql?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -496,6 +504,10 @@ const CHECKS: CheckSpec[] = [
   },
 
   // ----- Posted lines must have a real account_id (Task #67 invariant) ---
+  // Count semantics match sweep.sql exactly: COUNT(*) over FAILING LINES
+  // (NOT distinct JEs). Sample IDs report DISTINCT JE IDs so an operator
+  // can drill into the affected entries from the Findings UI without
+  // wading through duplicate rows.
   {
     key: "lines_posted_no_account_id",
     name: "Posted/reversed JE has line(s) with NULL account_id",
@@ -503,6 +515,12 @@ const CHECKS: CheckSpec[] = [
     severity: "critical",
     sampleKind: "journal_entry",
     matchesSql: `
+      SELECT jel.id AS _id
+      FROM journal_entry_lines jel
+      JOIN journal_entries je ON je.id = jel.journal_entry_id
+      WHERE jel.account_id IS NULL AND je.status IN ('posted','reversed')
+    `,
+    sampleIdsSql: `
       SELECT DISTINCT je.id AS _id
       FROM journal_entry_lines jel
       JOIN journal_entries je ON je.id = jel.journal_entry_id
@@ -516,6 +534,13 @@ const CHECKS: CheckSpec[] = [
     severity: "critical",
     sampleKind: "journal_entry",
     matchesSql: `
+      SELECT jel.id AS _id
+      FROM journal_entry_lines jel
+      JOIN chart_of_accounts coa ON coa.id = jel.account_id
+      JOIN journal_entries je ON je.id = jel.journal_entry_id
+      WHERE coa.is_active = false AND je.status IN ('posted','reversed')
+    `,
+    sampleIdsSql: `
       SELECT DISTINCT je.id AS _id
       FROM journal_entry_lines jel
       JOIN chart_of_accounts coa ON coa.id = jel.account_id
@@ -530,24 +555,41 @@ const CHECKS: CheckSpec[] = [
 // ---------------------------------------------------------------------------
 
 async function runOne(spec: CheckSpec): Promise<IntegrityCheckResult> {
-  // One round trip per check: compute the full COUNT and pull up to
-  // INTEGRITY_SAMPLE_CAP sample IDs from the same matching set. The
-  // `matches` CTE is evaluated once and reused for both the count and
-  // the sample selection (Postgres folds these together when safe).
-  const queryText = `
-    WITH matches AS (
-      ${spec.matchesSql}
-    )
-    SELECT
-      (SELECT COUNT(*)::int FROM matches) AS total,
-      COALESCE(
-        json_agg(t._id ORDER BY t._id) FILTER (WHERE t._id IS NOT NULL),
-        '[]'::json
-      ) AS ids
-    FROM (
-      SELECT _id FROM matches ORDER BY _id LIMIT ${INTEGRITY_SAMPLE_CAP}
-    ) t
-  `;
+  // Default path: one round trip — count and samples both come from
+  // the same `matches` CTE. When sampleIdsSql is provided (decoupled
+  // grain), we issue a second query for the sample IDs and keep the
+  // count semantics from matchesSql exactly per sweep.sql.
+  const queryText = spec.sampleIdsSql
+    ? `
+        WITH matches AS (
+          ${spec.matchesSql}
+        ), samples AS (
+          ${spec.sampleIdsSql}
+        )
+        SELECT
+          (SELECT COUNT(*)::int FROM matches) AS total,
+          COALESCE(
+            json_agg(t._id ORDER BY t._id) FILTER (WHERE t._id IS NOT NULL),
+            '[]'::json
+          ) AS ids
+        FROM (
+          SELECT _id FROM samples ORDER BY _id LIMIT ${INTEGRITY_SAMPLE_CAP}
+        ) t
+      `
+    : `
+        WITH matches AS (
+          ${spec.matchesSql}
+        )
+        SELECT
+          (SELECT COUNT(*)::int FROM matches) AS total,
+          COALESCE(
+            json_agg(t._id ORDER BY t._id) FILTER (WHERE t._id IS NOT NULL),
+            '[]'::json
+          ) AS ids
+        FROM (
+          SELECT _id FROM matches ORDER BY _id LIMIT ${INTEGRITY_SAMPLE_CAP}
+        ) t
+      `;
   const result = (await db.execute(sql.raw(queryText))) as unknown as {
     rows: Array<{ total: number | string | null; ids: unknown }>;
   };
