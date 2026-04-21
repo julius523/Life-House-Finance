@@ -1,0 +1,100 @@
+Good. That’s real progress.
+
+You’ve now got:
+
+* #84 done: Trial Balance bulk all-activity CSV
+* #85 done: live progress counter for bulk CSV prep
+
+That means the reporting/export slice is getting pretty tight.
+
+What’s effectively true now
+
+The reports page already has:
+
+* P&L drilldown working
+* Balance Sheet drilldown working
+* Trial Balance bulk activity export working
+* progress feedback during large exports
+* unmapped rows included instead of silently dropped
+
+So the next work should not be more export glitter. It should be confidence and cleanup.
+
+What I’d do next, in order
+
+1) Add an automated parity test for bulk exports
+
+This is the most valuable next step.
+
+Goal:
+prove that “Download all activity (CSV)” equals the combined per-account activity exports for the same date range.
+
+Why it matters:
+right now the feature works, but this locks the contract so future refactors don’t quietly corrupt exports.
+
+Acceptance:
+
+* same accounts included
+* same date range applied
+* same totals
+* unmapped section preserved when present
+* deterministic filename pattern
+
+2) Add cancel support for long-running bulk exports
+
+This is your best UX follow-up.
+
+Right now users can see progress, which is good. But if they picked the wrong date range or huge dataset, they’re still stuck waiting.
+
+Acceptance:
+
+* button changes to Cancel
+* in-flight fetch loop stops cleanly
+* no partial file download
+* UI resets safely
+
+3) Do a small reports hardening sweep
+
+Not a big project. Just a cleanup pass.
+
+Focus on:
+
+* consistent disabled states across all three bulk-export buttons
+* consistent tooltip copy
+* consistent empty-state copy
+* consistent error copy when one account fetch fails mid-export
+
+4) Then move to integrity checks
+
+This is the bigger operational win after reports.
+
+Especially:
+
+* orphaned accounting_source_links
+* “remediated but replacement missing”
+* JE/source-reference consistency checks
+* any rows that can appear in reports but should be impossible structurally
+
+My blunt read
+
+You are past the point where more feature-building on reports gives huge value. The smart move now is:
+lock correctness, add cancel, then move to integrity sweeps.
+
+Builder-ready next task
+
+If you want the clean next tracked task, I’d title it:
+
+#86 - Prove bulk all-activity CSV parity against per-account exports
+
+What & Why
+
+The new bulk all-activity exports for P&L, Balance Sheet, and Trial Balance are now user-visible and relied on for audit/review workflows. We need an automated regression test that proves the bulk export matches the union of the per-account exports for the same visible rows and date range, including unmapped Trial Balance rows.
+
+Done looks like
+
+* automated test coverage for P&L bulk export parity
+* automated test coverage for Balance Sheet bulk export parity
+* automated test coverage for Trial Balance bulk export parity
+* unmapped Trial Balance rows preserved in the bulk file with NOTE section
+* filename pattern asserted
+* date-range propagation asserted
+* totals/section presence asserted
