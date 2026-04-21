@@ -44,6 +44,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   Shield,
+  ShieldAlert,
   UserPlus,
   KeyRound,
   AlertTriangle,
@@ -56,6 +57,7 @@ import {
   Send,
   RotateCcw,
 } from "lucide-react";
+import { Link } from "wouter";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDistanceToNow } from "date-fns";
 
@@ -170,6 +172,28 @@ export default function AdminPage() {
           onSaved={() => setPasswordFor(null)}
         />
       )}
+
+      <Card data-testid="card-integrity-link">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldAlert className="h-5 w-5 text-primary" />
+            Integrity findings
+          </CardTitle>
+          <CardDescription>
+            Read-only snapshot of every database integrity check, grouped by
+            category with critical issues hoisted to the top. Useful for
+            pre-launch hardening and ad-hoc audits.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild variant="outline">
+            <Link href="/admin/integrity" data-testid="link-admin-integrity">
+              <ShieldAlert className="mr-2 h-4 w-4" />
+              Open integrity findings
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       <EmailSettingsCard />
 

@@ -29,6 +29,7 @@ import MonthEndDetail from "@/pages/month-end/detail";
 import ReportsPage from "@/pages/reports";
 import AdminPage from "@/pages/admin";
 import AdminExpenseCategoriesPage from "@/pages/admin-expense-categories";
+import AdminIntegrityPage from "@/pages/admin-integrity";
 import CreditsPage from "@/pages/credits";
 import AccountingPage from "@/pages/accounting";
 import AccountingCoaPage from "@/pages/accounting-coa";
@@ -147,6 +148,7 @@ function AppRoutes() {
           "accounting",
           AdminExpenseCategoriesPage,
         )}
+        {route("/admin/integrity", "admin", AdminIntegrityPage)}
 
         <Route component={NotFound} />
       </Switch>
