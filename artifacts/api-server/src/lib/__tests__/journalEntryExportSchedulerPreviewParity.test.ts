@@ -36,6 +36,7 @@ import {
   activityLogTable,
   agentActionsTable,
   copilotThreadsTable,
+  accountingSourceLinksTable,
   type JournalEntryExportSchedule,
 } from "@workspace/db";
 import {
@@ -50,6 +51,7 @@ const insertedScheduleIds: number[] = [];
 const insertedEntryIds: number[] = [];
 const insertedAgentActionIds: number[] = [];
 const insertedThreadIds: number[] = [];
+const insertedSourceLinkIds: number[] = [];
 let testUserId: number;
 let copilotUserId: number;
 /** Thread that backs the per-row agent_actions used to mark copilot entries. */
@@ -164,8 +166,14 @@ before(async () => {
     entryDate: string;
     memo: string;
     status: "posted" | "reversed";
-    /** "manual" rows have agentActionId NULL, "copilot" rows non-null. */
-    source: "manual" | "copilot";
+    /**
+     * - "manual"  → agentActionId NULL, no source link
+     * - "copilot" → agentActionId non-null
+     * - "expense" / "bill" → agentActionId NULL, with an
+     *   accounting_source_links row of the matching sourceType so
+     *   buildSourceClauseFor("expense"|"bill") (an EXISTS subquery) hits.
+     */
+    source: "manual" | "copilot" | "expense" | "bill";
     debitAccount: string;
     creditAccount: string;
     amountCents: number;
@@ -240,6 +248,36 @@ before(async () => {
       creditAccount: "4000 Revenue",
       amountCents: 1,
     },
+    {
+      // Monthly window, manual posting that the accounting bridge has
+      // linked to an expense source. buildSourceClauseFor("expense")
+      // selects this row via the EXISTS subquery on
+      // accounting_source_links; the manual filter must NOT (its
+      // NOT EXISTS clause excludes any JE that has an expense/bill
+      // link). Pairs with `monthly-summary-source-expense` below.
+      entryNo: `${TAG}-008`,
+      entryDate: "2025-03-18",
+      memo: "Monthly window, expense-sourced",
+      status: "posted",
+      source: "expense",
+      debitAccount: "5000 Expenses",
+      creditAccount: "1000 Cash",
+      amountCents: 4242,
+    },
+    {
+      // Monthly window, manual posting linked to a bill source. Same
+      // contract as the expense row above but exercises the
+      // sourceType='bill' branch of buildSourceClauseFor. Pairs with
+      // `monthly-summary-source-bill` below.
+      entryNo: `${TAG}-009`,
+      entryDate: "2025-03-25",
+      memo: "Monthly window, bill-sourced",
+      status: "posted",
+      source: "bill",
+      debitAccount: "5000 Expenses",
+      creditAccount: "2000 Accounts Payable",
+      amountCents: 8181,
+    },
   ];
 
   for (const s of seeds) {
@@ -303,6 +341,29 @@ before(async () => {
         memo: `cr ${s.memo}`,
       },
     ]);
+
+    if (s.source === "expense" || s.source === "bill") {
+      // The accounting bridge would normally insert this row when an
+      // approved expense/bill produces a journal entry. We mimic just
+      // the link side here — accounting_source_links.sourceId has no
+      // FK to expenses/bills, so we don't need the operational row to
+      // exist for the EXISTS subquery in buildSourceClauseFor to fire.
+      // sourceId/idempotencyKey are tagged with TAG to stay isolated
+      // from any other rows the suite/environment may have.
+      const fakeSourceId = entry!.id; // unique per JE, satisfies the unique index
+      const [link] = await db
+        .insert(accountingSourceLinksTable)
+        .values({
+          sourceType: s.source,
+          sourceId: fakeSourceId,
+          eventType: "primary",
+          idempotencyKey: `${TAG}-${s.source}-${fakeSourceId}`,
+          journalEntryId: entry!.id,
+          createdByUserId: testUserId,
+        })
+        .returning();
+      insertedSourceLinkIds.push(link!.id);
+    }
   }
 });
 
@@ -348,6 +409,15 @@ after(async () => {
       .where(
         inArray(journalEntryExportSchedulesTable.id, insertedScheduleIds),
       );
+  }
+  if (insertedSourceLinkIds.length > 0) {
+    // Clear source links before journal entries. The FK on
+    // journal_entry_id is ON DELETE SET NULL so the JE delete itself
+    // would not fail, but leaving these rows around with NULL FKs
+    // would leak test fixtures into shared/parallel environments.
+    await db
+      .delete(accountingSourceLinksTable)
+      .where(inArray(accountingSourceLinksTable.id, insertedSourceLinkIds));
   }
   if (insertedEntryIds.length > 0) {
     // journal_entries / journal_entry_lines have BEFORE UPDATE/DELETE
@@ -516,6 +586,38 @@ const parityCases: ParityCase[] = [
       filterPostedByUserId: null,
       filterApproverUserId: null,
       includeLines: false,
+    },
+  },
+  {
+    // Exercises the EXISTS-on-accounting_source_links branch of
+    // buildSourceClauseFor("expense"). The monthly window holds exactly
+    // one expense-linked entry (entry-008), so the CSV must include it
+    // and exclude the manual / copilot / bill rows in the same window.
+    label: "monthly-summary-source-expense",
+    runAt: new Date("2025-04-15T03:00:00.000Z"),
+    config: {
+      cadence: "monthly",
+      filterStatus: null,
+      filterSource: "expense",
+      filterPostedByUserId: null,
+      filterApproverUserId: null,
+      includeLines: false,
+    },
+  },
+  {
+    // Same shape as the expense case but for the sourceType='bill'
+    // branch. The monthly window holds entry-009 as the only
+    // bill-linked row, so this CSV is byte-distinct from every other
+    // source filter on the same window.
+    label: "monthly-with-lines-source-bill",
+    runAt: new Date("2025-04-15T03:00:00.000Z"),
+    config: {
+      cadence: "monthly",
+      filterStatus: null,
+      filterSource: "bill",
+      filterPostedByUserId: null,
+      filterApproverUserId: null,
+      includeLines: true,
     },
   },
   {
