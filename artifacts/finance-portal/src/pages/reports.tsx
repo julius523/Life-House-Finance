@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   useGetFinancialSummaryReport,
   useGetTrialBalanceReport,
@@ -983,6 +983,15 @@ export default function ReportsPage() {
     current: number;
     total: number;
   } | null>(null);
+  // AbortController for the in-flight bulk activity export. Held in a ref
+  // (not state) because the cancel handler reads it imperatively and we
+  // don't need to re-render on changes. `cancelBulkDownload` aborts the
+  // current per-account fetch and signals the loop to stop; the download
+  // function then skips writing the partial CSV.
+  const bulkAbortRef = useRef<AbortController | null>(null);
+  const cancelBulkDownload = () => {
+    bulkAbortRef.current?.abort();
+  };
   const bulkProgressLabel = (): string => {
     if (!bulkProgress) return "Preparing…";
     const { current, total } = bulkProgress;
@@ -1054,7 +1063,8 @@ export default function ReportsPage() {
     accounts: BulkAccount[],
     params: { from?: string; to: string },
     onProgress?: (current: number, total: number) => void,
-  ): Promise<{ failed: number; total: number }> => {
+    signal?: AbortSignal,
+  ): Promise<{ failed: number; total: number; aborted: boolean }> => {
     // Sequential to keep ordering stable and avoid hammering the API; chart of
     // accounts is small (tens of accounts), so latency is acceptable.
     const total = accounts.length;
@@ -1062,6 +1072,11 @@ export default function ReportsPage() {
     let done = 0;
     let failed = 0;
     for (const acct of accounts) {
+      // Check between accounts so a cancel issued mid-loop stops further
+      // fetches even if the just-resolved fetch hadn't been aborted.
+      if (signal?.aborted) {
+        return { failed, total, aborted: true };
+      }
       rows.push([
         "ACCOUNT",
         acct.code,
@@ -1071,12 +1086,21 @@ export default function ReportsPage() {
       rows.push(ACTIVITY_HEADER);
       let activity;
       try {
-        activity = await getAccountActivityReport({
-          accountId: acct.accountId,
-          ...(params.from ? { from: params.from } : {}),
-          to: params.to,
-        });
+        activity = await getAccountActivityReport(
+          {
+            accountId: acct.accountId,
+            ...(params.from ? { from: params.from } : {}),
+            to: params.to,
+          },
+          signal ? { signal } : undefined,
+        );
       } catch (e) {
+        // If the abort fired mid-fetch, treat it as a cancellation rather
+        // than a per-account error so we don't surface a fake "1 error"
+        // notice for what the user explicitly stopped.
+        if (signal?.aborted) {
+          return { failed, total, aborted: true };
+        }
         rows.push(["ERROR", "", "", String((e as Error)?.message ?? e)]);
         rows.push([]);
         done += 1;
@@ -1110,7 +1134,7 @@ export default function ReportsPage() {
       done += 1;
       onProgress?.(done, total);
     }
-    return { failed, total };
+    return { failed, total, aborted: false };
   };
   const collectPlAccounts = (): BulkAccount[] => {
     if (!data) return [];
@@ -1152,6 +1176,8 @@ export default function ReportsPage() {
     setBulkDownloading("pl");
     setBulkProgress({ current: 0, total: accounts.length });
     setBulkLastError(null);
+    const controller = new AbortController();
+    bulkAbortRef.current = controller;
     try {
       const rows: CsvCell[][] = [
         ["report", "Profit & Loss — all account activity"],
@@ -1164,7 +1190,9 @@ export default function ReportsPage() {
         accounts,
         { from: fromDate, to: toDate },
         (current, total) => setBulkProgress({ current, total }),
+        controller.signal,
       );
+      if (result.aborted) return;
       downloadCsv(
         `profit-and-loss_all-activity_${csvSafeDateRange(fromDate, toDate)}.csv`,
         rows,
@@ -1177,6 +1205,7 @@ export default function ReportsPage() {
         });
       }
     } finally {
+      bulkAbortRef.current = null;
       setBulkDownloading(null);
       setBulkProgress(null);
     }
@@ -1225,9 +1254,12 @@ export default function ReportsPage() {
     setBulkDownloading("trial-balance");
     setBulkProgress({ current: 0, total: mapped.length });
     setBulkLastError(null);
-    let tbResult: { failed: number; total: number } = {
+    const controller = new AbortController();
+    bulkAbortRef.current = controller;
+    let tbResult: { failed: number; total: number; aborted: boolean } = {
       failed: 0,
       total: mapped.length,
+      aborted: false,
     };
     try {
       const rows: CsvCell[][] = [
@@ -1241,7 +1273,9 @@ export default function ReportsPage() {
         mapped,
         { from: fromDate, to: toDate },
         (current, total) => setBulkProgress({ current, total }),
+        controller.signal,
       );
+      if (tbResult.aborted) return;
       // Append unmapped rows as sections with TB-level totals so the workbook
       // covers every row in the Trial Balance, with a marker explaining why
       // no per-line activity is listed.
@@ -1282,6 +1316,7 @@ export default function ReportsPage() {
         });
       }
     } finally {
+      bulkAbortRef.current = null;
       setBulkDownloading(null);
       setBulkProgress(null);
     }
@@ -1293,6 +1328,8 @@ export default function ReportsPage() {
     setBulkDownloading("balance");
     setBulkProgress({ current: 0, total: accounts.length });
     setBulkLastError(null);
+    const controller = new AbortController();
+    bulkAbortRef.current = controller;
     try {
       const rows: CsvCell[][] = [
         ["report", "Balance Sheet — all account activity"],
@@ -1308,7 +1345,9 @@ export default function ReportsPage() {
         accounts,
         { to: toDate },
         (current, total) => setBulkProgress({ current, total }),
+        controller.signal,
       );
+      if (result.aborted) return;
       downloadCsv(
         `balance-sheet_all-activity_as-of_${toDate}.csv`,
         rows,
@@ -1321,6 +1360,7 @@ export default function ReportsPage() {
         });
       }
     } finally {
+      bulkAbortRef.current = null;
       setBulkDownloading(null);
       setBulkProgress(null);
     }
@@ -1693,22 +1733,36 @@ export default function ReportsPage() {
                   {(() => {
                     const reason = bulkDisabledReason("pl");
                     return (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={downloadAllPlActivityCsv}
-                        disabled={
-                          reason !== undefined || bulkDownloading === "pl"
-                        }
-                        className="no-print"
-                        data-testid="export-csv-pl-all-activity"
-                        title={reason}
-                      >
-                        {bulkDownloading === "pl"
-                          ? bulkProgressLabel()
-                          : "Download all activity (CSV)"}
-                      </Button>
+                      <>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={downloadAllPlActivityCsv}
+                          disabled={
+                            reason !== undefined || bulkDownloading === "pl"
+                          }
+                          className="no-print"
+                          data-testid="export-csv-pl-all-activity"
+                          title={reason}
+                        >
+                          {bulkDownloading === "pl"
+                            ? bulkProgressLabel()
+                            : "Download all activity (CSV)"}
+                        </Button>
+                        {bulkDownloading === "pl" && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={cancelBulkDownload}
+                            className="no-print"
+                            data-testid="export-csv-pl-all-activity-cancel"
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                      </>
                     );
                   })()}
                   <Button
@@ -1826,23 +1880,37 @@ export default function ReportsPage() {
                   {(() => {
                     const reason = bulkDisabledReason("balance");
                     return (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={downloadAllBsActivityCsv}
-                        disabled={
-                          reason !== undefined ||
-                          bulkDownloading === "balance"
-                        }
-                        className="no-print"
-                        data-testid="export-csv-bs-all-activity"
-                        title={reason}
-                      >
-                        {bulkDownloading === "balance"
-                          ? bulkProgressLabel()
-                          : "Download all activity (CSV)"}
-                      </Button>
+                      <>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={downloadAllBsActivityCsv}
+                          disabled={
+                            reason !== undefined ||
+                            bulkDownloading === "balance"
+                          }
+                          className="no-print"
+                          data-testid="export-csv-bs-all-activity"
+                          title={reason}
+                        >
+                          {bulkDownloading === "balance"
+                            ? bulkProgressLabel()
+                            : "Download all activity (CSV)"}
+                        </Button>
+                        {bulkDownloading === "balance" && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={cancelBulkDownload}
+                            className="no-print"
+                            data-testid="export-csv-bs-all-activity-cancel"
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                      </>
                     );
                   })()}
                   <Button
@@ -2041,23 +2109,37 @@ export default function ReportsPage() {
                     {(() => {
                       const reason = bulkDisabledReason("trial-balance");
                       return (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={downloadAllTrialBalanceActivityCsv}
-                          disabled={
-                            reason !== undefined ||
-                            bulkDownloading === "trial-balance"
-                          }
-                          className="no-print"
-                          data-testid="export-csv-tb-all-activity"
-                          title={reason}
-                        >
-                          {bulkDownloading === "trial-balance"
-                            ? bulkProgressLabel()
-                            : "Download all activity (CSV)"}
-                        </Button>
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={downloadAllTrialBalanceActivityCsv}
+                            disabled={
+                              reason !== undefined ||
+                              bulkDownloading === "trial-balance"
+                            }
+                            className="no-print"
+                            data-testid="export-csv-tb-all-activity"
+                            title={reason}
+                          >
+                            {bulkDownloading === "trial-balance"
+                              ? bulkProgressLabel()
+                              : "Download all activity (CSV)"}
+                          </Button>
+                          {bulkDownloading === "trial-balance" && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={cancelBulkDownload}
+                              className="no-print"
+                              data-testid="export-csv-tb-all-activity-cancel"
+                            >
+                              Cancel
+                            </Button>
+                          )}
+                        </>
                       );
                     })()}
                     <Button

@@ -523,6 +523,127 @@ describe("Reports page — partial date input regression (Task #65 / #75)", () =
     }
   });
 
+  it("cancels an in-flight bulk activity export, stops further per-account fetches, skips the CSV, and re-enables all bulk buttons (Task #94)", async () => {
+    mockTrialBalanceData.current = {
+      fromDate: null,
+      toDate: null,
+      rows: [
+        {
+          accountId: 101,
+          code: "1000",
+          name: "Operating Cash",
+          type: "asset",
+          subtype: "cash",
+          normalBalance: "debit",
+          isActive: true,
+          debits: "500.00",
+          credits: "0.00",
+          balance: "500.00",
+          balanceSide: "debit",
+        },
+        {
+          accountId: 4000,
+          code: "4000",
+          name: "Program Income",
+          type: "income",
+          subtype: null,
+          normalBalance: "credit",
+          isActive: true,
+          debits: "0.00",
+          credits: "500.00",
+          balance: "500.00",
+          balanceSide: "credit",
+        },
+      ],
+      totals: {
+        debits: "500.00",
+        credits: "500.00",
+        balanced: true,
+        differenceCents: 0,
+      },
+    };
+
+    // Defer each per-account fetch and reject with an AbortError when the
+    // signal aborts so the loop sees the same shape as the real fetch.
+    const deferreds: {
+      reject: (e: unknown) => void;
+      resolve: (v: unknown) => void;
+      accountId: number;
+    }[] = [];
+    getAccountActivityReportMock.mockClear();
+    getAccountActivityReportMock.mockImplementation(
+      (
+        { accountId }: { accountId: number },
+        opts?: { signal?: AbortSignal },
+      ) =>
+        new Promise((resolve, reject) => {
+          deferreds.push({ resolve, reject, accountId });
+          opts?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        }),
+    );
+
+    const createdBlobs: Blob[] = [];
+    const createObjectURLSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockImplementation((blob: Blob | MediaSource) => {
+        createdBlobs.push(blob as Blob);
+        return "blob:test";
+      });
+    const revokeObjectURLSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    const anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    try {
+      render(<ReportsPage />);
+      const tbBtn = screen.getByTestId(
+        "export-csv-tb-all-activity",
+      ) as HTMLButtonElement;
+      fireEvent.click(tbBtn);
+
+      // Wait until the export is in flight (first fetch dispatched).
+      await waitFor(() => {
+        expect(deferreds.length).toBeGreaterThanOrEqual(1);
+      });
+      expect(tbBtn.textContent).toMatch(/Preparing/);
+
+      // Cancel button should be rendered while the export is running.
+      const cancelBtn = screen.getByTestId(
+        "export-csv-tb-all-activity-cancel",
+      ) as HTMLButtonElement;
+      fireEvent.click(cancelBtn);
+
+      // Bulk button returns to its idle label and re-enables.
+      await waitFor(() => {
+        expect(tbBtn.textContent).toMatch(/Download all activity/);
+      });
+      expect(tbBtn.disabled).toBe(false);
+
+      // The cancel button is removed from the DOM once the export stops.
+      expect(
+        screen.queryByTestId("export-csv-tb-all-activity-cancel"),
+      ).toBeNull();
+
+      // No CSV was produced for the cancelled export.
+      expect(createdBlobs.length).toBe(0);
+
+      // Only the first per-account fetch was issued; the loop did not
+      // continue after cancel.
+      expect(getAccountActivityReportMock).toHaveBeenCalledTimes(1);
+    } finally {
+      anchorClickSpy.mockRestore();
+      revokeObjectURLSpy.mockRestore();
+      createObjectURLSpy.mockRestore();
+      mockTrialBalanceData.current = undefined;
+    }
+  });
+
   it("P&L bulk activity button is rendered and disabled with the empty-state tooltip when there are zero income/expense accounts (Task #98)", () => {
     mockSummaryOverride.current = {
       generatedAt: new Date().toISOString(),
