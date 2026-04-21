@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   useGetFinancialSummaryReport,
   useGetTrialBalanceReport,
@@ -1008,6 +1008,17 @@ export default function ReportsPage() {
     failed: number;
     total: number;
   } | null>(null);
+  // Inline confirmation surfaced after a bulk export is cancelled. Auto-
+  // dismisses after a few seconds (or via the dismiss control) so it doesn't
+  // block starting a new export. Cleared when a new export starts.
+  const [bulkCancelled, setBulkCancelled] = useState<{
+    card: "pl" | "balance" | "trial-balance";
+  } | null>(null);
+  useEffect(() => {
+    if (!bulkCancelled) return;
+    const t = setTimeout(() => setBulkCancelled(null), 5000);
+    return () => clearTimeout(t);
+  }, [bulkCancelled]);
   const REPORT_LABEL: Record<"pl" | "balance" | "trial-balance", string> = {
     pl: "Profit & Loss",
     balance: "Balance Sheet",
@@ -1176,6 +1187,7 @@ export default function ReportsPage() {
     setBulkDownloading("pl");
     setBulkProgress({ current: 0, total: accounts.length });
     setBulkLastError(null);
+    setBulkCancelled(null);
     const controller = new AbortController();
     bulkAbortRef.current = controller;
     try {
@@ -1192,7 +1204,10 @@ export default function ReportsPage() {
         (current, total) => setBulkProgress({ current, total }),
         controller.signal,
       );
-      if (result.aborted) return;
+      if (result.aborted) {
+        setBulkCancelled({ card: "pl" });
+        return;
+      }
       downloadCsv(
         `profit-and-loss_all-activity_${csvSafeDateRange(fromDate, toDate)}.csv`,
         rows,
@@ -1254,6 +1269,7 @@ export default function ReportsPage() {
     setBulkDownloading("trial-balance");
     setBulkProgress({ current: 0, total: mapped.length });
     setBulkLastError(null);
+    setBulkCancelled(null);
     const controller = new AbortController();
     bulkAbortRef.current = controller;
     let tbResult: { failed: number; total: number; aborted: boolean } = {
@@ -1275,7 +1291,10 @@ export default function ReportsPage() {
         (current, total) => setBulkProgress({ current, total }),
         controller.signal,
       );
-      if (tbResult.aborted) return;
+      if (tbResult.aborted) {
+        setBulkCancelled({ card: "trial-balance" });
+        return;
+      }
       // Append unmapped rows as sections with TB-level totals so the workbook
       // covers every row in the Trial Balance, with a marker explaining why
       // no per-line activity is listed.
@@ -1328,6 +1347,7 @@ export default function ReportsPage() {
     setBulkDownloading("balance");
     setBulkProgress({ current: 0, total: accounts.length });
     setBulkLastError(null);
+    setBulkCancelled(null);
     const controller = new AbortController();
     bulkAbortRef.current = controller;
     try {
@@ -1347,7 +1367,10 @@ export default function ReportsPage() {
         (current, total) => setBulkProgress({ current, total }),
         controller.signal,
       );
-      if (result.aborted) return;
+      if (result.aborted) {
+        setBulkCancelled({ card: "balance" });
+        return;
+      }
       downloadCsv(
         `balance-sheet_all-activity_as-of_${toDate}.csv`,
         rows,
@@ -1777,6 +1800,27 @@ export default function ReportsPage() {
                   </Button>
                 </div>
               </div>
+              {bulkCancelled?.card === "pl" && (
+                <Alert
+                  className="mt-3 no-print"
+                  data-testid="bulk-cancelled-notice-pl"
+                >
+                  <AlertDescription className="flex items-start justify-between gap-3">
+                    <span>
+                      Profit &amp; Loss export cancelled — no file was
+                      downloaded.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setBulkCancelled(null)}
+                      className="shrink-0 underline text-xs"
+                      data-testid="bulk-cancelled-notice-pl-dismiss"
+                    >
+                      Dismiss
+                    </button>
+                  </AlertDescription>
+                </Alert>
+              )}
               {bulkLastError?.card === "pl" && (
                 <Alert
                   variant="destructive"
@@ -1925,6 +1969,26 @@ export default function ReportsPage() {
                   </Button>
                 </div>
               </div>
+              {bulkCancelled?.card === "balance" && (
+                <Alert
+                  className="mt-3 no-print"
+                  data-testid="bulk-cancelled-notice-balance"
+                >
+                  <AlertDescription className="flex items-start justify-between gap-3">
+                    <span>
+                      Balance Sheet export cancelled — no file was downloaded.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setBulkCancelled(null)}
+                      className="shrink-0 underline text-xs"
+                      data-testid="bulk-cancelled-notice-balance-dismiss"
+                    >
+                      Dismiss
+                    </button>
+                  </AlertDescription>
+                </Alert>
+              )}
               {bulkLastError?.card === "balance" && (
                 <Alert
                   variant="destructive"
@@ -2154,6 +2218,27 @@ export default function ReportsPage() {
                     </Button>
                   </div>
                 </div>
+                {bulkCancelled?.card === "trial-balance" && (
+                  <Alert
+                    className="mt-3 no-print"
+                    data-testid="bulk-cancelled-notice-trial-balance"
+                  >
+                    <AlertDescription className="flex items-start justify-between gap-3">
+                      <span>
+                        Trial Balance export cancelled — no file was
+                        downloaded.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setBulkCancelled(null)}
+                        className="shrink-0 underline text-xs"
+                        data-testid="bulk-cancelled-notice-trial-balance-dismiss"
+                      >
+                        Dismiss
+                      </button>
+                    </AlertDescription>
+                  </Alert>
+                )}
                 {bulkLastError?.card === "trial-balance" && (
                   <Alert
                     variant="destructive"
