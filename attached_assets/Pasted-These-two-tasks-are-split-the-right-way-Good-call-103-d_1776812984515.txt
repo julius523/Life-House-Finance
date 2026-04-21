@@ -1,0 +1,345 @@
+These two tasks are split the right way. Good call.
+
+**#103 = detection/report contract**
+**#104 = read-only operator UI**
+
+That is the sane sequence.
+
+Before you approve them, I’d tighten a few things so the builder has less room to “interpret creatively.”
+
+---
+
+## Revisions for #103 — Integrity Sweep: Detection + Report
+
+This brief is already strong. I’d add these exact constraints.
+
+### 1) Lock the response shape harder
+
+Right now it says “structured report,” but I’d make the contract explicit.
+
+Add to **Done looks like**:
+
+* The JSON response includes:
+
+  * `generatedAt`
+  * `ok` boolean
+  * `totalChecks`
+  * `failingChecks`
+  * `checks[]`
+* Each check object includes exactly:
+
+  * `key`
+  * `name`
+  * `category`
+  * `severity`
+  * `count`
+  * `sampleRefs[]`
+* Each `sampleRef` is an object, not a raw string:
+
+  * `kind` (`expense` | `bill` | `journal_entry` | `draft` | `source_link` | `other`)
+  * `id` (string or number serialized as string)
+
+Why: the UI task becomes much easier and you avoid messy guesswork later.
+
+---
+
+### 2) Freeze the enums
+
+Do not let the builder invent categories or severities ad hoc.
+
+Add:
+
+* `category` is one of:
+
+  * `structural`
+  * `status_mismatch`
+  * `missing_bridge`
+  * `reversal`
+  * `posted_line`
+  * `remediation`
+* `severity` is one of:
+
+  * `info`
+  * `warning`
+  * `critical`
+
+Why: otherwise the UI task turns into “support whatever came back.”
+
+---
+
+### 3) Make “sample cap” explicit and stable
+
+You mention “up to N.” Good, but pin it.
+
+Add:
+
+* Sample refs are capped at **25 per check**.
+* `count` always reflects the full affected count, even when `sampleRefs.length < count`.
+
+That prevents misleading output.
+
+---
+
+### 4) Define the zero-findings contract
+
+Add:
+
+* When all checks are zero, the service still returns the full check list with `count=0`.
+* `ok=true` only when every check count is zero.
+* The CLI exits **0** when the sweep ran successfully, regardless of findings.
+* The CLI exits non-zero only on runtime/DB/auth/config failure.
+
+That avoids the classic “findings == failed command” problem.
+
+---
+
+### 5) Re-run behavior: read-only only
+
+Because this is integrity work, I’d be extra explicit.
+
+Add to out of scope or acceptance:
+
+* The sweep service performs **no writes** of any kind:
+
+  * no repair rows
+  * no status changes
+  * no activity-log entries
+  * no “last run” persistence
+* The API endpoint computes the report on demand and returns it directly.
+
+That matters because people love sneaking in “we cached the last result in a table.”
+
+---
+
+### 6) Porting rule for the 30 checks
+
+This one is important.
+
+Add:
+
+* The new service must preserve the semantic meaning of the existing `scripts/integrity/sweep.sql` checks.
+* Renaming keys for readability is allowed only if the old SQL check can be traced 1:1 to the new exported check key in code comments or docs.
+
+Why: otherwise “ported” turns into “kind of similar.”
+
+---
+
+### 7) Add performance guardrails
+
+Not fancy, just practical.
+
+Add:
+
+* The API should return within a reasonable operator-facing window on production-like data.
+* Queries should be batched or grouped where possible; avoid N+1 scans per sample row.
+* Sample IDs must be fetched in the same query path as counts where feasible.
+
+This prevents a brutally slow admin endpoint.
+
+---
+
+### 8) Tighten the test fixture expectations
+
+Right now “at least one violation per category” is good, but I’d sharpen it.
+
+Add:
+
+* The test fixture must assert:
+
+  * at least one zero-finding case
+  * at least one non-zero check in multiple categories
+  * sample refs include the expected `kind`
+  * unauthorized requests get rejected
+  * CLI and API use the same service output shape
+
+That catches contract drift.
+
+---
+
+## Revisions for #104 — Integrity Findings UI
+
+Also solid. I’d tighten the UI contract the same way.
+
+### 1) Clarify the exact data source
+
+Right now it says “latest sweep result” plus “Re-run button.” That can be interpreted two ways:
+
+* fetch cached last run
+* recompute live every time
+
+Pick one.
+
+I recommend:
+
+* Initial page load calls the sweep endpoint directly and renders the returned snapshot.
+* “Re-run” triggers a fresh call to the same endpoint and replaces the current snapshot.
+* No separate persistence/history view in this task.
+
+That keeps it simple.
+
+---
+
+### 2) Define group and row ordering
+
+Without this, the page can look random.
+
+Add:
+
+* Categories render in this order:
+
+  1. `critical` findings first across categories
+  2. then remaining categories in fixed order:
+
+     * structural
+     * status-mismatch
+     * missing-bridge
+     * reversal
+     * posted-line
+     * remediation
+* Checks within a category sort by:
+
+  1. severity
+  2. descending count
+  3. name
+
+That makes the page useful immediately.
+
+---
+
+### 3) Nail the link mapping rules
+
+This should not be left fuzzy.
+
+Add:
+
+* `sampleRef.kind=expense` links to expense detail
+* `bill` links to bill detail
+* `journal_entry` links to JE detail
+* `draft` links to manual JE draft detail
+* `source_link` and `other` render raw ID with copy affordance only
+* The page does not attempt lookup-by-guess for opaque IDs
+
+That avoids brittle magic.
+
+---
+
+### 4) Clarify empty/all-OK behavior
+
+Add:
+
+* If `ok=true`, show a success banner with:
+
+  * “All checks passed”
+  * `generatedAt`
+  * total number of checks run
+* Categories may still be rendered collapsed with zero rows hidden, or omitted entirely. Pick one.
+
+I’d recommend:
+
+* omit zero-count rows entirely
+* show only the success banner in all-OK state
+
+Cleaner.
+
+---
+
+### 5) Make the CSV flattening rules explicit
+
+Add:
+
+* CSV columns:
+
+  * `generatedAt`
+  * `checkKey`
+  * `checkName`
+  * `category`
+  * `severity`
+  * `count`
+  * `sampleKind`
+  * `sampleId`
+* For checks with `count > 0` but no sample refs returned, emit one row with empty `sampleKind/sampleId`.
+* For checks with multiple sample refs, emit one row per sample ref.
+
+That keeps exports audit-friendly.
+
+---
+
+### 6) Copy affordance behavior
+
+Tiny thing, but worth pinning.
+
+Add:
+
+* Clicking copy on an opaque ID shows a lightweight confirmation state.
+* Copy failures show inline feedback; no silent no-op.
+
+Small, but operator-friendly.
+
+---
+
+### 7) Lock the auth expectation
+
+Add:
+
+* The page uses the same admin-only route guard pattern as existing admin pages.
+* Non-admins see the standard unauthorized state already used elsewhere in the portal.
+* No custom permission scheme is introduced here.
+
+Prevents role drift.
+
+---
+
+### 8) Add one more UI test case
+
+Add:
+
+* Test long sample lists are truncated visually if needed, but export still includes all returned sample rows from the snapshot.
+
+Not essential, but useful if they decide to paginate later.
+
+---
+
+## One thing I would change in the sequence
+
+Do **not** approve #104 until #103 is merged and the contract is real.
+
+Not “started.”
+Not “in progress.”
+Merged.
+
+Because #104 is only easy if the payload is nailed down.
+
+---
+
+## Final recommended wording tweak
+
+I’d rename #104 slightly:
+
+**#104 – Integrity Findings UI (read-only snapshot viewer)**
+
+That phrase makes the scope crystal clear.
+
+---
+
+## Approval recommendation
+
+### #103
+
+Approve after adding:
+
+* fixed response schema
+* enum locking
+* sampleRef object shape
+* zero-findings contract
+* no-writes guarantee
+
+### #104
+
+Approve as drafted, but only after:
+
+* #103 is merged
+* link mapping rules are explicit
+* CSV shape is explicit
+* initial load vs rerun semantics are explicit
+
+These are close. They just need a little less wiggle room and a little more “builder cannot freestyle this.”

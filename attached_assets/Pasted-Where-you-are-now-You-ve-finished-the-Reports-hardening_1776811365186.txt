@@ -1,0 +1,173 @@
+Where you are now
+
+You’ve finished the Reports hardening sweep for the bulk export UX:
+
+all 3 bulk export buttons now behave consistently
+disabled states and tooltips are unified
+partial-failure exports surface inline errors instead of failing silently
+tests are green
+old Task #93 is effectively dead and can stay buried
+
+That means the app is in a better place than it was a few days ago. Not “done,” but no longer wobbly in a place users touch often.
+
+What should happen next
+
+Do not jump to AI copilot wiring yet.
+
+The next move is still the same:
+
+1) Integrity Sweep
+
+This is the real foundation task now.
+
+You want a builder-ready tracked task that checks for:
+
+orphaned accounting_source_links
+status/link mismatches on expenses and bills
+missing bridge rows where accounting should exist but does not
+remediation inconsistencies
+a safe read-only findings surface
+
+The reason this is next is simple: if the ledger truth is off, every later layer becomes expensive fiction.
+
+I would structure it as 2 tasks, not 1
+
+Trying to do detection + operator UI + repair flows in one shot is how scope creep eats a week.
+
+Task A — Integrity Sweep: Detection + Report
+
+CLI/script or admin API
+read-only
+produces counts, categories, sample IDs
+no auto-fix
+acceptance criteria focused on correctness
+
+Task B — Integrity Findings UI
+
+lightweight admin page
+grouped findings
+drill into affected IDs
+links to expense / bill / draft / JE detail
+maybe exportable CSV
+
+That split is cleaner, faster to merge, and safer.
+
+2) Permissions pass
+
+After integrity, lock the system down for real:
+
+accounting admin vs approver vs viewer vs submitter
+report visibility
+blocked queue visibility
+remediation permissions
+export permissions
+schedule editor permissions
+
+Right now this is usually where “works in dev” becomes “oops, too many people can touch finance.”
+
+3) E2E smoke suite
+
+Not giant. Just the critical finance paths:
+
+create/approve expense → draft JE
+blocked queue → retry
+bill bridge happy path
+reports drilldown works
+CSV export works
+remediation happy path
+permission denial for wrong role
+
+You do not need 80 smoke tests. You need the 10 that would catch a catastrophe.
+
+4) Launch hardening
+
+Then do the boring grown-up stuff:
+
+backup/restore drill
+seed/reset strategy for Replit
+env var audit
+migration discipline
+prod-safe test data strategy
+monitoring / error logging
+operator runbook
+
+This is the stuff people skip and then cry over later.
+
+5) AI copilot integration
+
+Only after the above.
+
+Yes — the accounting and expense system can integrate with AI copilot
+
+But the right version first is:
+
+Copilot = read, explain, prepare, suggest
+Not:
+Copilot = auto-post, auto-remediate, auto-decide
+
+Safe first AI features
+
+Start with these:
+
+explain why an expense or bill is blocked
+suggest likely category / CoA mapping
+summarize accounting history on an expense/bill
+draft remediation notes
+explain report anomalies in plain English
+surface missing fields before approval
+generate operator checklists
+Do not let AI do these yet
+
+Not until much later:
+
+post journal entries
+approve accounting drafts
+auto-remediate integrity findings
+change mappings without human review
+alter statuses silently
+
+That would be clown shoes on a balance sheet.
+
+Finish-line guide from here
+Phase 1 — Finish trust in the ledger
+Integrity Sweep detection task
+Integrity findings UI
+Manual guided repair tasks only after findings are known
+Phase 2 — Lock permissions
+Full permission matrix pass
+Route + API + button-level enforcement
+Regression tests for role boundaries
+Phase 3 — Prove critical flows
+E2E smoke suite for accounting/reporting flows
+Post-merge gate tuned so it stays green and fast enough
+Phase 4 — Production readiness
+Launch hardening / backup / env / monitoring / runbook
+Real pilot with operator feedback
+Phase 5 — AI assist layer
+Read-only copilot context over expenses, bills, drafts, reports
+Suggestion workflows with explicit human approval
+Only much later: tightly scoped write-assist actions
+Realistic “how much is left?”
+
+Based on everything you’ve described, you are past the messy middle but not at polish-complete.
+
+A blunt estimate:
+
+Core accounting/reporting foundation: ~75–85% there
+Production-safe finance system: ~55–65% there
+AI-assisted finance operations: maybe ~20–30% there, because most of that depends on the safety layers above
+
+So the app is substantially built, but the remaining work is the high-leverage “make it trustworthy” work, not fluff.
+
+That part matters more than the earlier feature velocity.
+
+What I recommend you do next
+
+Send your builder this exact direction:
+
+Next priority is Integrity Sweep, split into two tracked tasks:
+
+Detection/reporting task: read-only integrity checks for orphaned links, status/link mismatches, missing bridge rows, and remediation inconsistencies, with CLI/admin API output and sample IDs.
+Admin findings UI task: lightweight page to surface the findings with links back to expense/bill/draft/JE details.
+
+After that: permissions pass, then end-to-end smoke suite, then launch hardening, then AI copilot integration.
