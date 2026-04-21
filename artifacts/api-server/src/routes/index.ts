@@ -20,6 +20,7 @@ import accountingRouter from "./accounting";
 import coaRouter from "./coa";
 import journalEntryExportSchedulesRouter from "./journal-entry-export-schedules";
 import remediationRouter from "./remediation";
+import integrityRouter from "./integrity";
 
 const router: IRouter = Router();
 
@@ -44,5 +45,6 @@ router.use(accountingRouter);
 router.use(coaRouter);
 router.use(journalEntryExportSchedulesRouter);
 router.use(remediationRouter);
+router.use(integrityRouter);
 
 export default router;

@@ -33,6 +33,10 @@ Nonprofit bookkeeping monorepo (pnpm workspace).
 
 ## Integrity sweep
 - `scripts/integrity/sweep.sql` is a read-only diagnostic: 32 single-row checks across `accounting_source_links` structural integrity, JE↔draft linkage including reciprocal pointer symmetry, JE reversal-pointer symmetry + cardinality, expense+bill bridge state vs link presence, and posted-line account_id invariants. A clean DB returns `n=0` for every row. Last run 2026-04-20: 32/32 OK.
+- **Task #103 detection layer**: the same 32 checks are now also exposed as a typed read-only TypeScript service (`artifacts/api-server/src/lib/integritySweepService.ts`) that returns the locked `IntegritySweepReport` shape from `@workspace/db` — per-check count + up to 25 sample IDs (`INTEGRITY_SAMPLE_CAP`), every sample tagged with its `kind` (`expense | bill | journal_entry | draft | source_link | other`). The service `key` for each check matches the `sweep.sql` check_name 1:1.
+  - HTTP: `GET /api/admin/integrity/sweep` (admin-only — `requireAuth + requireRole("admin")`).
+  - CLI: `pnpm --filter @workspace/api-server run integrity:sweep` — prints a human summary on stderr and the locked report JSON on stdout (exit 0 on success regardless of findings, exit 1 on runtime failure).
+  - Service is strictly read-only: no `activity_log` rows, no caching tables, no "last run" persistence. The Findings UI in #104 will consume this endpoint.
 - One-off repair scripts live under `scripts/integrity/YYYY-MM-DD-*.sql`. Conventions:
   - One transaction.
   - Header documents the finding, root cause, and reproduction context.

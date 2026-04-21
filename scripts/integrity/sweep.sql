@@ -7,7 +7,12 @@
 -- Usage:
 --   psql "$DATABASE_URL" -f scripts/integrity/sweep.sql
 --
--- Last run: 2026-04-20 — all 30 checks at zero.
+-- Last run: 2026-04-20 — all 32 checks at zero.
+--
+-- Task #103 ports every check below into a typed read-only TypeScript service
+-- (artifacts/api-server/src/lib/integritySweepService.ts) that backs both
+-- GET /api/admin/integrity/sweep and `pnpm --filter @workspace/api-server
+-- run integrity:sweep`. Service `key` values match the SQL check names 1:1.
 -- =============================================================================
 
 WITH checks(check_name, n) AS (

@@ -8,7 +8,8 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "test": "tsx --test --test-concurrency=1 src/lib/__tests__/*.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "integrity:sweep": "tsx src/scripts/integritySweep.ts"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
