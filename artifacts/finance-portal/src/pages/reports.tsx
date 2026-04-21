@@ -1015,8 +1015,8 @@ export default function ReportsPage() {
     }
     if (card === "trial-balance") {
       if (!tb || tbLoading) return `Loading ${REPORT_LABEL[card]}…`;
-      if (collectTrialBalanceAccounts().mapped.length +
-        collectTrialBalanceAccounts().unmapped.length === 0) {
+      const tbAccts = collectTrialBalanceAccounts();
+      if (tbAccts.mapped.length + tbAccts.unmapped.length === 0) {
         return `No ${REPORT_LABEL[card]} activity to export`;
       }
       return undefined;
