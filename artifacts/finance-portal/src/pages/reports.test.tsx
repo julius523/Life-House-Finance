@@ -644,6 +644,216 @@ describe("Reports page — partial date input regression (Task #65 / #75)", () =
     }
   });
 
+  it("cancelling one bulk export keeps the other two bulk buttons usable and lets a fresh export start (Task #100)", async () => {
+    // Both PL/BS (via summary override) and Trial Balance (via TB data)
+    // need exportable accounts so all three bulk buttons would be enabled
+    // when the page lands in ledger source.
+    mockSummaryOverride.current = {
+      generatedAt: new Date().toISOString(),
+      fromDate: "2025-01-01",
+      toDate: "2025-12-31",
+      expenseTotalsByStatus: [],
+      billTotalsByStatus: [],
+      spendByProgram: [],
+      topVendors: [],
+      missingReceiptCount: 0,
+      missingReceiptAmount: 0,
+      missingReceipts: [],
+      bankReconciliation: {
+        accounts: [],
+        totals: { ledgerBalance: 0, statementBalance: 0, deltaCents: 0 },
+      },
+      profitAndLoss: {
+        totalIncome: 100,
+        totalExpenses: 50,
+        netIncome: 50,
+        incomeByProgram: [],
+        expensesByProgram: [],
+        uncategorizedIncome: 0,
+        uncategorizedExpenses: 0,
+        incomeByAccount: [
+          { accountId: 4000, code: "4000", name: "Income", amount: 100 },
+        ],
+        expensesByAccount: [
+          { accountId: 5000, code: "5000", name: "Expense", amount: 50 },
+        ],
+      },
+      balanceSheet: {
+        cash: 100,
+        cashOnHand: 0,
+        accountsReceivable: 0,
+        otherAssets: 0,
+        accountsPayable: 0,
+        otherLiabilities: 0,
+        equity: 0,
+        totalAssets: 100,
+        totalLiabilities: 0,
+        cashAccounts: [
+          { accountId: 1001, code: "1001", name: "Cash", balance: 100 },
+        ],
+        accountsReceivableAccounts: [],
+        otherAssetAccounts: [],
+        accountsPayableAccounts: [],
+        otherLiabilityAccounts: [],
+      },
+    };
+    mockTrialBalanceData.current = {
+      fromDate: null,
+      toDate: null,
+      rows: [
+        {
+          accountId: 101,
+          code: "1000",
+          name: "Operating Cash",
+          type: "asset",
+          subtype: "cash",
+          normalBalance: "debit",
+          isActive: true,
+          debits: "500.00",
+          credits: "0.00",
+          balance: "500.00",
+          balanceSide: "debit",
+        },
+      ],
+      totals: {
+        debits: "500.00",
+        credits: "500.00",
+        balanced: true,
+        differenceCents: 0,
+      },
+    };
+
+    // Defer per-account fetches and reject with AbortError on signal abort,
+    // mirroring the Task #94 pattern.
+    const deferreds: {
+      reject: (e: unknown) => void;
+      resolve: (v: unknown) => void;
+      accountId: number;
+    }[] = [];
+    getAccountActivityReportMock.mockClear();
+    getAccountActivityReportMock.mockImplementation(
+      (
+        { accountId }: { accountId: number },
+        opts?: { signal?: AbortSignal },
+      ) =>
+        new Promise((resolve, reject) => {
+          deferreds.push({ resolve, reject, accountId });
+          opts?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        }),
+    );
+
+    const createdBlobs: Blob[] = [];
+    const createObjectURLSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockImplementation((blob: Blob | MediaSource) => {
+        createdBlobs.push(blob as Blob);
+        return "blob:test";
+      });
+    const revokeObjectURLSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    const anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    try {
+      render(<ReportsPage />);
+      // PL/BS bulk buttons are only enabled in ledger source.
+      fireEvent.click(
+        screen.getByRole("button", { name: /general ledger/i }),
+      );
+
+      const tbBtn = screen.getByTestId(
+        "export-csv-tb-all-activity",
+      ) as HTMLButtonElement;
+      const plBtn = screen.getByTestId(
+        "export-csv-pl-all-activity",
+      ) as HTMLButtonElement;
+      const bsBtn = screen.getByTestId(
+        "export-csv-bs-all-activity",
+      ) as HTMLButtonElement;
+
+      // Sanity: all three start enabled.
+      expect(tbBtn.disabled).toBe(false);
+      expect(plBtn.disabled).toBe(false);
+      expect(bsBtn.disabled).toBe(false);
+
+      // Start the Trial Balance bulk export.
+      fireEvent.click(tbBtn);
+      await waitFor(() => {
+        expect(deferreds.length).toBeGreaterThanOrEqual(1);
+      });
+
+      // While in flight, the other two cards are disabled with the shared
+      // "Another export is preparing…" gate.
+      expect(plBtn.disabled).toBe(true);
+      expect(plBtn.title).toMatch(/another export is preparing/i);
+      expect(bsBtn.disabled).toBe(true);
+      expect(bsBtn.title).toMatch(/another export is preparing/i);
+
+      // Cancel the Trial Balance export.
+      fireEvent.click(
+        screen.getByTestId("export-csv-tb-all-activity-cancel"),
+      );
+
+      // After cancel, all three bulk buttons are usable again.
+      await waitFor(() => {
+        expect(plBtn.disabled).toBe(false);
+      });
+      expect(bsBtn.disabled).toBe(false);
+      expect(tbBtn.disabled).toBe(false);
+      expect(plBtn.title === "" || plBtn.title === undefined).toBe(true);
+      expect(bsBtn.title === "" || bsBtn.title === undefined).toBe(true);
+
+      // A fresh export on a different card actually fires.
+      const fetchesBefore = getAccountActivityReportMock.mock.calls.length;
+      fireEvent.click(plBtn);
+      await waitFor(() => {
+        expect(getAccountActivityReportMock.mock.calls.length).toBeGreaterThan(
+          fetchesBefore,
+        );
+      });
+      // The new in-flight export is the P&L card now.
+      expect(plBtn.textContent).toMatch(/Preparing/);
+
+      // Drain the remaining P&L deferreds (they're created sequentially as
+      // each one resolves) so the in-flight export winds down cleanly.
+      let drained = 0;
+      while (drained < 10) {
+        const pending = deferreds.slice(drained);
+        if (pending.length === 0) {
+          await waitFor(() => {
+            expect(
+              deferreds.length > drained ||
+                plBtn.textContent?.match(/Download all activity/),
+            ).toBeTruthy();
+          });
+          if (plBtn.textContent?.match(/Download all activity/)) break;
+          continue;
+        }
+        for (const d of pending) {
+          d.resolve({
+            lines: [],
+            totals: { debits: "0.00", credits: "0.00" },
+          });
+          drained += 1;
+        }
+        // let the loop advance to the next account
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    } finally {
+      anchorClickSpy.mockRestore();
+      revokeObjectURLSpy.mockRestore();
+      createObjectURLSpy.mockRestore();
+      mockTrialBalanceData.current = undefined;
+      mockSummaryOverride.current = undefined;
+    }
+  });
+
   it("bulk activity CSV surfaces an ERROR row for a failed per-account fetch instead of silently skipping the account (Task #96)", async () => {
     mockTrialBalanceData.current = {
       fromDate: null,
