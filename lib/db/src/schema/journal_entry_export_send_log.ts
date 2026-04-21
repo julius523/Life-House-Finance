@@ -39,6 +39,15 @@ export const journalEntryExportSendLogTable = pgTable(
       () => usersTable.id,
       { onDelete: "set null" },
     ),
+    /**
+     * Task #89 — snapshot of the resolved "Display Name <email>" labels for
+     * the schedule's posted-by / approver filters at the moment this run
+     * fired. Stored alongside the row so the send-log table stays auditable
+     * even after an admin later edits the schedule's filter (or the
+     * referenced user is deleted). Null when no filter was set on that run.
+     */
+    filterPostedByUserLabel: text("filter_posted_by_user_label"),
+    filterApproverUserLabel: text("filter_approver_user_label"),
   },
 );
 

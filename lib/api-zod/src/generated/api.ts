@@ -5377,6 +5377,18 @@ export const GetJournalEntryExportScheduleLogResponse = zod.object({
       filename: zod.string(),
       triggeredBy: zod.string(),
       triggeredByUserId: zod.number().nullish(),
+      filterPostedByUserLabel: zod
+        .string()
+        .nullish()
+        .describe(
+          "Snapshot of the resolved \"Display Name <email>\" for the schedule's posted-by filter at the time this run fired (Task #89). Null when no filter was set on that run. Stored on the row so historical entries stay auditable even after the schedule's filter changes.\n",
+        ),
+      filterApproverUserLabel: zod
+        .string()
+        .nullish()
+        .describe(
+          'Snapshot of the resolved \"Display Name <email>\" for the schedule\'s approver filter at the time this run fired. See filterPostedByUserLabel.\n',
+        ),
     }),
   ),
 });

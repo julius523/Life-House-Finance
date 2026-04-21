@@ -286,6 +286,29 @@ export async function runSchedule(
   let filename = "";
   let errorMessage: string | undefined;
 
+  // Task #89 — resolve the friendly labels for the schedule's user filters
+  // *before* we attempt the CSV/email work so the snapshot is captured into
+  // the send-log row even when the run later fails. This is what keeps the
+  // history table auditable after an admin edits the schedule's filter.
+  const filterUserLabels = await resolveUserLabels([
+    ...(schedule.filterPostedByUserId != null
+      ? [schedule.filterPostedByUserId]
+      : []),
+    ...(schedule.filterApproverUserId != null
+      ? [schedule.filterApproverUserId]
+      : []),
+  ]);
+  const snapshotPostedByLabel =
+    schedule.filterPostedByUserId != null
+      ? filterUserLabels.get(schedule.filterPostedByUserId) ??
+        `User #${schedule.filterPostedByUserId}`
+      : null;
+  const snapshotApproverLabel =
+    schedule.filterApproverUserId != null
+      ? filterUserLabels.get(schedule.filterApproverUserId) ??
+        `User #${schedule.filterApproverUserId}`
+      : null;
+
   try {
     const built = await buildScheduleCsv(
       {
@@ -320,24 +343,10 @@ export async function runSchedule(
     } (${rowCount} entr${rowCount === 1 ? "y" : "ies"})`;
     // Task #81 — resolve user-id filters to "Display Name <email>" so the
     // email reads as an audit trail instead of leaking opaque integers.
-    const labels = await resolveUserLabels([
-      ...(schedule.filterPostedByUserId != null
-        ? [schedule.filterPostedByUserId]
-        : []),
-      ...(schedule.filterApproverUserId != null
-        ? [schedule.filterApproverUserId]
-        : []),
-    ]);
-    const postedByLabel =
-      schedule.filterPostedByUserId != null
-        ? labels.get(schedule.filterPostedByUserId) ??
-          `User #${schedule.filterPostedByUserId}`
-        : "anyone";
-    const approverLabel =
-      schedule.filterApproverUserId != null
-        ? labels.get(schedule.filterApproverUserId) ??
-          `User #${schedule.filterApproverUserId}`
-        : "anyone";
+    // Task #89 — reuse the same snapshot computed above so the email body
+    // and the send-log row never disagree about what was rendered.
+    const postedByLabel = snapshotPostedByLabel ?? "anyone";
+    const approverLabel = snapshotApproverLabel ?? "anyone";
     const body =
       `Scheduled CSV export for "${schedule.name}".\n\n` +
       `Cadence: ${schedule.cadence}\n` +
@@ -395,6 +404,11 @@ export async function runSchedule(
     filename: filename || `journal-entries-${range.from}_to_${range.to}.csv`,
     triggeredBy: options.triggeredBy,
     triggeredByUserId: options.triggeredByUserId ?? null,
+    // Task #89 — snapshot the resolved labels at run time so future audits
+    // are pinned to who/what was filtered on this attempt, not whatever the
+    // schedule points at now.
+    filterPostedByUserLabel: snapshotPostedByLabel,
+    filterApproverUserLabel: snapshotApproverLabel,
   });
 
   await db.insert(activityLogTable).values({

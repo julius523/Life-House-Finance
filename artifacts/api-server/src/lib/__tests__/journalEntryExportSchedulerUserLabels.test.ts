@@ -328,6 +328,125 @@ test("runSchedule falls back to 'User #<id>' when the filtered user was deleted"
   );
 });
 
+test("Task #89 — runSchedule snapshots filter labels onto the send-log row, surviving later schedule edits", async () => {
+  // Insert a user, point a schedule at them, run it, then *edit* the
+  // schedule to clear the posted-by filter (the same kind of audit-breaking
+  // change Task #89 protects against). The pre-existing send-log row must
+  // still report the original resolved label, not whatever the schedule
+  // points at now.
+  const [snapshotPoster] = await db
+    .insert(usersTable)
+    .values({
+      email: `${TAG}-snapshot@test.local`,
+      passwordHash: "x",
+      firstName: "Snap",
+      lastName: "Shotter",
+      role: "submitter",
+    })
+    .returning();
+  const snapshotPosterId = snapshotPoster!.id;
+
+  const [schedule] = await db
+    .insert(journalEntryExportSchedulesTable)
+    .values({
+      name: `${TAG}-snapshot-row`,
+      enabled: true,
+      cadence: "daily",
+      recipients: [`${TAG}-recipient@test.local`],
+      filterPostedByUserId: snapshotPosterId,
+      filterApproverUserId: approverUserId,
+      includeLines: false,
+      nextRunAt: new Date(Date.now() + 24 * 60 * 60_000),
+    })
+    .returning();
+  insertedScheduleIds.push(schedule!.id);
+
+  await runSchedule(schedule!, {
+    triggeredBy: "manual",
+    triggeredByUserId: adminUserId,
+  });
+
+  // Mutate the schedule the same way an admin would after the fact.
+  await db
+    .update(journalEntryExportSchedulesTable)
+    .set({ filterPostedByUserId: null, filterApproverUserId: null })
+    .where(eq(journalEntryExportSchedulesTable.id, schedule!.id));
+
+  // Also delete the snapshot user so the only place the label can come
+  // from is the send-log row's own column.
+  await db.delete(usersTable).where(eq(usersTable.id, snapshotPosterId));
+
+  const logRows = await db
+    .select()
+    .from(journalEntryExportSendLogTable)
+    .where(eq(journalEntryExportSendLogTable.scheduleId, schedule!.id));
+  assert.equal(logRows.length, 1, "expected exactly one send-log row for the run");
+  assert.equal(
+    logRows[0]!.filterPostedByUserLabel,
+    `Snap Shotter <${TAG}-snapshot@test.local>`,
+    "send-log row must keep the resolved poster label even after the schedule's filter is edited and the user is deleted",
+  );
+  assert.equal(
+    logRows[0]!.filterApproverUserLabel,
+    `Apple Prover <${TAG}-approver@test.local>`,
+  );
+
+  // And the GET /log endpoint must surface the snapshotted columns so the
+  // management page can render historical context without re-resolving.
+  const res = await fetch(
+    `${baseUrl}/journal-entry-export-schedules/${schedule!.id}/log`,
+    { headers: { Cookie: adminCookie } },
+  );
+  assert.equal(res.status, 200);
+  const json = (await res.json()) as {
+    entries: Array<{
+      filterPostedByUserLabel: string | null;
+      filterApproverUserLabel: string | null;
+    }>;
+  };
+  assert.equal(json.entries.length, 1);
+  assert.equal(
+    json.entries[0]!.filterPostedByUserLabel,
+    `Snap Shotter <${TAG}-snapshot@test.local>`,
+  );
+  assert.equal(
+    json.entries[0]!.filterApproverUserLabel,
+    `Apple Prover <${TAG}-approver@test.local>`,
+  );
+});
+
+test("Task #89 — schedule with no user filters records null label snapshots, not 'anyone' strings", async () => {
+  const [schedule] = await db
+    .insert(journalEntryExportSchedulesTable)
+    .values({
+      name: `${TAG}-no-filters-snapshot`,
+      enabled: true,
+      cadence: "daily",
+      recipients: [`${TAG}-recipient@test.local`],
+      filterPostedByUserId: null,
+      filterApproverUserId: null,
+      includeLines: false,
+      nextRunAt: new Date(Date.now() + 24 * 60 * 60_000),
+    })
+    .returning();
+  insertedScheduleIds.push(schedule!.id);
+
+  await runSchedule(schedule!, {
+    triggeredBy: "manual",
+    triggeredByUserId: adminUserId,
+  });
+  const rows = await db
+    .select()
+    .from(journalEntryExportSendLogTable)
+    .where(eq(journalEntryExportSendLogTable.scheduleId, schedule!.id));
+  assert.equal(rows.length, 1);
+  // Null (not "anyone") so the UI owns the friendly fallback string and
+  // the column stays distinguishable from a real label of literal text
+  // "anyone" should one ever exist.
+  assert.equal(rows[0]!.filterPostedByUserLabel, null);
+  assert.equal(rows[0]!.filterApproverUserLabel, null);
+});
+
 test("GET /journal-entry-export-schedules enriches rows with friendly user labels", async () => {
   // A schedule with both filters set, one with no filter, and one
   // pointing at a deleted user — three cases the management page must

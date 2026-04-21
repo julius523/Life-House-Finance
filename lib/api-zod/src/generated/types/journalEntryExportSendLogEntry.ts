@@ -19,4 +19,10 @@ export interface JournalEntryExportSendLogEntry {
   filename: string;
   triggeredBy: string;
   triggeredByUserId?: number | null;
+  /** Snapshot of the resolved "Display Name <email>" for the schedule's posted-by filter at the time this run fired (Task #89). Null when no filter was set on that run. Stored on the row so historical entries stay auditable even after the schedule's filter changes.
+   */
+  filterPostedByUserLabel?: string | null;
+  /** Snapshot of the resolved "Display Name <email>" for the schedule's approver filter at the time this run fired. See filterPostedByUserLabel.
+   */
+  filterApproverUserLabel?: string | null;
 }

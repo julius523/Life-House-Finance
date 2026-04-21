@@ -935,6 +935,8 @@ export default function JournalExportSchedulesPage() {
                       <th className="text-left p-3">Range</th>
                       <th className="text-left p-3">Rows</th>
                       <th className="text-left p-3">Recipients</th>
+                      <th className="text-left p-3">Posted by filter</th>
+                      <th className="text-left p-3">Approver filter</th>
                       <th className="text-left p-3">Trigger</th>
                       <th className="text-left p-3">Error</th>
                     </tr>
@@ -958,6 +960,25 @@ export default function JournalExportSchedulesPage() {
                         <td className="p-3">{entry.rowCount}</td>
                         <td className="p-3 text-muted-foreground">
                           {(entry.recipients ?? []).join(", ")}
+                        </td>
+                        {/* Task #89 — show the resolved label that was active when
+                            this run fired so historical rows stay auditable even
+                            after an admin edits the schedule's filter. Rows
+                            written before Task #89 have null snapshots and will
+                            render as "anyone" — there is no way to recover their
+                            true filter from history, so the safe default matches
+                            "no filter set" rather than guessing. */}
+                        <td
+                          className="p-3 text-muted-foreground"
+                          data-testid={`cell-log-posted-by-${entry.id}`}
+                        >
+                          {entry.filterPostedByUserLabel ?? "anyone"}
+                        </td>
+                        <td
+                          className="p-3 text-muted-foreground"
+                          data-testid={`cell-log-approver-${entry.id}`}
+                        >
+                          {entry.filterApproverUserLabel ?? "anyone"}
                         </td>
                         <td className="p-3">{entry.triggeredBy}</td>
                         <td className="p-3 text-destructive">
