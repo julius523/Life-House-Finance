@@ -644,6 +644,149 @@ describe("Reports page — partial date input regression (Task #65 / #75)", () =
     }
   });
 
+  it("bulk activity CSV surfaces an ERROR row for a failed per-account fetch instead of silently skipping the account (Task #96)", async () => {
+    mockTrialBalanceData.current = {
+      fromDate: null,
+      toDate: null,
+      rows: [
+        {
+          accountId: 101,
+          code: "1000",
+          name: "Operating Cash",
+          type: "asset",
+          subtype: "cash",
+          normalBalance: "debit",
+          isActive: true,
+          debits: "500.00",
+          credits: "0.00",
+          balance: "500.00",
+          balanceSide: "debit",
+        },
+        {
+          accountId: 4000,
+          code: "4000",
+          name: "Program Income",
+          type: "income",
+          subtype: null,
+          normalBalance: "credit",
+          isActive: true,
+          debits: "0.00",
+          credits: "500.00",
+          balance: "500.00",
+          balanceSide: "credit",
+        },
+        {
+          accountId: 5000,
+          code: "5000",
+          name: "Program Expenses",
+          type: "expense",
+          subtype: null,
+          normalBalance: "debit",
+          isActive: true,
+          debits: "200.00",
+          credits: "0.00",
+          balance: "200.00",
+          balanceSide: "debit",
+        },
+      ],
+      totals: {
+        debits: "700.00",
+        credits: "500.00",
+        balanced: false,
+        differenceCents: 20000,
+      },
+    };
+
+    // Fail the middle account; other accounts succeed normally. The bulk
+    // loop must catch the rejection and write an ERROR row instead of
+    // silently dropping the section, so reviewers can see which account
+    // failed.
+    getAccountActivityReportMock.mockClear();
+    getAccountActivityReportMock.mockImplementation(
+      async ({ accountId }: { accountId: number }) => {
+        if (accountId === 4000) {
+          throw new Error("backend exploded for 4000");
+        }
+        return {
+          lines: [
+            {
+              entryDate: "2025-01-15",
+              entryNo: `JE-${accountId}-1`,
+              entryMemo: "memo",
+              lineMemo: "line",
+              program: null,
+              fund: null,
+              debit: accountId === 101 ? "500.00" : "0.00",
+              credit: accountId === 101 ? "0.00" : "200.00",
+            },
+          ],
+          totals: {
+            debits: accountId === 101 ? "500.00" : "0.00",
+            credits: accountId === 101 ? "0.00" : "200.00",
+          },
+        };
+      },
+    );
+
+    const createdBlobs: Blob[] = [];
+    const createObjectURLSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockImplementation((blob: Blob | MediaSource) => {
+        createdBlobs.push(blob as Blob);
+        return "blob:test";
+      });
+    const revokeObjectURLSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    const anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    try {
+      render(<ReportsPage />);
+      const btn = screen.getByTestId("export-csv-tb-all-activity");
+      fireEvent.click(btn);
+
+      await waitFor(() => {
+        expect(getAccountActivityReportMock).toHaveBeenCalledTimes(3);
+      });
+      await waitFor(() => {
+        expect(createdBlobs.length).toBe(1);
+      });
+
+      const csv = await createdBlobs[0].text();
+
+      // Failed-account section is still present: ACCOUNT marker, header
+      // row, and an ERROR row carrying the underlying error message — not
+      // silently skipped.
+      expect(csv).toContain("ACCOUNT,4000,Program Income");
+      const lines = csv.split("\n");
+      const failedIdx = lines.findIndex((l) =>
+        l.startsWith("ACCOUNT,4000,Program Income"),
+      );
+      expect(failedIdx).toBeGreaterThanOrEqual(0);
+      expect(lines[failedIdx + 1]).toMatch(/^entry_date,entry_no,/);
+      expect(lines[failedIdx + 2]).toMatch(/^ERROR,/);
+      expect(lines[failedIdx + 2]).toContain("backend exploded for 4000");
+
+      // Other accounts still produce normal sections with their activity
+      // rows and TOTALS — the failure didn't poison the rest of the file.
+      expect(csv).toContain("ACCOUNT,1000,Operating Cash");
+      expect(csv).toContain("JE-101-1");
+      expect(csv).toContain("ACCOUNT,5000,Program Expenses");
+      expect(csv).toContain("JE-5000-1");
+      // The successful sections still emit their TOTALS line; the failed
+      // section does not (it bailed out via the ERROR branch).
+      const totalsLines = lines.filter((l) => l.startsWith("TOTALS,"));
+      expect(totalsLines.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      anchorClickSpy.mockRestore();
+      revokeObjectURLSpy.mockRestore();
+      createObjectURLSpy.mockRestore();
+      mockTrialBalanceData.current = undefined;
+    }
+  });
+
   it("P&L bulk activity button is rendered and disabled with the empty-state tooltip when there are zero income/expense accounts (Task #98)", () => {
     mockSummaryOverride.current = {
       generatedAt: new Date().toISOString(),
