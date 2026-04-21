@@ -16,7 +16,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { Router as WouterRouter } from "wouter";
 import type { IntegritySweepReport } from "@workspace/db/integrity-types";
 
@@ -539,6 +539,49 @@ describe("AdminIntegrityPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("expands a check row to reveal sampleRefs beyond the visible cap", () => {
+    const refs = Array.from({ length: 15 }, (_, i) => ({
+      kind: "expense" as const,
+      id: String(1000 + i),
+    }));
+    const report: IntegritySweepReport = {
+      generatedAt: "2026-04-21T12:00:00.000Z",
+      ok: false,
+      totalChecks: 1,
+      failingChecks: 1,
+      checks: [
+        check({
+          key: "big",
+          name: "Big",
+          category: "structural",
+          severity: "warning",
+          count: 15,
+          sampleRefs: refs,
+        }),
+      ],
+    };
+    useQueryMock.mockReturnValueOnce({
+      data: report,
+      error: null,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+    render(withRouter(<AdminIntegrityPage />));
+    // Collapsed by default: only first 10 rendered; ref #11 hidden.
+    expect(
+      screen.queryByTestId("sample-link-expense-1010"),
+    ).not.toBeInTheDocument();
+    const toggle = screen.getByTestId("integrity-expand-big");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("sample-link-expense-1010")).toBeInTheDocument();
+    expect(screen.getByTestId("sample-link-expense-1014")).toBeInTheDocument();
+    expect(screen.getByTestId("integrity-expand-big")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
   it("renders only the success banner (no metadata line) when ok=true", () => {
     const report: IntegritySweepReport = {
       generatedAt: "2026-04-21T12:00:00.000Z",
@@ -588,7 +631,7 @@ describe("AdminIntegrityPage", () => {
     });
     render(withRouter(<AdminIntegrityPage />));
     const copyBtn = screen.getByTestId("sample-copy-expense-77");
-    copyBtn.click();
+    fireEvent.click(copyBtn);
     const err = await screen.findByTestId("sample-copy-error-expense-77");
     expect(err).toHaveTextContent("denied");
   });

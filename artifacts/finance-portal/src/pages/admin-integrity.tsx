@@ -298,7 +298,11 @@ function SampleRefItem({ refItem }: { refItem: IntegritySampleRef }) {
 }
 
 function CheckRow({ check }: { check: IntegrityCheckResult }) {
-  const visible = check.sampleRefs.slice(0, VISIBLE_SAMPLE_CAP);
+  const [expanded, setExpanded] = useState(false);
+  const canExpand = check.sampleRefs.length > VISIBLE_SAMPLE_CAP;
+  const visible = expanded
+    ? check.sampleRefs
+    : check.sampleRefs.slice(0, VISIBLE_SAMPLE_CAP);
   const hidden = check.sampleRefs.length - visible.length;
   const cappedByServer =
     check.sampleRefs.length < check.count
@@ -329,16 +333,29 @@ function CheckRow({ check }: { check: IntegrityCheckResult }) {
           ))}
         </ul>
       )}
-      {(hidden > 0 || cappedByServer > 0) && (
-        <p
-          className="mt-1 text-[11px] text-muted-foreground"
-          data-testid={`integrity-trunc-${check.key}`}
-        >
-          showing {visible.length} of {check.count.toLocaleString()}
-          {cappedByServer > 0
-            ? ` (server caps samples at ${check.sampleRefs.length})`
-            : ""}
-        </p>
+      {(hidden > 0 || cappedByServer > 0 || expanded) && (
+        <div className="mt-1 flex items-center gap-2">
+          <p
+            className="text-[11px] text-muted-foreground"
+            data-testid={`integrity-trunc-${check.key}`}
+          >
+            showing {visible.length} of {check.count.toLocaleString()}
+            {cappedByServer > 0
+              ? ` (server caps samples at ${check.sampleRefs.length})`
+              : ""}
+          </p>
+          {canExpand && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="text-[11px] text-primary underline-offset-2 hover:underline"
+              data-testid={`integrity-expand-${check.key}`}
+              aria-expanded={expanded}
+            >
+              {expanded ? "Show less" : `Show all ${check.sampleRefs.length}`}
+            </button>
+          )}
+        </div>
       )}
     </li>
   );
