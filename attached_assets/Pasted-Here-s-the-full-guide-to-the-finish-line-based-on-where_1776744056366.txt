@@ -1,0 +1,556 @@
+Here’s the full guide to the finish line based on where you are now.
+
+The truth about where you stand
+
+You are past the hard architecture phase.
+
+That matters.
+
+The scary stuff is mostly done:
+
+* chart of accounts
+* manual JE workflow
+* expense → accounting bridge
+* bills → accounting bridge
+* blocked accounting queues
+* two-way traceability
+* drilldowns / exports
+* remediation flows
+* integrity guardrails
+* regression coverage is growing
+
+So this is no longer “build the accounting system.”
+This is now:
+
+stabilize it, seal the leaks, make it safe to operate, then launch without embarrassment.
+
+That is a very different phase.
+
+⸻
+
+The finish line in plain English
+
+You are trying to get from:
+
+“it works if we know what we’re doing”
+
+to:
+
+“someone else can use it safely on a normal Tuesday without breaking accounting.”
+
+That finish line has 5 lanes:
+
+1. System integrity
+2. Reporting trust
+3. Workflow completeness
+4. Permissions and operator safety
+5. Launch hardening
+
+If you finish those 5 lanes, the app is launchable.
+
+⸻
+
+The remaining work, in the right order
+
+Phase 1 — Lock down correctness first
+
+This is the highest priority. Do this before more polish.
+
+1. Full integrity sweep
+
+Goal: make sure the database and workflows cannot drift into nonsense.
+
+You already started touching this area. Finish it thoroughly.
+
+What to check
+
+* orphaned accounting_source_links
+* links pointing to missing draft rows
+* links pointing to missing journal entries
+* expenses or bills marked draft_created but with no draft
+* expenses or bills marked posted but with no JE
+* links where both expense and bill references are inconsistent
+* reversal / replacement states that are logically impossible
+* journal entry lines pointing to bad accounts
+* rows with archived/non-postable accounts sneaking through older data
+* blocked statuses with empty reason codes
+* not-applicable rows missing the required note
+* duplicate bridges for same source record
+* partial success remnants from remediation flows
+
+Done looks like
+
+* one integrity report or admin page that surfaces every inconsistency
+* one repair path per inconsistency type
+* tests covering every rule
+* zero known silent corruption paths left
+
+Why this comes first
+
+Because if integrity is loose, every report and export becomes a liar.
+
+⸻
+
+Phase 2 — Finish reporting trust
+
+Reports are close. Now make them bulletproof.
+
+2. Reporting stability pass
+
+Even if #60 was “mostly already done,” finish the hardening pass anyway.
+
+Make sure:
+
+* no panel can white-screen the whole page
+* every panel has safe fallback rendering
+* partial API failure does not poison unrelated panels
+* CSV buttons never explode on null/partial payloads
+* empty states are clean
+* non-admin / restricted roles see sane messaging
+* loading states are stable and not jumpy
+* exported CSVs always match on-screen filters and date ranges
+
+3. P&L / BS / TB parity verification
+
+You already verified a lot. Now formalize it.
+
+For each report:
+
+* on-screen totals tie to ledger source of truth
+* drilldowns tie to the exact visible row
+* CSV export matches visible filters
+* bulk all-activity export matches per-account exports
+* unmapped rows are surfaced clearly
+* date filters are identical across screen and export
+* ledger vs operational mode boundaries are clear
+
+4. Reporting regression suite
+
+Build the boring tests that save your life later.
+
+Must-have automated tests:
+
+* report loads with zero data
+* report loads with partial data
+* report loads with invalid date input
+* drilldown opens correct JE rows
+* CSV filenames are correct
+* CSV respects active filters
+* unmapped rows are included correctly
+* empty exports disable cleanly
+* progress labels advance properly
+* permission-restricted users do not see forbidden data
+
+⸻
+
+Phase 3 — Finish workflow completeness
+
+This is where you make sure no operator has to “know the secret way.”
+
+5. Every blocked state needs a clear operator path
+
+For expenses, bills, remediation, and queue work:
+
+A blocked row should always answer:
+
+* what failed
+* why it failed
+* who can fix it
+* where to go fix it
+* what happens after retry
+
+That means every blocked state should have:
+
+* stable reason code
+* human-readable explanation
+* direct link to the fixing screen
+* retry button
+* audit log
+* protection against duplicate retries
+* clear post-retry state transition
+
+6. Final review of all accounting state machines
+
+This is big. Do it explicitly.
+
+Review these transitions for:
+
+* expenses
+* bills
+* manual JE drafts
+* posted JEs
+* remediation entries
+* blocked queue items
+* mark-not-applicable flows
+* reverse-and-replace flows
+
+For each one, define:
+
+* allowed states
+* forbidden states
+* who can transition
+* what side effects happen
+* what logs are written
+* what links are created/updated
+* what can be retried safely
+* what is idempotent
+
+If this isn’t written down, bugs breed in the dark like gremlins after midnight.
+
+⸻
+
+Phase 4 — Permissions, safety, and operator UX
+
+This is where a “working system” becomes a real tool.
+
+7. Full permission matrix review
+
+You need one clean pass over every accounting page and action.
+
+Roles likely include:
+
+* admin
+* approver
+* accountant/bookkeeper
+* submitter
+* viewer
+
+For every screen and action, confirm:
+
+* who can view
+* who can edit
+* who can submit
+* who can approve
+* who can retry
+* who can mark not applicable
+* who can export
+* who can remediate
+* who can reverse / replace
+* who can access queues
+* who can access reports / activity details
+
+Done looks like
+
+* one permission matrix doc
+* backend enforcement matches frontend visibility
+* no button visible if the backend will always 403
+* no route accessible just because the frontend forgot to hide it
+
+8. Operator UX polish on high-risk screens
+
+Not vanity polish. Safety polish.
+
+Prioritize:
+
+* blocked queue
+* JE detail / draft detail
+* remediation dialog
+* bills detail
+* expense detail
+* reports page
+* schedule editor filters
+* all bulk export buttons
+
+Improve:
+
+* labels
+* warning copy
+* confirmation dialogs
+* error messages
+* note requirements
+* state badges
+* “what happens next” messaging
+* disabled button explanations
+
+Goal:
+a smart non-technical finance person should not need telepathy to use it.
+
+⸻
+
+Phase 5 — Launch hardening
+
+This is the “don’t get cooked in production” phase.
+
+9. End-to-end smoke suite
+
+Minimum flows:
+
+Expense flow
+
+* create expense
+* categorize
+* approve
+* draft created
+* submit draft
+* approve draft
+* post
+* source links visible
+* report drilldown shows it
+
+Bill flow
+
+* create bill
+* accrual draft generated
+* submit / approve / post
+* payment event generates payment JE draft
+* submit / approve / post
+* bill detail shows both legs
+* report drilldown shows both correctly
+
+Blocked flow
+
+* intentionally break mapping
+* approve expense/bill
+* item lands in blocked queue
+* fix mapping
+* retry
+* draft gets created
+* audit log preserved
+
+Remediation flow
+
+* detect issue
+* open remediation
+* adjusting entry OR reverse-and-replace
+* partial-failure path behaves correctly
+* logs written
+* UI shows result clearly
+
+Reports flow
+
+* open reports
+* filter date range
+* open drilldown
+* open JE detail
+* export CSV
+* bulk export CSV
+* verify progress label
+
+10. Post-merge / CI / test reliability
+
+Since you’re on Replit, this is not optional.
+
+Lock down:
+
+* test runner stability
+* no flaky parallel DB races
+* longer workflow timeout where needed
+* clean seed/setup/teardown
+* no leaked test fixtures into real app data
+* restart scripts reliable
+* ports predictable
+* migrations applied consistently
+
+11. Seed/demo data sanity
+
+Before launch:
+
+* remove garbage test data
+* keep intentional demo data only
+* ensure reports don’t show weird leftovers
+* no broken linked entries from old tests
+* no fake users visible in production-like views
+
+12. Backup / restore / rollback plan
+
+You do not want your first true production mistake to become a horror movie.
+
+Have:
+
+* DB backup routine
+* migration rollback plan
+* “bad deploy” rollback steps
+* list of critical tables
+* manual recovery procedure for accounting data
+
+⸻
+
+What is still left, categorized cleanly
+
+Must finish before launch
+
+These are non-negotiable.
+
+* integrity sweep
+* permission matrix review
+* full workflow state review
+* report stability pass
+* report/export parity tests
+* blocked/retry flows finalized
+* end-to-end smoke suite
+* CI/post-merge reliability
+* cleanup of leaked/bad test data
+* backup/rollback plan
+* final launch checklist
+
+Should finish right after launch or right before if time allows
+
+These are strong “yes,” but not launch blockers if the core is safe.
+
+* better progress/cancel behavior for long exports
+* schedule editor URL-sync polish
+* more operator copy improvements
+* more bulk actions
+* richer dashboarding for queue metrics
+* more detailed audit log browsing
+* more integrity auto-repair helpers
+
+Can wait until v2
+
+Do not let these delay launch.
+
+* copilot reconciliation enhancements
+* advanced forecasting
+* AI-powered categorization suggestions
+* more automated accounting intelligence
+* email/Slack alerts
+* fancier reporting visualizations
+* vendor/program override layers
+* ultra-polished UI animations
+* broader mobile refinement
+
+⸻
+
+Your practical launch sequence
+
+Week 1: correctness week
+
+Finish:
+
+* integrity sweep
+* repair tools
+* reporting hardening
+* permission review
+* state machine audit
+
+Output:
+
+* no silent corruption paths
+* no known broken transitions
+* no role leaks
+
+Week 2: trust week
+
+Finish:
+
+* reporting parity tests
+* drilldown/export verification
+* blocked queue/operator path polish
+* end-to-end smoke coverage
+* cleanup test data
+
+Output:
+
+* reports trustworthy
+* exports trustworthy
+* operator flow trustworthy
+
+Week 3: launch hardening week
+
+Finish:
+
+* Replit stability work
+* timeout/script cleanup
+* migration safety
+* backup/rollback
+* final regression pass
+* launch checklist walkthrough
+
+Output:
+
+* safe to deploy
+* safe to recover
+* safe to operate
+
+Week 4: buffer week
+
+Use only if needed for:
+
+* bug fixes
+* real-user testing
+* permission mistakes
+* weird production-only behaviors
+* data cleanup
+
+If you don’t need it, great. That means the app is ready sooner.
+
+⸻
+
+The actual definition of “complete”
+
+The app is complete enough to launch when all of these are true:
+
+Accounting correctness
+
+* no known silent bad states
+* no direct posting shortcuts bypassing workflow
+* all bridge records are consistent
+* retries are idempotent
+* audit logs are reliable
+
+Reporting trust
+
+* reports tie to ledger
+* drilldowns work
+* exports match screen state
+* empty/partial/error cases are safe
+* no test pollution visible to users
+
+Workflow completeness
+
+* every blocked item has a clear fix path
+* every critical workflow is test-covered
+* state transitions are explicit and enforced
+
+Permissions
+
+* frontend and backend agree
+* restricted users see sane behavior
+* high-risk actions are limited correctly
+
+Operational readiness
+
+* tests pass reliably
+* merge gate is stable
+* migrations are safe
+* backups exist
+* rollback exists
+* no known critical bugs remain
+
+If those are all true, ship it.
+
+⸻
+
+What I would do next, exactly
+
+If I were driving this from here, I would do these in this order:
+
+Immediate next 5 tasks
+
+1. Integrity sweep task
+2. Permission matrix + route enforcement audit
+3. Reporting parity regression suite
+4. Full accounting workflow smoke suite
+5. Launch readiness checklist + backup/rollback pack
+
+That is the shortest path to a trustworthy beta.
+
+⸻
+
+Biggest mistake to avoid now
+
+Do not spend the next two weeks adding clever features because the app feels close.
+
+That is how teams end up with:
+
+* more surface area
+* more hidden bugs
+* more regression risk
+* less launch confidence
+
+You do not need more brilliance right now.
+
+You need:
+boring reliability.
+
+That’s the finish line.
