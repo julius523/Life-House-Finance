@@ -1310,4 +1310,158 @@ describe("Bulk all-activity CSV equals per-account CSV (Task #86)", () => {
       allAccounts.map((a) => a.code).sort(),
     );
   });
+
+  /**
+   * Task #95 — Pin the bulk file's account ordering, file-level preamble,
+   * and ACCOUNT marker row format.
+   *
+   * The Task #86 byte-equality test above proves each per-account section
+   * matches its per-account export, but it sorts section codes before
+   * comparing — so a regression that reorders accounts, drops the preamble,
+   * or changes the marker row would not fail. These tests pin those
+   * structural details so any drift surfaces as a test failure instead of
+   * a silently-different audit-prep workbook.
+   */
+  function parseAccountMarkers(
+    bulkCsv: string,
+  ): Array<{ code: string; name: string; group: string }> {
+    const text = bulkCsv.replace(/^\uFEFF/, "").replace(/\r\n$/, "");
+    const out: Array<{ code: string; name: string; group: string }> = [];
+    for (const line of text.split("\r\n")) {
+      const m = line.match(/^ACCOUNT,([^,]+),([^,]+),group=(.+)$/);
+      if (m) out.push({ code: m[1], name: m[2], group: m[3] });
+    }
+    return out;
+  }
+
+  it("P&L bulk CSV: pins preamble rows, ACCOUNT marker format, and income-then-expense ordering (Task #95)", async () => {
+    const incomeByAccount = [
+      { accountId: 4000, code: "4000", name: "Program Income", amount: 250 },
+      { accountId: 4100, code: "4100", name: "Grants", amount: 250 },
+      { accountId: 4200, code: "4200", name: "Donations", amount: 250 },
+    ];
+    const expensesByAccount = [
+      { accountId: 5001, code: "5001", name: "Salaries", amount: 325.51 },
+      { accountId: 5003, code: "5003", name: "Rent", amount: 325.51 },
+    ];
+    mockSummaryOverride.current = makeSummary({
+      incomeByAccount,
+      expensesByAccount,
+      cashAccounts: [],
+      accountsReceivableAccounts: [],
+      otherAssetAccounts: [],
+      accountsPayableAccounts: [],
+      otherLiabilityAccounts: [],
+    });
+
+    render(<ReportsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /general ledger/i }));
+
+    const bulkCsv = await downloadAndCapture("export-csv-pl-all-activity");
+    const text = bulkCsv.replace(/^\uFEFF/, "").replace(/\r\n$/, "");
+    const lines = text.split("\r\n");
+
+    // Preamble rows: report / range / generated / blank, in that order.
+    expect(lines[0]).toBe("report,Profit & Loss — all account activity");
+    expect(lines[1]).toMatch(
+      /^range,\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2}$/,
+    );
+    expect(lines[2]).toMatch(
+      /^generated,\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+    );
+    expect(lines[3]).toBe("");
+
+    // ACCOUNT marker rows: format `ACCOUNT,<code>,<name>,group=<group>`,
+    // listing income accounts (group=Income) before expense accounts
+    // (group=Expense), each in the same order as the source arrays.
+    const markers = parseAccountMarkers(bulkCsv);
+    expect(markers).toEqual([
+      ...incomeByAccount.map((a) => ({
+        code: a.code,
+        name: a.name,
+        group: "Income",
+      })),
+      ...expensesByAccount.map((a) => ({
+        code: a.code,
+        name: a.name,
+        group: "Expense",
+      })),
+    ]);
+  });
+
+  it("Balance Sheet bulk CSV: pins preamble rows, ACCOUNT marker format, and cash → A/R → other assets → A/P → other liabilities ordering (Task #95)", async () => {
+    const cashAccounts = [
+      { accountId: 1001, code: "1001", name: "Operating Checking", balance: 100 },
+      { accountId: 1002, code: "1002", name: "Savings", balance: 100 },
+    ];
+    const accountsReceivableAccounts = [
+      { accountId: 1201, code: "1201", name: "Pledges receivable", balance: 100 },
+    ];
+    const otherAssetAccounts = [
+      { accountId: 1501, code: "1501", name: "Prepaid insurance", balance: 100 },
+    ];
+    const accountsPayableAccounts = [
+      { accountId: 2002, code: "2002", name: "Vendor A/P", balance: 100 },
+    ];
+    const otherLiabilityAccounts = [
+      { accountId: 2200, code: "2200", name: "Deferred revenue", balance: 100 },
+    ];
+    mockSummaryOverride.current = makeSummary({
+      incomeByAccount: [],
+      expensesByAccount: [],
+      cashAccounts,
+      accountsReceivableAccounts,
+      otherAssetAccounts,
+      accountsPayableAccounts,
+      otherLiabilityAccounts,
+    });
+
+    render(<ReportsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /general ledger/i }));
+
+    const bulkCsv = await downloadAndCapture("export-csv-bs-all-activity");
+    const text = bulkCsv.replace(/^\uFEFF/, "").replace(/\r\n$/, "");
+    const lines = text.split("\r\n");
+
+    // Preamble rows: report / as_of / generated / blank, in that order.
+    // Balance Sheet uses `as_of` (single date), not `range`, because the
+    // report is point-in-time, not period-bounded.
+    expect(lines[0]).toBe("report,Balance Sheet — all account activity");
+    expect(lines[1]).toMatch(/^as_of,\d{4}-\d{2}-\d{2}$/);
+    expect(lines[2]).toMatch(
+      /^generated,\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+    );
+    expect(lines[3]).toBe("");
+
+    // ACCOUNT marker rows: format pinned and section ordering pinned to
+    // cash → A/R → other assets → A/P → other liabilities.
+    const markers = parseAccountMarkers(bulkCsv);
+    expect(markers).toEqual([
+      ...cashAccounts.map((a) => ({
+        code: a.code,
+        name: a.name,
+        group: "Assets:Cash",
+      })),
+      ...accountsReceivableAccounts.map((a) => ({
+        code: a.code,
+        name: a.name,
+        group: "Assets:Receivable",
+      })),
+      ...otherAssetAccounts.map((a) => ({
+        code: a.code,
+        name: a.name,
+        group: "Assets:Other",
+      })),
+      ...accountsPayableAccounts.map((a) => ({
+        code: a.code,
+        name: a.name,
+        group: "Liabilities:Payable",
+      })),
+      ...otherLiabilityAccounts.map((a) => ({
+        code: a.code,
+        name: a.name,
+        group: "Liabilities:Other",
+      })),
+    ]);
+  });
 });
