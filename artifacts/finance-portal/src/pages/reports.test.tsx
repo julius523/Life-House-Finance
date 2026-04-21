@@ -523,6 +523,230 @@ describe("Reports page — partial date input regression (Task #65 / #75)", () =
     }
   });
 
+  it("P&L bulk activity button is rendered and disabled with the empty-state tooltip when there are zero income/expense accounts (Task #98)", () => {
+    mockSummaryOverride.current = {
+      generatedAt: new Date().toISOString(),
+      fromDate: "2025-01-01",
+      toDate: "2025-12-31",
+      expenseTotalsByStatus: [],
+      billTotalsByStatus: [],
+      spendByProgram: [],
+      topVendors: [],
+      missingReceiptCount: 0,
+      missingReceiptAmount: 0,
+      missingReceipts: [],
+      bankReconciliation: {
+        accounts: [],
+        totals: { ledgerBalance: 0, statementBalance: 0, deltaCents: 0 },
+      },
+      profitAndLoss: {
+        totalIncome: 0,
+        totalExpenses: 0,
+        netIncome: 0,
+        incomeByProgram: [],
+        expensesByProgram: [],
+        uncategorizedIncome: 0,
+        uncategorizedExpenses: 0,
+        incomeByAccount: [],
+        expensesByAccount: [],
+      },
+      balanceSheet: {
+        cash: 0,
+        cashOnHand: 0,
+        accountsReceivable: 0,
+        otherAssets: 0,
+        accountsPayable: 0,
+        otherLiabilities: 0,
+        equity: 0,
+        totalAssets: 0,
+        totalLiabilities: 0,
+        cashAccounts: [],
+        accountsReceivableAccounts: [],
+        otherAssetAccounts: [],
+        accountsPayableAccounts: [],
+        otherLiabilityAccounts: [],
+      },
+    };
+    render(<ReportsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /general ledger/i }));
+    const plBtn = screen.getByTestId(
+      "export-csv-pl-all-activity",
+    ) as HTMLButtonElement;
+    expect(plBtn).toBeInTheDocument();
+    expect(plBtn.disabled).toBe(true);
+    expect(plBtn.title).toMatch(/no profit & loss activity to export/i);
+    const bsBtn = screen.getByTestId(
+      "export-csv-bs-all-activity",
+    ) as HTMLButtonElement;
+    expect(bsBtn).toBeInTheDocument();
+    expect(bsBtn.disabled).toBe(true);
+    expect(bsBtn.title).toMatch(/no balance sheet activity to export/i);
+    mockSummaryOverride.current = undefined;
+  });
+
+  it("P&L and Balance Sheet bulk activity buttons are disabled with the 'Switch to Ledger source' tooltip in operational mode (Task #98)", () => {
+    mockSummaryOverride.current = {
+      generatedAt: new Date().toISOString(),
+      fromDate: "2025-01-01",
+      toDate: "2025-12-31",
+      expenseTotalsByStatus: [],
+      billTotalsByStatus: [],
+      spendByProgram: [],
+      topVendors: [],
+      missingReceiptCount: 0,
+      missingReceiptAmount: 0,
+      missingReceipts: [],
+      bankReconciliation: {
+        accounts: [],
+        totals: { ledgerBalance: 0, statementBalance: 0, deltaCents: 0 },
+      },
+      profitAndLoss: {
+        totalIncome: 0,
+        totalExpenses: 0,
+        netIncome: 0,
+        incomeByProgram: [],
+        expensesByProgram: [],
+        uncategorizedIncome: 0,
+        uncategorizedExpenses: 0,
+        incomeByAccount: [
+          { accountId: 4000, code: "4000", name: "Income", amount: 100 },
+        ],
+        expensesByAccount: [
+          { accountId: 5000, code: "5000", name: "Expense", amount: 50 },
+        ],
+      },
+      balanceSheet: {
+        cash: 0,
+        cashOnHand: 0,
+        accountsReceivable: 0,
+        otherAssets: 0,
+        accountsPayable: 0,
+        otherLiabilities: 0,
+        equity: 0,
+        totalAssets: 0,
+        totalLiabilities: 0,
+        cashAccounts: [
+          { accountId: 1001, code: "1001", name: "Cash", balance: 100 },
+        ],
+        accountsReceivableAccounts: [],
+        otherAssetAccounts: [],
+        accountsPayableAccounts: [],
+        otherLiabilityAccounts: [],
+      },
+    };
+    render(<ReportsPage />);
+    // Do NOT click the General Ledger toggle — we stay in operational mode.
+    const plBtn = screen.getByTestId(
+      "export-csv-pl-all-activity",
+    ) as HTMLButtonElement;
+    expect(plBtn.disabled).toBe(true);
+    expect(plBtn.title).toMatch(/switch to ledger source/i);
+    const bsBtn = screen.getByTestId(
+      "export-csv-bs-all-activity",
+    ) as HTMLButtonElement;
+    expect(bsBtn.disabled).toBe(true);
+    expect(bsBtn.title).toMatch(/switch to ledger source/i);
+    mockSummaryOverride.current = undefined;
+  });
+
+  it("shows an inline error notice after a bulk export when one or more per-account fetches fail (Task #98)", async () => {
+    mockTrialBalanceData.current = {
+      fromDate: null,
+      toDate: null,
+      rows: [
+        {
+          accountId: 101,
+          code: "1000",
+          name: "Operating Cash",
+          type: "asset",
+          subtype: "cash",
+          normalBalance: "debit",
+          isActive: true,
+          debits: "500.00",
+          credits: "0.00",
+          balance: "500.00",
+          balanceSide: "debit",
+        },
+        {
+          accountId: 4000,
+          code: "4000",
+          name: "Program Income",
+          type: "income",
+          subtype: null,
+          normalBalance: "credit",
+          isActive: true,
+          debits: "0.00",
+          credits: "500.00",
+          balance: "500.00",
+          balanceSide: "credit",
+        },
+      ],
+      totals: {
+        debits: "500.00",
+        credits: "500.00",
+        balanced: true,
+        differenceCents: 0,
+      },
+    };
+
+    getAccountActivityReportMock.mockClear();
+    getAccountActivityReportMock.mockImplementation(
+      async ({ accountId }: { accountId: number }) => {
+        if (accountId === 4000) {
+          throw new Error("simulated upstream 500");
+        }
+        return {
+          lines: [],
+          totals: { debits: "0.00", credits: "0.00" },
+        };
+      },
+    );
+
+    const createObjectURLSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockImplementation(() => "blob:test");
+    const revokeObjectURLSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    const anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    try {
+      render(<ReportsPage />);
+      const btn = screen.getByTestId("export-csv-tb-all-activity");
+      fireEvent.click(btn);
+
+      const notice = await screen.findByTestId(
+        "bulk-error-notice-trial-balance",
+      );
+      expect(notice.textContent ?? "").toMatch(
+        /downloaded with 1 error/i,
+      );
+      expect(notice.textContent ?? "").toMatch(/1 of 2 accounts/i);
+
+      // Dismiss removes it.
+      fireEvent.click(
+        screen.getByTestId("bulk-error-notice-trial-balance-dismiss"),
+      );
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("bulk-error-notice-trial-balance"),
+        ).toBeNull();
+      });
+    } finally {
+      anchorClickSpy.mockRestore();
+      revokeObjectURLSpy.mockRestore();
+      createObjectURLSpy.mockRestore();
+      mockTrialBalanceData.current = undefined;
+      getAccountActivityReportMock.mockReset();
+      getAccountActivityReportMock.mockImplementation(async () => ({
+        lines: [],
+        totals: { debits: "0.00", credits: "0.00" },
+      }));
+    }
+  });
+
   it("shows the inverted-range warning banner when From > To (no crash)", () => {
     render(<ReportsPage />);
     const fromInput = screen.getByLabelText("From") as HTMLInputElement;

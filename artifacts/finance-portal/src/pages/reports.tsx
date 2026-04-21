@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Printer, BarChart3, Lock, AlertTriangle } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PeriodDraftsBanner } from "@/components/period-drafts-banner";
 import { PanelErrorBoundary } from "@/components/error-boundary";
@@ -988,6 +989,50 @@ export default function ReportsPage() {
     if (total <= 0) return "Preparing…";
     return `Preparing ${Math.min(current, total)} of ${total}…`;
   };
+  // Inline notice surfaced after a bulk export completes if any per-account
+  // fetch failed. The CSV is still produced (best-effort) with ERROR rows
+  // for the failed accounts; this just gives the user a visible signal that
+  // the workbook is partial. Cleared when a new export starts or when the
+  // user dismisses it.
+  const [bulkLastError, setBulkLastError] = useState<{
+    card: "pl" | "balance" | "trial-balance";
+    failed: number;
+    total: number;
+  } | null>(null);
+  const REPORT_LABEL: Record<"pl" | "balance" | "trial-balance", string> = {
+    pl: "Profit & Loss",
+    balance: "Balance Sheet",
+    "trial-balance": "Trial Balance",
+  };
+  // Single source of truth for "is this bulk button disabled, and if so
+  // why?". Returns the tooltip string (also drives the `disabled` boolean
+  // via `=== undefined`) so the two can never disagree across cards.
+  const bulkDisabledReason = (
+    card: "pl" | "balance" | "trial-balance",
+  ): string | undefined => {
+    if (bulkDownloading !== null && bulkDownloading !== card) {
+      return "Another export is preparing…";
+    }
+    if (card === "trial-balance") {
+      if (!tb || tbLoading) return `Loading ${REPORT_LABEL[card]}…`;
+      if (collectTrialBalanceAccounts().mapped.length +
+        collectTrialBalanceAccounts().unmapped.length === 0) {
+        return `No ${REPORT_LABEL[card]} activity to export`;
+      }
+      return undefined;
+    }
+    // P&L and Balance Sheet need ledger source for per-account breakdowns.
+    if (source !== "ledger") {
+      return "Switch to Ledger source to export per-account activity";
+    }
+    if (!data || isLoading) return `Loading ${REPORT_LABEL[card]}…`;
+    const accts =
+      card === "pl" ? collectPlAccounts() : collectBsAccounts();
+    if (accts.length === 0) {
+      return `No ${REPORT_LABEL[card]} activity to export`;
+    }
+    return undefined;
+  };
   const ACTIVITY_HEADER: CsvCell[] = [
     "entry_date",
     "entry_no",
@@ -1009,12 +1054,13 @@ export default function ReportsPage() {
     accounts: BulkAccount[],
     params: { from?: string; to: string },
     onProgress?: (current: number, total: number) => void,
-  ) => {
+  ): Promise<{ failed: number; total: number }> => {
     // Sequential to keep ordering stable and avoid hammering the API; chart of
     // accounts is small (tens of accounts), so latency is acceptable.
     const total = accounts.length;
     onProgress?.(0, total);
     let done = 0;
+    let failed = 0;
     for (const acct of accounts) {
       rows.push([
         "ACCOUNT",
@@ -1034,6 +1080,7 @@ export default function ReportsPage() {
         rows.push(["ERROR", "", "", String((e as Error)?.message ?? e)]);
         rows.push([]);
         done += 1;
+        failed += 1;
         onProgress?.(done, total);
         continue;
       }
@@ -1063,6 +1110,7 @@ export default function ReportsPage() {
       done += 1;
       onProgress?.(done, total);
     }
+    return { failed, total };
   };
   const collectPlAccounts = (): BulkAccount[] => {
     if (!data) return [];
@@ -1103,6 +1151,7 @@ export default function ReportsPage() {
     if (accounts.length === 0) return;
     setBulkDownloading("pl");
     setBulkProgress({ current: 0, total: accounts.length });
+    setBulkLastError(null);
     try {
       const rows: CsvCell[][] = [
         ["report", "Profit & Loss — all account activity"],
@@ -1110,7 +1159,7 @@ export default function ReportsPage() {
         ["generated", new Date().toISOString()],
         [],
       ];
-      await fetchAndAppendActivity(
+      const result = await fetchAndAppendActivity(
         rows,
         accounts,
         { from: fromDate, to: toDate },
@@ -1120,6 +1169,13 @@ export default function ReportsPage() {
         `profit-and-loss_all-activity_${csvSafeDateRange(fromDate, toDate)}.csv`,
         rows,
       );
+      if (result.failed > 0) {
+        setBulkLastError({
+          card: "pl",
+          failed: result.failed,
+          total: result.total,
+        });
+      }
     } finally {
       setBulkDownloading(null);
       setBulkProgress(null);
@@ -1168,6 +1224,11 @@ export default function ReportsPage() {
     if (mapped.length === 0 && unmapped.length === 0) return;
     setBulkDownloading("trial-balance");
     setBulkProgress({ current: 0, total: mapped.length });
+    setBulkLastError(null);
+    let tbResult: { failed: number; total: number } = {
+      failed: 0,
+      total: mapped.length,
+    };
     try {
       const rows: CsvCell[][] = [
         ["report", "Trial Balance — all account activity"],
@@ -1175,7 +1236,7 @@ export default function ReportsPage() {
         ["generated", new Date().toISOString()],
         [],
       ];
-      await fetchAndAppendActivity(
+      tbResult = await fetchAndAppendActivity(
         rows,
         mapped,
         { from: fromDate, to: toDate },
@@ -1213,6 +1274,13 @@ export default function ReportsPage() {
         `trial-balance_all-activity_${csvSafeDateRange(fromDate, toDate)}.csv`,
         rows,
       );
+      if (tbResult.failed > 0) {
+        setBulkLastError({
+          card: "trial-balance",
+          failed: tbResult.failed,
+          total: tbResult.total,
+        });
+      }
     } finally {
       setBulkDownloading(null);
       setBulkProgress(null);
@@ -1224,6 +1292,7 @@ export default function ReportsPage() {
     if (accounts.length === 0) return;
     setBulkDownloading("balance");
     setBulkProgress({ current: 0, total: accounts.length });
+    setBulkLastError(null);
     try {
       const rows: CsvCell[][] = [
         ["report", "Balance Sheet — all account activity"],
@@ -1234,7 +1303,7 @@ export default function ReportsPage() {
       // Balance sheet drilldowns are cumulative-through-toDate (no `from`),
       // matching the per-row drilldown behavior in AccountDrillDownRow so the
       // listed lines net to the displayed balance.
-      await fetchAndAppendActivity(
+      const result = await fetchAndAppendActivity(
         rows,
         accounts,
         { to: toDate },
@@ -1244,6 +1313,13 @@ export default function ReportsPage() {
         `balance-sheet_all-activity_as-of_${toDate}.csv`,
         rows,
       );
+      if (result.failed > 0) {
+        setBulkLastError({
+          card: "balance",
+          failed: result.failed,
+          total: result.total,
+        });
+      }
     } finally {
       setBulkDownloading(null);
       setBulkProgress(null);
@@ -1614,24 +1690,27 @@ export default function ReportsPage() {
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
-                  {source === "ledger" &&
-                    ((data?.profitAndLoss.incomeByAccount?.length ?? 0) +
-                      (data?.profitAndLoss.expensesByAccount?.length ?? 0) >
-                      0) && (
+                  {(() => {
+                    const reason = bulkDisabledReason("pl");
+                    return (
                       <Button
                         type="button"
                         size="sm"
                         variant="outline"
                         onClick={downloadAllPlActivityCsv}
-                        disabled={bulkDownloading !== null}
+                        disabled={
+                          reason !== undefined || bulkDownloading === "pl"
+                        }
                         className="no-print"
                         data-testid="export-csv-pl-all-activity"
+                        title={reason}
                       >
                         {bulkDownloading === "pl"
                           ? bulkProgressLabel()
                           : "Download all activity (CSV)"}
                       </Button>
-                    )}
+                    );
+                  })()}
                   <Button
                     type="button"
                     size="sm"
@@ -1644,6 +1723,31 @@ export default function ReportsPage() {
                   </Button>
                 </div>
               </div>
+              {bulkLastError?.card === "pl" && (
+                <Alert
+                  variant="destructive"
+                  className="mt-3 no-print"
+                  data-testid="bulk-error-notice-pl"
+                >
+                  <AlertDescription className="flex items-start justify-between gap-3">
+                    <span>
+                      Downloaded with {bulkLastError.failed} error
+                      {bulkLastError.failed === 1 ? "" : "s"}:{" "}
+                      {bulkLastError.failed} of {bulkLastError.total} accounts
+                      could not be fetched. The CSV contains ERROR rows for
+                      those accounts.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setBulkLastError(null)}
+                      className="shrink-0 underline text-xs"
+                      data-testid="bulk-error-notice-pl-dismiss"
+                    >
+                      Dismiss
+                    </button>
+                  </AlertDescription>
+                </Alert>
+              )}
             </CardHeader>
             <CardContent>
               <div className="space-y-6">
@@ -1719,30 +1823,28 @@ export default function ReportsPage() {
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
-                  {source === "ledger" &&
-                    ((data?.balanceSheet.cashAccounts?.length ?? 0) +
-                      (data?.balanceSheet.accountsReceivableAccounts?.length ??
-                        0) +
-                      (data?.balanceSheet.otherAssetAccounts?.length ?? 0) +
-                      (data?.balanceSheet.accountsPayableAccounts?.length ??
-                        0) +
-                      (data?.balanceSheet.otherLiabilityAccounts?.length ??
-                        0) >
-                      0) && (
+                  {(() => {
+                    const reason = bulkDisabledReason("balance");
+                    return (
                       <Button
                         type="button"
                         size="sm"
                         variant="outline"
                         onClick={downloadAllBsActivityCsv}
-                        disabled={bulkDownloading !== null}
+                        disabled={
+                          reason !== undefined ||
+                          bulkDownloading === "balance"
+                        }
                         className="no-print"
                         data-testid="export-csv-bs-all-activity"
+                        title={reason}
                       >
                         {bulkDownloading === "balance"
                           ? bulkProgressLabel()
                           : "Download all activity (CSV)"}
                       </Button>
-                    )}
+                    );
+                  })()}
                   <Button
                     type="button"
                     size="sm"
@@ -1755,6 +1857,31 @@ export default function ReportsPage() {
                   </Button>
                 </div>
               </div>
+              {bulkLastError?.card === "balance" && (
+                <Alert
+                  variant="destructive"
+                  className="mt-3 no-print"
+                  data-testid="bulk-error-notice-balance"
+                >
+                  <AlertDescription className="flex items-start justify-between gap-3">
+                    <span>
+                      Downloaded with {bulkLastError.failed} error
+                      {bulkLastError.failed === 1 ? "" : "s"}:{" "}
+                      {bulkLastError.failed} of {bulkLastError.total} accounts
+                      could not be fetched. The CSV contains ERROR rows for
+                      those accounts.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setBulkLastError(null)}
+                      className="shrink-0 underline text-xs"
+                      data-testid="bulk-error-notice-balance-dismiss"
+                    >
+                      Dismiss
+                    </button>
+                  </AlertDescription>
+                </Alert>
+              )}
             </CardHeader>
             <CardContent>
               <div className="grid gap-6 md:grid-cols-2">
@@ -1911,31 +2038,28 @@ export default function ReportsPage() {
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={downloadAllTrialBalanceActivityCsv}
-                      disabled={
-                        !tb ||
-                        tbLoading ||
-                        tb.rows.length === 0 ||
-                        bulkDownloading !== null
-                      }
-                      className="no-print"
-                      data-testid="export-csv-tb-all-activity"
-                      title={
-                        !tb || tbLoading
-                          ? "Loading Trial Balance…"
-                          : tb.rows.length === 0
-                            ? "No Trial Balance activity to export"
-                            : undefined
-                      }
-                    >
-                      {bulkDownloading === "trial-balance"
-                        ? bulkProgressLabel()
-                        : "Download all activity (CSV)"}
-                    </Button>
+                    {(() => {
+                      const reason = bulkDisabledReason("trial-balance");
+                      return (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={downloadAllTrialBalanceActivityCsv}
+                          disabled={
+                            reason !== undefined ||
+                            bulkDownloading === "trial-balance"
+                          }
+                          className="no-print"
+                          data-testid="export-csv-tb-all-activity"
+                          title={reason}
+                        >
+                          {bulkDownloading === "trial-balance"
+                            ? bulkProgressLabel()
+                            : "Download all activity (CSV)"}
+                        </Button>
+                      );
+                    })()}
                     <Button
                       type="button"
                       size="sm"
@@ -1948,6 +2072,31 @@ export default function ReportsPage() {
                     </Button>
                   </div>
                 </div>
+                {bulkLastError?.card === "trial-balance" && (
+                  <Alert
+                    variant="destructive"
+                    className="mt-3 no-print"
+                    data-testid="bulk-error-notice-trial-balance"
+                  >
+                    <AlertDescription className="flex items-start justify-between gap-3">
+                      <span>
+                        Downloaded with {bulkLastError.failed} error
+                        {bulkLastError.failed === 1 ? "" : "s"}:{" "}
+                        {bulkLastError.failed} of {bulkLastError.total}{" "}
+                        accounts could not be fetched. The CSV contains ERROR
+                        rows for those accounts.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setBulkLastError(null)}
+                        className="shrink-0 underline text-xs"
+                        data-testid="bulk-error-notice-trial-balance-dismiss"
+                      >
+                        Dismiss
+                      </button>
+                    </AlertDescription>
+                  </Alert>
+                )}
               </CardHeader>
               <CardContent>
                 {tbError && (
