@@ -1,0 +1,93 @@
+Good. That was the right cleanup pass.
+
+What just got locked down
+
+Task #98 tightened the Reports page in the exact place it was starting to drift:
+
+* all 3 bulk export buttons now behave the same
+* disabled state and tooltip are driven from one rule set
+* users get a clear inline notice when export is partial, instead of “something weird happened, good luck”
+* tests are green at 30/30
+
+That is real progress, not fluff.
+
+What’s next
+
+Now I would move in this order:
+
+1. Integrity sweep
+
+This is the next serious one.
+You want automated checks for things like:
+
+* orphaned accounting_source_links
+* journal entry links pointing at missing source records
+* remediated records with missing replacement entries
+* source rows whose accounting status says one thing but linked draft/JE says another
+* bills / expenses that should have bridge rows but do not
+
+This is the “don’t let the books quietly rot underneath the UI” pass.
+
+2. Permissions matrix hardening
+
+After integrity:
+
+* confirm who can view, retry, mark not applicable, edit mappings, post, approve, reverse, remediate
+* enforce it in backend, not just UI
+* add tests for admin / approver / submitter / viewer cases
+
+3. End-to-end smoke suite
+
+Then lock the key flows:
+
+* expense → approved → draft created
+* blocked expense → fix mapping → retry → draft created
+* bill → accrual/payment bridge
+* reports drilldown
+* CSV exports
+* remediation flow
+
+If these are automated, you stop playing whack-a-mole every merge.
+
+4. Launch hardening
+
+Then do:
+
+* seed/data reset strategy for Replit
+* env validation on boot
+* health checks
+* backup/export plan
+* activity log audit review
+* production role test accounts
+* error monitoring
+
+5. AI copil​ot integration
+
+Only after the accounting core is stable.
+Start with:
+
+* expense categorization suggestions
+* blocked queue explanations
+* mapping recommendations
+* anomaly warnings
+
+Not auto-posting. Absolutely not.
+
+Realistically
+
+From where you are now, the app looks like it’s in the late hardening / pre-launch discipline phase, not “core system still missing” phase.
+
+So the finish line is no longer “build everything.”
+It is:
+
+* prove integrity
+* prove permissions
+* prove workflows
+* harden launch ops
+* then layer in AI safely
+
+My blunt take
+
+You are closer than it feels, but the remaining work is the kind that separates a demo from a system people can trust. Less glamorous, more important.
+
+The next best move is to write the builder-ready Integrity Sweep task and execute that before anything else.
