@@ -24,41 +24,55 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const { mockTrialBalanceData, getAccountActivityReportMock } = vi.hoisted(
-  () => ({
-    mockTrialBalanceData: {
-      current: undefined as
-        | undefined
-        | {
-            fromDate: string | null;
-            toDate: string | null;
-            rows: Array<{
-              accountId: number | null;
-              code: string;
-              name: string;
-              type: string | null;
-              subtype: string | null;
-              normalBalance: "debit" | "credit";
-              isActive: boolean;
-              debits: string;
-              credits: string;
-              balance: string;
-              balanceSide: "debit" | "credit";
-            }>;
-            totals: {
-              debits: string;
-              credits: string;
-              balanced: boolean;
-              differenceCents: number;
-            };
-          },
-    },
-    getAccountActivityReportMock: vi.fn(async () => ({
-      lines: [],
-      totals: { debits: "0.00", credits: "0.00" },
-    })),
-  }),
-);
+const {
+  mockTrialBalanceData,
+  getAccountActivityReportMock,
+  mockSummaryOverride,
+  useGetAccountActivityReportImpl,
+} = vi.hoisted(() => ({
+  mockTrialBalanceData: {
+    current: undefined as
+      | undefined
+      | {
+          fromDate: string | null;
+          toDate: string | null;
+          rows: Array<{
+            accountId: number | null;
+            code: string;
+            name: string;
+            type: string | null;
+            subtype: string | null;
+            normalBalance: "debit" | "credit";
+            isActive: boolean;
+            debits: string;
+            credits: string;
+            balance: string;
+            balanceSide: "debit" | "credit";
+          }>;
+          totals: {
+            debits: string;
+            credits: string;
+            balanced: boolean;
+            differenceCents: number;
+          };
+        },
+  },
+  getAccountActivityReportMock: vi.fn(async () => ({
+    lines: [],
+    totals: { debits: "0.00", credits: "0.00" },
+  })),
+  mockSummaryOverride: { current: undefined as undefined | unknown },
+  useGetAccountActivityReportImpl: {
+    current: ((_args: unknown, _opts: unknown) => ({
+      data: undefined as unknown,
+      isLoading: false,
+      error: null,
+    })) as (
+      args: { accountId: number; from?: string; to: string },
+      opts?: { query?: { enabled?: boolean } },
+    ) => { data: unknown; isLoading: boolean; error: unknown },
+  },
+}));
 
 vi.mock("@workspace/api-client-react", () => {
   const noopQuery = () => ({
@@ -68,7 +82,13 @@ vi.mock("@workspace/api-client-react", () => {
   });
   return {
     useGetFinancialSummaryReport: () =>
-      mockTrialBalanceData.current
+      mockSummaryOverride.current
+        ? {
+            data: mockSummaryOverride.current,
+            isLoading: false,
+            error: null,
+          }
+        : mockTrialBalanceData.current
         ? {
             data: {
               generatedAt: new Date().toISOString(),
@@ -122,7 +142,10 @@ vi.mock("@workspace/api-client-react", () => {
       isLoading: false,
       error: null,
     }),
-    useGetAccountActivityReport: noopQuery,
+    useGetAccountActivityReport: (
+      args: { accountId: number; from?: string; to: string },
+      opts?: { query?: { enabled?: boolean } },
+    ) => useGetAccountActivityReportImpl.current(args, opts),
     useGetReconciliationReport: noopQuery,
     useListAccountingPeriods: noopQuery,
     useListJournalEntryDrafts: noopQuery,
@@ -518,5 +541,428 @@ describe("Reports page — partial date input regression (Task #65 / #75)", () =
       /must be on or before the .To. date/i,
     );
     assertNoInvalidTimeValue();
+  });
+});
+
+/**
+ * Task #86 — Bulk all-activity CSV per-account section equals per-account
+ * export, byte-for-byte.
+ *
+ * The "Download all activity (CSV)" buttons (P&L and Balance Sheet) fan out
+ * to the same /api/reports/account-activity endpoint that powers the
+ * existing per-account "Download CSV" buttons inside each drilldown, then
+ * concatenate the per-account sections into one workbook. If the bulk
+ * builder ever drifts (different field, different totals rounding, missing
+ * rows, off-by-one slicing) the audit-prep workbook would silently disagree
+ * with the per-account exports reviewers double-check against.
+ *
+ * These tests:
+ *   1. Render the Reports page with mocked summary data containing a
+ *      handful of P&L / Balance Sheet accounts.
+ *   2. Stub both `useGetAccountActivityReport` (drives the per-account
+ *      drilldown UI + its "Download CSV" button) and the imperative
+ *      `getAccountActivityReport` (drives the bulk fan-out) with a single
+ *      shared activity factory so both code paths see identical lines.
+ *   3. Click each per-account "Download CSV" button and capture the CSV
+ *      blob.
+ *   4. Click the bulk "Download all activity (CSV)" button and capture the
+ *      bulk CSV blob.
+ *   5. Slice each ACCOUNT section out of the bulk CSV and assert the
+ *      header + data rows + TOTALS row match the per-account CSV body
+ *      exactly (after stripping the per-account file's BOM and trailing
+ *      CRLF, which the bulk file does not include between sections).
+ *
+ * Covers the P&L bulk export (uses both `from` + `to`) and the Balance
+ * Sheet bulk export (uses `to` only — drilldowns are cumulative so the
+ * sections also use only `to`).
+ */
+describe("Bulk all-activity CSV equals per-account CSV (Task #86)", () => {
+  type ActivityLine = {
+    lineId: number;
+    journalEntryId: number;
+    entryDate: string;
+    entryNo: string;
+    entryMemo: string | null;
+    lineMemo: string | null;
+    program: string | null;
+    fund: string | null;
+    debit: number;
+    credit: number;
+  };
+  type ActivityReport = {
+    lines: ActivityLine[];
+    totals: { debits: number; credits: number };
+  };
+
+  // Deterministic activity-per-account factory shared by the per-account
+  // hook stub and the bulk fan-out function stub. Even-coded accounts net
+  // credit, odd-coded accounts net debit — so the rows include a mix of
+  // values, programs, funds, memos, and nullable fields. This catches any
+  // bulk-vs-per-account drift in field selection, ordering, csvMoney
+  // rounding, or null handling.
+  const activityFor = (accountId: number): ActivityReport => {
+    const debitSide = accountId % 2 === 1;
+    const lines: ActivityLine[] = [
+      {
+        lineId: accountId * 10 + 1,
+        journalEntryId: accountId * 100 + 1,
+        entryDate: "2025-03-15",
+        entryNo: `JE-${accountId}-A`,
+        entryMemo: `memo for ${accountId}`,
+        lineMemo: null,
+        program: "Programs",
+        fund: null,
+        debit: debitSide ? 250 : 0,
+        credit: debitSide ? 0 : 250,
+      },
+      {
+        lineId: accountId * 10 + 2,
+        journalEntryId: accountId * 100 + 2,
+        entryDate: "2025-03-20",
+        entryNo: `JE-${accountId}-B`,
+        entryMemo: null,
+        lineMemo: "qty 3, rate 25.17",
+        program: null,
+        fund: "General",
+        debit: debitSide ? 75.51 : 0,
+        credit: debitSide ? 0 : 75.51,
+      },
+    ];
+    const debits = lines.reduce((s, l) => s + l.debit, 0);
+    const credits = lines.reduce((s, l) => s + l.credit, 0);
+    return { lines, totals: { debits, credits } };
+  };
+
+  function makeSummary(opts: {
+    incomeByAccount: { accountId: number; code: string; name: string; amount: number }[];
+    expensesByAccount: { accountId: number; code: string; name: string; amount: number }[];
+    cashAccounts: { accountId: number; code: string; name: string; balance: number }[];
+    accountsReceivableAccounts: { accountId: number; code: string; name: string; balance: number }[];
+    otherAssetAccounts: { accountId: number; code: string; name: string; balance: number }[];
+    accountsPayableAccounts: { accountId: number; code: string; name: string; balance: number }[];
+    otherLiabilityAccounts: { accountId: number; code: string; name: string; balance: number }[];
+  }) {
+    return {
+      generatedAt: new Date().toISOString(),
+      fromDate: "2025-01-01",
+      toDate: "2025-12-31",
+      expenseTotalsByStatus: [],
+      billTotalsByStatus: [],
+      spendByProgram: [],
+      topVendors: [],
+      missingReceiptCount: 0,
+      missingReceiptAmount: 0,
+      missingReceipts: [],
+      bankReconciliation: {
+        accounts: [],
+        totals: { ledgerBalance: 0, statementBalance: 0, deltaCents: 0 },
+      },
+      profitAndLoss: {
+        totalIncome: opts.incomeByAccount.reduce((s, a) => s + a.amount, 0),
+        totalExpenses: opts.expensesByAccount.reduce((s, a) => s + a.amount, 0),
+        netIncome:
+          opts.incomeByAccount.reduce((s, a) => s + a.amount, 0) -
+          opts.expensesByAccount.reduce((s, a) => s + a.amount, 0),
+        incomeByProgram: [],
+        expensesByProgram: [],
+        uncategorizedIncome: 0,
+        uncategorizedExpenses: 0,
+        incomeByAccount: opts.incomeByAccount,
+        expensesByAccount: opts.expensesByAccount,
+      },
+      balanceSheet: {
+        cash: opts.cashAccounts.reduce((s, a) => s + a.balance, 0),
+        cashOnHand: 0,
+        accountsReceivable: opts.accountsReceivableAccounts.reduce(
+          (s, a) => s + a.balance,
+          0,
+        ),
+        otherAssets: opts.otherAssetAccounts.reduce((s, a) => s + a.balance, 0),
+        accountsPayable: opts.accountsPayableAccounts.reduce(
+          (s, a) => s + a.balance,
+          0,
+        ),
+        otherLiabilities: opts.otherLiabilityAccounts.reduce(
+          (s, a) => s + a.balance,
+          0,
+        ),
+        equity: 0,
+        totalAssets: 0,
+        totalLiabilities: 0,
+        cashAccounts: opts.cashAccounts,
+        accountsReceivableAccounts: opts.accountsReceivableAccounts,
+        otherAssetAccounts: opts.otherAssetAccounts,
+        accountsPayableAccounts: opts.accountsPayableAccounts,
+        otherLiabilityAccounts: opts.otherLiabilityAccounts,
+      },
+    };
+  }
+
+  // Splits a bulk CSV into a map of `code -> body string` where body is the
+  // per-account section's header + data rows + TOTALS row, joined by CRLF.
+  // The leading "ACCOUNT,<code>,<name>,group=..." marker row and the blank
+  // separator after the section are dropped — they only exist in the bulk
+  // file, not in per-account exports.
+  function extractBulkSections(bulkCsv: string): Record<string, string> {
+    const text = bulkCsv.replace(/^\uFEFF/, "").replace(/\r\n$/, "");
+    const lines = text.split("\r\n");
+    const out: Record<string, string> = {};
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^ACCOUNT,([^,]+),/);
+      if (!m) continue;
+      const code = m[1];
+      const body: string[] = [];
+      let j = i + 1;
+      while (j < lines.length && lines[j] !== "") {
+        body.push(lines[j]);
+        j++;
+      }
+      out[code] = body.join("\r\n");
+      i = j;
+    }
+    return out;
+  }
+
+  // Strip the per-account file's BOM + trailing CRLF so its body is in the
+  // exact same shape as a bulk section body.
+  function stripPerAccountWrapping(csv: string): string {
+    return csv.replace(/^\uFEFF/, "").replace(/\r\n$/, "");
+  }
+
+  let createdBlobs: Blob[];
+  let createObjectURLSpy: ReturnType<typeof vi.spyOn>;
+  let revokeObjectURLSpy: ReturnType<typeof vi.spyOn>;
+  let anchorClickSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    createdBlobs = [];
+    createObjectURLSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockImplementation((blob: Blob | MediaSource) => {
+        createdBlobs.push(blob as Blob);
+        return "blob:test";
+      });
+    revokeObjectURLSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    // Both the drilldown hook and the bulk fan-out function read from the
+    // same activity factory so any divergence we observe is the bulk
+    // builder's fault, not a mock-skew artifact.
+    useGetAccountActivityReportImpl.current = (args, opts) => {
+      const enabled = opts?.query?.enabled !== false;
+      return {
+        data: enabled ? activityFor(args.accountId) : undefined,
+        isLoading: false,
+        error: null,
+      };
+    };
+    getAccountActivityReportMock.mockReset();
+    getAccountActivityReportMock.mockImplementation(
+      async (args: { accountId: number }) => activityFor(args.accountId),
+    );
+  });
+
+  afterEach(() => {
+    anchorClickSpy.mockRestore();
+    revokeObjectURLSpy.mockRestore();
+    createObjectURLSpy.mockRestore();
+    mockSummaryOverride.current = undefined;
+    useGetAccountActivityReportImpl.current = () => ({
+      data: undefined,
+      isLoading: false,
+      error: null,
+    });
+    getAccountActivityReportMock.mockReset();
+    getAccountActivityReportMock.mockImplementation(async () => ({
+      lines: [],
+      totals: { debits: "0.00", credits: "0.00" },
+    }));
+  });
+
+  async function downloadAndCapture(testId: string): Promise<string> {
+    const startCount = createdBlobs.length;
+    fireEvent.click(screen.getByTestId(testId));
+    await waitFor(() => {
+      expect(createdBlobs.length).toBeGreaterThan(startCount);
+    });
+    return await createdBlobs[createdBlobs.length - 1].text();
+  }
+
+  it("P&L: bulk per-account sections are byte-equal to per-account CSV exports (uses from + to)", async () => {
+    const incomeByAccount = [
+      { accountId: 4000, code: "4000", name: "Program Income", amount: 250 },
+      { accountId: 4100, code: "4100", name: "Grants, restricted", amount: 250 },
+    ];
+    const expensesByAccount = [
+      { accountId: 5001, code: "5001", name: "Salaries", amount: 325.51 },
+      { accountId: 5003, code: "5003", name: "Rent & utilities", amount: 325.51 },
+    ];
+    mockSummaryOverride.current = makeSummary({
+      incomeByAccount,
+      expensesByAccount,
+      cashAccounts: [],
+      accountsReceivableAccounts: [],
+      otherAssetAccounts: [],
+      accountsPayableAccounts: [],
+      otherLiabilityAccounts: [],
+    });
+
+    render(<ReportsPage />);
+
+    // The bulk PL button (and per-account drilldown rows) only render when
+    // source === "ledger".
+    fireEvent.click(
+      screen.getByRole("button", { name: /general ledger/i }),
+    );
+
+    const allAccounts = [...incomeByAccount, ...expensesByAccount];
+
+    // Capture each per-account CSV by expanding the drilldown row and
+    // clicking its "Download CSV" button.
+    const perAccount: Record<string, string> = {};
+    for (const a of allAccounts) {
+      const parentSlug = incomeByAccount.includes(a) ? "pl-income" : "pl-expense";
+      fireEvent.click(
+        screen.getByTestId(`pl-row-toggle-${parentSlug}-${a.accountId}`),
+      );
+      const dlBtn = await screen.findByTestId(
+        `export-csv-pl-activity-${a.accountId}`,
+      );
+      const startCount = createdBlobs.length;
+      fireEvent.click(dlBtn);
+      await waitFor(() => {
+        expect(createdBlobs.length).toBeGreaterThan(startCount);
+      });
+      perAccount[a.code] = await createdBlobs[createdBlobs.length - 1].text();
+    }
+
+    // Bulk export.
+    const bulkCsv = await downloadAndCapture("export-csv-pl-all-activity");
+    const sections = extractBulkSections(bulkCsv);
+
+    // Sanity: bulk fan-out called exactly once per account with both
+    // `from` and `to` (P&L is period-bounded).
+    const bulkCalls = getAccountActivityReportMock.mock.calls.map(
+      (c) => c[0] as { accountId: number; from?: string; to: string },
+    );
+    expect(bulkCalls).toHaveLength(allAccounts.length);
+    for (const c of bulkCalls) {
+      expect(c.from).toBeTruthy();
+      expect(c.to).toBeTruthy();
+    }
+
+    // Per account: bulk section body must equal per-account CSV body.
+    for (const a of allAccounts) {
+      expect(sections[a.code]).toBeDefined();
+      expect(sections[a.code]).toBe(stripPerAccountWrapping(perAccount[a.code]));
+    }
+    expect(Object.keys(sections).sort()).toEqual(
+      allAccounts.map((a) => a.code).sort(),
+    );
+  });
+
+  it("Balance Sheet: bulk per-account sections are byte-equal to per-account CSV exports (uses to only)", async () => {
+    const cashAccounts = [
+      { accountId: 1001, code: "1001", name: "Operating Checking", balance: 325.51 },
+    ];
+    const accountsReceivableAccounts = [
+      { accountId: 1201, code: "1201", name: "Pledges receivable", balance: 325.51 },
+    ];
+    const otherAssetAccounts = [
+      { accountId: 1501, code: "1501", name: "Prepaid insurance", balance: 325.51 },
+    ];
+    const accountsPayableAccounts = [
+      { accountId: 2002, code: "2002", name: "Vendor A/P", balance: 250 },
+    ];
+    const otherLiabilityAccounts = [
+      { accountId: 2200, code: "2200", name: "Deferred revenue", balance: 250 },
+    ];
+    mockSummaryOverride.current = makeSummary({
+      incomeByAccount: [],
+      expensesByAccount: [],
+      cashAccounts,
+      accountsReceivableAccounts,
+      otherAssetAccounts,
+      accountsPayableAccounts,
+      otherLiabilityAccounts,
+    });
+
+    render(<ReportsPage />);
+    fireEvent.click(
+      screen.getByRole("button", { name: /general ledger/i }),
+    );
+
+    const groupSlugs: Array<{
+      slug: string;
+      list: { accountId: number; code: string; name: string; balance: number }[];
+    }> = [
+      { slug: "cash", list: cashAccounts },
+      { slug: "accounts-receivable", list: accountsReceivableAccounts },
+      { slug: "other-assets", list: otherAssetAccounts },
+      { slug: "accounts-payable", list: accountsPayableAccounts },
+      { slug: "other-liabilities", list: otherLiabilityAccounts },
+    ];
+    const allAccounts = groupSlugs.flatMap((g) => g.list);
+
+    // Each Balance Sheet group row must be expanded before its account
+    // children render. The group's testid is `bs-row-<slug>` and its
+    // children appear under `bs-account-toggle-<accountId>`.
+    const perAccount: Record<string, string> = {};
+    for (const g of groupSlugs) {
+      // Group toggles are rendered as <button aria-expanded ...>; walk the
+      // DOM by finding any account-toggle inside the group's accounts list.
+      for (const a of g.list) {
+        // Open the parent group.
+        const groupAccountsList = screen.queryByTestId(
+          `bs-row-${g.slug}-accounts`,
+        );
+        if (!groupAccountsList) {
+          // The `bs-row-<slug>` testid is on the group's toggle <button>
+          // itself (see ExpandableRow), so click it directly to expand the
+          // accounts list underneath.
+          fireEvent.click(screen.getByTestId(`bs-row-${g.slug}`));
+        }
+        const accountToggle = await screen.findByTestId(
+          `bs-account-toggle-${a.accountId}`,
+        );
+        fireEvent.click(accountToggle);
+        const dlBtn = await screen.findByTestId(
+          `export-csv-bs-activity-${a.accountId}`,
+        );
+        const startCount = createdBlobs.length;
+        fireEvent.click(dlBtn);
+        await waitFor(() => {
+          expect(createdBlobs.length).toBeGreaterThan(startCount);
+        });
+        perAccount[a.code] = await createdBlobs[createdBlobs.length - 1].text();
+      }
+    }
+
+    const bulkCsv = await downloadAndCapture("export-csv-bs-all-activity");
+    const sections = extractBulkSections(bulkCsv);
+
+    // Balance Sheet bulk export must use `to` only (no `from`) — drilldowns
+    // are cumulative-through-toDate so the listed lines net to the
+    // displayed balance.
+    const bulkCalls = getAccountActivityReportMock.mock.calls.map(
+      (c) => c[0] as { accountId: number; from?: string; to: string },
+    );
+    expect(bulkCalls).toHaveLength(allAccounts.length);
+    for (const c of bulkCalls) {
+      expect(c.from).toBeUndefined();
+      expect(c.to).toBeTruthy();
+    }
+
+    for (const a of allAccounts) {
+      expect(sections[a.code]).toBeDefined();
+      expect(sections[a.code]).toBe(stripPerAccountWrapping(perAccount[a.code]));
+    }
+    expect(Object.keys(sections).sort()).toEqual(
+      allAccounts.map((a) => a.code).sort(),
+    );
   });
 });
