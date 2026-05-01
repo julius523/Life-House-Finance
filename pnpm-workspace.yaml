@@ -44,6 +44,9 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  '@tootallnate/once': '^3.0.0'
+  brace-expansion: '^2.0.3'
+  yaml: '^2.8.3'
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'
