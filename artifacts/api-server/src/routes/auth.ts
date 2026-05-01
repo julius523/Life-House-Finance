@@ -9,6 +9,7 @@ import {
   setSessionCookie,
   toAuthUser,
 } from "../lib/auth";
+import { isAllowedOrigin } from "../lib/cors";
 
 const router: IRouter = Router();
 
@@ -18,6 +19,11 @@ const LoginBody = z.object({
 });
 
 router.post("/auth/login", async (req, res): Promise<void> => {
+  const origin = req.headers["origin"] as string | undefined;
+  if (origin !== undefined && !isAllowedOrigin(origin)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
   const parsed = LoginBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid email or password" });
