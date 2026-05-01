@@ -71,13 +71,20 @@ export type CopilotRole = AuthUser["role"];
 export const TOOL_ROLE_SCOPES: Readonly<Record<string, ReadonlyArray<CopilotRole>>> = {
   // Read-only tools — available to every authenticated finance-portal role.
   get_current_page_context: ["admin", "approver", "submitter"],
-  get_current_record: ["admin", "approver", "submitter"],
+  // Privileged record lookup: submitters are restricted to their own records via
+  // the UI and must not be able to fetch arbitrary records through the copilot.
+  get_current_record: ["admin", "approver"],
   get_accounting_dimensions: ["admin", "approver", "submitter"],
-  get_open_tasks: ["admin", "approver", "submitter"],
-  get_missing_receipts: ["admin", "approver", "submitter"],
-  get_reconciliation_status: ["admin", "approver", "submitter"],
+  // Open-tasks, missing-receipts, and reconciliation status expose org-wide
+  // accounting operations data that is gated behind the reports and month-end
+  // screens — which submitters cannot access. Keep these admin/approver only.
+  get_open_tasks: ["admin", "approver"],
+  get_missing_receipts: ["admin", "approver"],
+  get_reconciliation_status: ["admin", "approver"],
   search_chart_of_accounts: ["admin", "approver", "submitter"],
-  search_internal_policies: ["admin", "approver", "submitter"],
+  // Internal policy documents are admin-managed; searching them is likewise
+  // restricted to admin and approver to match the document ingestion boundary.
+  search_internal_policies: ["admin", "approver"],
 
   // Drafting tools — restricted by role per the Step 7 access matrix.
   // Memos are documentation; any staff member may propose one.
