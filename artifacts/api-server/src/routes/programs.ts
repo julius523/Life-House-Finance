@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { requireRole } from "../lib/auth";
+import { isPrivilegedRead } from "../lib/recordAuthz";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { programsTable, programContactsTable, expensesTable, billsTable } from "@workspace/db";
@@ -54,6 +55,22 @@ function formatProgram(p: typeof programsTable.$inferSelect, totalSpend: number,
   };
 }
 
+/**
+ * Task #107 — submitters need program ID/name/type to fill in the bill
+ * and expense forms (the program picker), but they should NOT see
+ * budgets, codes, descriptions, or org-wide spend. Picker-safe shape
+ * for submitters; admins/approvers still get the full payload.
+ */
+function formatProgramRedacted(p: typeof programsTable.$inferSelect) {
+  return {
+    id: p.id,
+    name: p.name,
+    type: p.type as "program" | "grant" | "fund" | "site" | "department",
+    isActive: p.isActive,
+    createdAt: p.createdAt.toISOString(),
+  };
+}
+
 router.get("/programs", async (req, res): Promise<void> => {
   const parsed = ListProgramsQueryParams.safeParse(req.query);
   if (!parsed.success) {
@@ -65,6 +82,13 @@ router.get("/programs", async (req, res): Promise<void> => {
   const programs = type
     ? await db.select().from(programsTable).where(eq(programsTable.type, type))
     : await db.select().from(programsTable);
+
+  if (!isPrivilegedRead(req)) {
+    // Submitter — picker-safe shape only. Skip the per-program totals
+    // round trips so submitters cannot infer org-wide spend.
+    res.json(ListProgramsResponse.parse(programs.map(formatProgramRedacted)));
+    return;
+  }
 
   const items = await Promise.all(
     programs.map(async (p) => {
@@ -118,6 +142,10 @@ router.get("/programs/:id", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Not found" });
     return;
   }
+  if (!isPrivilegedRead(req)) {
+    res.json(GetProgramResponse.parse(formatProgramRedacted(program)));
+    return;
+  }
   const { totalSpend } = await getProgramTotals(program.id);
   const budget = program.budgetAmount ? parseFloat(program.budgetAmount) : undefined;
   const percentUsed = budget && budget > 0 ? (totalSpend / budget) * 100 : undefined;
@@ -160,7 +188,10 @@ router.put("/programs/:id", requireRole("admin", "approver"), async (req, res): 
   res.json(UpdateProgramResponse.parse(formatProgram(program, totalSpend, percentUsed)));
 });
 
-router.get("/programs/:id/spending", async (req, res): Promise<void> => {
+// Task #107 — program spending exposes budget vs. actual spend, monthly
+// rollups, and cross-record counts. This is a management report and
+// must not be visible to submitters.
+router.get("/programs/:id/spending", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const idParsed = GetProgramSpendingParams.safeParse({ id: Number(req.params["id"]) });
   if (!idParsed.success) {
     res.status(400).json({ error: "Invalid id" });
@@ -265,7 +296,10 @@ function formatProgramContact(c: typeof programContactsTable.$inferSelect) {
   };
 }
 
-router.get("/programs/:id/contacts", async (req, res): Promise<void> => {
+// Task #107 — program contacts include email/phone PII. Reads, like
+// writes, are restricted to admin/approver. Submitters do not need to
+// see contact details to file bills/expenses.
+router.get("/programs/:id/contacts", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isInteger(id)) {
     res.status(400).json({ error: "Invalid id" });

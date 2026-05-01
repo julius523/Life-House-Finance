@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { expensesTable, billsTable, transactionsTable, vendorsTable, programsTable, activityLogTable } from "@workspace/db";
 import { sql, eq, and, gte, lte, count } from "drizzle-orm";
+import { requireRole } from "../lib/auth";
 import {
   GetDashboardSummaryResponse,
   GetRecentActivityResponse,
@@ -11,6 +12,16 @@ import {
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
+// Task #107 — every endpoint in this router exposes org-wide finance
+// data: cash balance, monthly burn rate, totals across all submitters,
+// activity log entries that reveal who paid whom, and budget vs.
+// actual spend per program. None of that should be visible to a
+// submitter. The frontend already routes submitters to a separate
+// `SubmitterDashboard` that does not call any of these endpoints, so
+// gating the entire router to admin/approver matches the UX and
+// closes the residual broken-access-control surface.
+router.use(requireRole("admin", "approver"));
 
 router.get("/dashboard/summary", async (_req, res): Promise<void> => {
   const now = new Date();

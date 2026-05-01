@@ -167,3 +167,24 @@ export function isMutableExpenseStatus(status: string): boolean {
 export function isMutableBillStatus(status: string): boolean {
   return MUTABLE_BILL_STATUSES.has(status as BillStatus);
 }
+
+/**
+ * Task #107 — privileged READ check used by GET /vendors and
+ * GET /programs to decide whether to return the full record or a
+ * picker-safe redacted shape.
+ *
+ * Submitters need to see vendor/program names so they can pick one
+ * when filing an expense or bill, but they must not see PII (email,
+ * phone, taxId, paymentTerms) or org-wide financial data (budgets,
+ * totalSpend, percentUsed). Admins and approvers see everything.
+ *
+ * Centralized here (rather than duplicated per route) so the rule
+ * stays consistent if we ever expand it (e.g., adding a finance-only
+ * "viewer" role or honoring an audit-mode override).
+ */
+export function isPrivilegedRead(req: {
+  authUser?: { role?: string } | undefined;
+}): boolean {
+  const role = req.authUser?.role;
+  return role === "admin" || role === "approver";
+}

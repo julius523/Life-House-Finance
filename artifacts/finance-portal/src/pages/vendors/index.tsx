@@ -360,7 +360,11 @@ export default function VendorsList() {
                         )}
                       </div>
                     </div>
-                    {isOpen && (
+                    {isOpen && canManage && (
+                      // Task #107 — vendor contact PII (email/phone) is
+                      // now admin/approver only on the server. Hide the
+                      // expandable contact panel for submitters so we
+                      // don't render a section that would 403.
                       <div className="px-6 pb-6 border-t bg-muted/20">
                         <div className="pt-4">
                           <ContactList parentId={vendor.id} kind="vendor" />

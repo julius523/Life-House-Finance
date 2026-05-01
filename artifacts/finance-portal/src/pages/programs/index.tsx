@@ -312,7 +312,9 @@ export default function ProgramsList() {
                         </Button>
                       )}
                     </div>
-                    {isOpen && (
+                    {isOpen && canManage && (
+                      // Task #107 — program contact PII is admin/approver
+                      // only on the server. Hide for submitters.
                       <div className="pt-2 border-t">
                         <ContactList parentId={program.id} kind="program" />
                       </div>

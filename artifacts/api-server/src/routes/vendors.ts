@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { requireRole } from "../lib/auth";
+import { isPrivilegedRead } from "../lib/recordAuthz";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { vendorsTable, vendorContactsTable, billsTable, expensesTable } from "@workspace/db";
@@ -42,6 +43,22 @@ function formatVendor(v: typeof vendorsTable.$inferSelect, totalSpend?: number) 
   };
 }
 
+/**
+ * Task #107 — submitters need vendor IDs/names to fill in the bill and
+ * expense forms (the vendor picker), but they should NOT see vendor
+ * PII (email, phone, address), tax ID, payment terms, or org-wide
+ * spend. Return the picker-safe shape for submitters; admins/approvers
+ * still get the full payload.
+ */
+function formatVendorRedacted(v: typeof vendorsTable.$inferSelect) {
+  return {
+    id: v.id,
+    name: v.name,
+    isActive: v.isActive,
+    createdAt: v.createdAt.toISOString(),
+  };
+}
+
 router.get("/vendors", async (req, res): Promise<void> => {
   const parsed = ListVendorsQueryParams.safeParse(req.query);
   if (!parsed.success) {
@@ -53,6 +70,13 @@ router.get("/vendors", async (req, res): Promise<void> => {
   const vendors = search
     ? await db.select().from(vendorsTable).where(ilike(vendorsTable.name, `%${search}%`))
     : await db.select().from(vendorsTable);
+
+  if (!isPrivilegedRead(req)) {
+    // Submitter — picker-safe shape only. Skip the per-vendor totalSpend
+    // round trips entirely so submitters cannot infer org-wide spend.
+    res.json(ListVendorsResponse.parse(vendors.map(formatVendorRedacted)));
+    return;
+  }
 
   const items = await Promise.all(
     vendors.map(async (v) => {
@@ -90,6 +114,12 @@ router.get("/vendors/:id", async (req, res): Promise<void> => {
   const [vendor] = await db.select().from(vendorsTable).where(eq(vendorsTable.id, parsed.data.id));
   if (!vendor) {
     res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (!isPrivilegedRead(req)) {
+    // Picker-safe shape — no contact PII, tax ID, payment terms, or
+    // org-wide spend leak to a submitter who happens to know an id.
+    res.json(GetVendorResponse.parse(formatVendorRedacted(vendor)));
     return;
   }
   const totalSpend = await getVendorTotalSpend(vendor.id);
@@ -175,7 +205,10 @@ function formatContact(c: typeof vendorContactsTable.$inferSelect) {
   };
 }
 
-router.get("/vendors/:id/contacts", async (req, res): Promise<void> => {
+// Task #107 — vendor contacts include email/phone PII. Reads, like
+// writes, are restricted to admin/approver. Submitters do not need to
+// see contact details to file bills/expenses.
+router.get("/vendors/:id/contacts", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isInteger(id)) {
     res.status(400).json({ error: "Invalid id" });

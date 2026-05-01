@@ -59,6 +59,7 @@ import vendorsRouter from "../../routes/vendors";
 import programsRouter from "../../routes/programs";
 import approvalsRouter from "../../routes/approvals";
 import reportsRouter from "../../routes/reports";
+import dashboardRouter from "../../routes/dashboard";
 
 const TAG = `t107-${process.pid}-${Date.now()}`;
 
@@ -147,11 +148,14 @@ before(async () => {
       status: "active",
     })
     .returning();
+  // GetProgramResponse enforces type ∈ {program, grant, fund, site,
+  // department} so the submitter-redacted list parser would 500 if we
+  // seeded an invalid type — match the API contract here.
   const [program] = await db
     .insert(programsTable)
     .values({
       name: `${TAG}-program`,
-      type: "service",
+      type: "grant",
       status: "active",
     })
     .returning();
@@ -323,6 +327,7 @@ before(async () => {
   app.use("/api", programsRouter);
   app.use("/api", approvalsRouter);
   app.use("/api", reportsRouter);
+  app.use("/api", dashboardRouter);
 
   await new Promise<void>((resolve) => {
     server = createServer(app);
@@ -910,7 +915,189 @@ test("PUT /programs/:id: submitter is forbidden", async () => {
   assert.equal(res.status, 403);
 });
 
-// ---------- 4. Residual cross-record exposure routes (post code-review) ----------
+// ---------- 4a. Master-data READ scoping for submitters ----------
+//
+// Vendor/program writes are restricted, but the original task also calls
+// out unauthorized READ exposure of vendor PII (email/phone/address/tax
+// ID/payment terms), payment relationships, and program budgets. For
+// submitters we now return a picker-safe shape (id/name/type/isActive
+// only) and we lock down contact-list reads + program spending.
+
+test("GET /vendors: submitter sees picker-safe shape only (no PII / spend)", async () => {
+  // Seed a vendor with full PII so we can prove it's redacted.
+  const [v] = await db
+    .insert(vendorsTable)
+    .values({
+      name: `${TAG}-pii-vendor`,
+      email: "leak@vendor.test",
+      phone: "555-LEAK",
+      address: "1 Leaky Lane",
+      category: "service",
+      taxId: "12-3456789",
+      paymentTerms: "Net 30",
+      type: "service",
+      status: "active",
+    })
+    .returning();
+  const vid = v!.id;
+  try {
+    const res = await fetch(`${baseUrl}/vendors`, {
+      headers: { cookie: cookieFor(submitterAId) },
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Array<Record<string, unknown>>;
+    const row = body.find((r) => r["id"] === vid);
+    assert.ok(row, "submitter list should include the vendor");
+    // Sensitive fields must NOT be present.
+    assert.equal(row!["email"], undefined);
+    assert.equal(row!["phone"], undefined);
+    assert.equal(row!["address"], undefined);
+    assert.equal(row!["taxId"], undefined);
+    assert.equal(row!["paymentTerms"], undefined);
+    assert.equal(row!["totalSpend"], undefined);
+    // Picker basics still present.
+    assert.equal(row!["name"], `${TAG}-pii-vendor`);
+  } finally {
+    await db.delete(vendorsTable).where(eq(vendorsTable.id, vid));
+  }
+});
+
+test("GET /vendors/:id: submitter sees picker-safe shape only", async () => {
+  const [v] = await db
+    .insert(vendorsTable)
+    .values({
+      name: `${TAG}-pii-vendor-detail`,
+      email: "leak2@vendor.test",
+      taxId: "98-7654321",
+      type: "service",
+      status: "active",
+    })
+    .returning();
+  const vid = v!.id;
+  try {
+    const subRes = await fetch(`${baseUrl}/vendors/${vid}`, {
+      headers: { cookie: cookieFor(submitterAId) },
+    });
+    assert.equal(subRes.status, 200);
+    const subBody = (await subRes.json()) as Record<string, unknown>;
+    assert.equal(subBody["email"], undefined);
+    assert.equal(subBody["taxId"], undefined);
+    assert.equal(subBody["totalSpend"], undefined);
+
+    // Admin still gets the full payload — proves the redaction is
+    // role-conditional, not a blanket schema change.
+    const adminRes = await fetch(`${baseUrl}/vendors/${vid}`, {
+      headers: { cookie: cookieFor(adminId) },
+    });
+    assert.equal(adminRes.status, 200);
+    const adminBody = (await adminRes.json()) as Record<string, unknown>;
+    assert.equal(adminBody["email"], "leak2@vendor.test");
+    assert.equal(adminBody["taxId"], "98-7654321");
+  } finally {
+    await db.delete(vendorsTable).where(eq(vendorsTable.id, vid));
+  }
+});
+
+test("GET /vendors/:id/contacts: submitter forbidden, admin allowed", async () => {
+  const subRes = await fetch(`${baseUrl}/vendors/${vendorId}/contacts`, {
+    headers: { cookie: cookieFor(submitterAId) },
+  });
+  assert.equal(subRes.status, 403);
+  const adminRes = await fetch(`${baseUrl}/vendors/${vendorId}/contacts`, {
+    headers: { cookie: cookieFor(adminId) },
+  });
+  assert.equal(adminRes.status, 200);
+});
+
+test("GET /programs: submitter sees picker-safe shape only (no budget/spend)", async () => {
+  const [p] = await db
+    .insert(programsTable)
+    .values({
+      name: `${TAG}-secret-program`,
+      description: "internal description should not leak",
+      code: "PROG-X",
+      budgetAmount: "50000.00",
+      fiscalYear: "2024-2025",
+      type: "grant",
+      status: "active",
+    })
+    .returning();
+  const pid = p!.id;
+  try {
+    const res = await fetch(`${baseUrl}/programs`, {
+      headers: { cookie: cookieFor(submitterAId) },
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Array<Record<string, unknown>>;
+    const row = body.find((r) => r["id"] === pid);
+    assert.ok(row, "submitter list should include the program");
+    assert.equal(row!["description"], undefined);
+    assert.equal(row!["code"], undefined);
+    assert.equal(row!["budgetAmount"], undefined);
+    assert.equal(row!["fiscalYear"], undefined);
+    assert.equal(row!["totalSpend"], undefined);
+    assert.equal(row!["percentUsed"], undefined);
+    assert.equal(row!["name"], `${TAG}-secret-program`);
+    assert.equal(row!["type"], "grant");
+  } finally {
+    await db.delete(programsTable).where(eq(programsTable.id, pid));
+  }
+});
+
+test("GET /programs/:id: submitter sees picker-safe shape, admin sees full", async () => {
+  const [p] = await db
+    .insert(programsTable)
+    .values({
+      name: `${TAG}-secret-detail`,
+      budgetAmount: "12345.67",
+      type: "grant",
+      status: "active",
+    })
+    .returning();
+  const pid = p!.id;
+  try {
+    const subRes = await fetch(`${baseUrl}/programs/${pid}`, {
+      headers: { cookie: cookieFor(submitterAId) },
+    });
+    assert.equal(subRes.status, 200);
+    const subBody = (await subRes.json()) as Record<string, unknown>;
+    assert.equal(subBody["budgetAmount"], undefined);
+    assert.equal(subBody["totalSpend"], undefined);
+
+    const adminRes = await fetch(`${baseUrl}/programs/${pid}`, {
+      headers: { cookie: cookieFor(adminId) },
+    });
+    assert.equal(adminRes.status, 200);
+    const adminBody = (await adminRes.json()) as Record<string, unknown>;
+    assert.equal(adminBody["budgetAmount"], 12345.67);
+  } finally {
+    await db.delete(programsTable).where(eq(programsTable.id, pid));
+  }
+});
+
+test("GET /programs/:id/spending: submitter forbidden, approver allowed", async () => {
+  const subRes = await fetch(`${baseUrl}/programs/${programId}/spending`, {
+    headers: { cookie: cookieFor(submitterAId) },
+  });
+  assert.equal(subRes.status, 403);
+  const apRes = await fetch(`${baseUrl}/programs/${programId}/spending`, {
+    headers: { cookie: cookieFor(approverId) },
+  });
+  assert.equal(apRes.status, 200);
+});
+
+test("GET /programs/:id/contacts: submitter forbidden, admin allowed", async () => {
+  const subRes = await fetch(`${baseUrl}/programs/${programId}/contacts`, {
+    headers: { cookie: cookieFor(submitterAId) },
+  });
+  assert.equal(subRes.status, 403);
+  const adminRes = await fetch(`${baseUrl}/programs/${programId}/contacts`, {
+    headers: { cookie: cookieFor(adminId) },
+  });
+  assert.equal(adminRes.status, 200);
+});
+
+// ---------- 4b. Residual cross-record exposure routes (post code-review) ----------
 //
 // /approvals exposes org-wide submitted expense+bill metadata, and
 // /reports/* exposes org-wide P&L / missing-receipts itemization. These
@@ -928,6 +1115,52 @@ test("GET /approvals: submitter forbidden, approver allowed", async () => {
     headers: { cookie: cookieFor(approverId) },
   });
   assert.equal(apRes.status, 200);
+});
+
+test("GET /dashboard/summary: submitter forbidden, admin allowed", async () => {
+  const subRes = await fetch(`${baseUrl}/dashboard/summary`, {
+    headers: { cookie: cookieFor(submitterAId) },
+  });
+  assert.equal(subRes.status, 403);
+  const adminRes = await fetch(`${baseUrl}/dashboard/summary`, {
+    headers: { cookie: cookieFor(adminId) },
+  });
+  assert.equal(adminRes.status, 200);
+});
+
+test("GET /dashboard/recent-activity: submitter forbidden, approver allowed", async () => {
+  const subRes = await fetch(`${baseUrl}/dashboard/recent-activity`, {
+    headers: { cookie: cookieFor(submitterAId) },
+  });
+  assert.equal(subRes.status, 403);
+  const apRes = await fetch(`${baseUrl}/dashboard/recent-activity`, {
+    headers: { cookie: cookieFor(approverId) },
+  });
+  assert.equal(apRes.status, 200);
+});
+
+test("GET /dashboard/spending-by-program: submitter forbidden", async () => {
+  const subRes = await fetch(`${baseUrl}/dashboard/spending-by-program`, {
+    headers: { cookie: cookieFor(submitterAId) },
+  });
+  assert.equal(subRes.status, 403);
+});
+
+test("GET /dashboard/pending-approvals-count: submitter forbidden", async () => {
+  const subRes = await fetch(`${baseUrl}/dashboard/pending-approvals-count`, {
+    headers: { cookie: cookieFor(submitterAId) },
+  });
+  assert.equal(subRes.status, 403);
+});
+
+test("isPrivilegedRead: admin and approver true, submitter false, missing user false", async () => {
+  const { isPrivilegedRead } = await import("../recordAuthz");
+  assert.equal(isPrivilegedRead({ authUser: { role: "admin" } }), true);
+  assert.equal(isPrivilegedRead({ authUser: { role: "approver" } }), true);
+  assert.equal(isPrivilegedRead({ authUser: { role: "submitter" } }), false);
+  assert.equal(isPrivilegedRead({ authUser: { role: undefined } }), false);
+  assert.equal(isPrivilegedRead({ authUser: undefined }), false);
+  assert.equal(isPrivilegedRead({}), false);
 });
 
 test("GET /reports/financial-summary: submitter forbidden, admin allowed", async () => {
