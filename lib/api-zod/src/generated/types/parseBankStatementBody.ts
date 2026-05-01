@@ -8,7 +8,7 @@
 import type { ParseBankStatementBodyDefaultPaymentMethod } from "./parseBankStatementBodyDefaultPaymentMethod";
 
 export interface ParseBankStatementBody {
-  /** objectPath of the uploaded statement (PDF, image, or CSV/text) */
+  /** objectPath of the uploaded statement (PDF, image, or CSV/text). Must be an object that was uploaded by the calling user (or the caller must be an admin). The server enforces ownership — supplying another user's object path results in a 403 Forbidden response. */
   objectPath: string;
   fileName: string;
   contentType: string;

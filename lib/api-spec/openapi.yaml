@@ -4548,6 +4548,11 @@ components:
           type: string
         fileUrl:
           type: string
+          description: >-
+            Private object path returned by POST /storage/uploads/request-url.
+            The server enforces ownership: the value must reference an object
+            uploaded by the calling user (or the caller must be an admin).
+            Supplying another user's object path results in a 403 Forbidden response.
         ocrText:
           type: string
         vendorId:
@@ -4975,7 +4980,11 @@ components:
       properties:
         objectPath:
           type: string
-          description: objectPath of the uploaded statement (PDF, image, or CSV/text)
+          description: >-
+            objectPath of the uploaded statement (PDF, image, or CSV/text).
+            Must be an object that was uploaded by the calling user (or the
+            caller must be an admin). The server enforces ownership — supplying
+            another user's object path results in a 403 Forbidden response.
         fileName:
           type: string
         contentType:

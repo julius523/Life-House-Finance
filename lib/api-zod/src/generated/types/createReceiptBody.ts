@@ -9,6 +9,7 @@
 export interface CreateReceiptBody {
   fileName: string;
   fileType?: string;
+  /** Private object path returned by POST /storage/uploads/request-url. The server enforces ownership: the value must reference an object uploaded by the calling user (or the caller must be an admin). Supplying another user's object path results in a 403 Forbidden response. */
   fileUrl?: string;
   ocrText?: string;
   vendorId?: number;

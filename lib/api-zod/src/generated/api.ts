@@ -1623,7 +1623,12 @@ export const ListReceiptsResponse = zod.object({
 export const CreateReceiptBody = zod.object({
   fileName: zod.string(),
   fileType: zod.string().optional(),
-  fileUrl: zod.string().optional(),
+  fileUrl: zod
+    .string()
+    .optional()
+    .describe(
+      "Private object path returned by POST \/storage\/uploads\/request-url. The server enforces ownership: the value must reference an object uploaded by the calling user (or the caller must be an admin). Supplying another user's object path results in a 403 Forbidden response.",
+    ),
   ocrText: zod.string().optional(),
   vendorId: zod.number().optional(),
   amount: zod.number().optional(),
@@ -2278,7 +2283,7 @@ export const ParseBankStatementBody = zod.object({
   objectPath: zod
     .string()
     .describe(
-      "objectPath of the uploaded statement (PDF, image, or CSV\/text)",
+      "objectPath of the uploaded statement (PDF, image, or CSV\/text). Must be an object that was uploaded by the calling user (or the caller must be an admin). The server enforces ownership — supplying another user's object path results in a 403 Forbidden response.",
     ),
   fileName: zod.string(),
   contentType: zod.string(),
