@@ -8,6 +8,7 @@ import {
 } from "@workspace/api-zod";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { canConsumeUpload } from "../lib/objectAuthz";
+import { requireRole } from "../lib/auth";
 import { z } from "zod";
 
 const router: IRouter = Router();
@@ -42,7 +43,10 @@ Rules:
 - "merchant" is the cleaned up vendor or payer name when one is identifiable (e.g. "STARBUCKS #1234 SEATTLE WA" -> "Starbucks"). If unclear, omit.
 - Do not include any text outside the JSON object.`;
 
-router.post("/ai/parse-bank-statement", async (req, res): Promise<void> => {
+router.post(
+  "/ai/parse-bank-statement",
+  requireRole("admin", "approver"),
+  async (req, res): Promise<void> => {
   // Authn + authz BEFORE the AI-availability check so unauthorized callers
   // receive a deterministic 401/403 regardless of whether OpenAI is wired
   // up. (Otherwise a misconfigured server would mask the security gate
@@ -174,7 +178,7 @@ router.post("/ai/parse-bank-statement", async (req, res): Promise<void> => {
     await db.insert(activityLogTable).values({
       type: "transaction_imported",
       description: `${inserted.length} transaction${inserted.length === 1 ? "" : "s"} imported from ${data.fileName}`,
-      actor: data.submittedBy,
+      actor: user.email,
       amount: String(Math.abs(total).toFixed(2)),
       referenceType: "transaction",
     });
