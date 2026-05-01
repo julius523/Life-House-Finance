@@ -35,7 +35,7 @@ import {
   type CopilotMessageSourceRow,
   type AgentActionRow,
 } from "@workspace/db";
-import { requireAuth } from "../lib/auth";
+import { requireAuth, requireRole } from "../lib/auth";
 import { generateDraftFromExpense } from "../lib/expenseDraftService";
 import {
   generateAccrualDraftFromBill,
@@ -1329,6 +1329,13 @@ function canApproveAgentAction(
 router.get("/accounting/agent-actions", async (req, res): Promise<void> => {
   const status = String(req.query["status"] ?? "pending_review");
   const mineParam = String(req.query["mine"] ?? "false") === "true";
+  if (!mineParam) {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+  }
   const conds = [eq(agentActionsTable.status, status)];
   if (mineParam) {
     conds.push(eq(agentActionsTable.userId, req.authUser!.id));
@@ -1405,6 +1412,13 @@ router.get("/accounting/agent-actions/:id", async (req, res): Promise<void> => {
   if (!row) {
     res.status(404).json({ error: "Agent action not found" });
     return;
+  }
+  if (row.userId !== req.authUser!.id) {
+    const role = req.authUser?.role;
+    if (role !== "admin" && role !== "approver") {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
   }
   const userIds = [row.userId, ...(row.reviewedBy ? [row.reviewedBy] : [])];
   const [users, sources] = await Promise.all([
@@ -1589,12 +1603,14 @@ async function reviewAgentAction(
 
 router.post(
   "/accounting/agent-actions/:id/approve",
+  requireRole("admin", "approver"),
   async (req, res): Promise<void> => {
     await reviewAgentAction(req, res, "approved");
   },
 );
 router.post(
   "/accounting/agent-actions/:id/reject",
+  requireRole("admin", "approver"),
   async (req, res): Promise<void> => {
     await reviewAgentAction(req, res, "rejected");
   },

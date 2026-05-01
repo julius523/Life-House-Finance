@@ -282,7 +282,7 @@ const QuerySchema = z
     toDate: d.toDate ?? d.to,
   }));
 
-router.get("/reports/financial-summary", async (req, res): Promise<void> => {
+router.get("/reports/financial-summary", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const parsed = QuerySchema.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid date range", details: parsed.error.format() });
@@ -795,7 +795,7 @@ const AccountActivityQuery = z.object({
   toDate: d.toDate ?? d.to,
 }));
 
-router.get("/reports/account-activity", async (req, res): Promise<void> => {
+router.get("/reports/account-activity", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const parsed = AccountActivityQuery.safeParse(req.query);
   if (!parsed.success) {
     res

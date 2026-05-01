@@ -11,8 +11,11 @@ import {
   UpdateMonthEndChecklistBody,
   UpdateMonthEndChecklistResponse,
 } from "@workspace/api-zod";
+import { requireRole } from "../lib/auth";
 
 const router: IRouter = Router();
+
+router.use("/month-end", requireRole("admin", "approver"));
 
 const DEFAULT_CHECKLIST_ITEMS = [
   { label: "Review all submitted expenses", category: "Expenses", isCompleted: false },
