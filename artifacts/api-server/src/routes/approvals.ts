@@ -6,10 +6,16 @@ import {
   ListApprovalsQueryParams,
   ListApprovalsResponse,
 } from "@workspace/api-zod";
+import { requireRole } from "../lib/auth";
 
 const router: IRouter = Router();
 
-router.get("/approvals", async (req, res): Promise<void> => {
+// Task #107 — the approvals queue exposes org-wide submitted expense
+// and bill metadata (description, amount, submitter, program). Without
+// this guard, any authenticated submitter could enumerate org-wide
+// finance records via /api/approvals, bypassing the per-record
+// ownership scoping we now apply on /expenses and /bills.
+router.get("/approvals", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const parsed = ListApprovalsQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid query params" });

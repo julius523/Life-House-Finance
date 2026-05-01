@@ -107,13 +107,19 @@ export default function VendorsList() {
             Manage your vendor directory and track total spend.
           </p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
-              <Plus className="mr-2 h-4 w-4" />
-              New Vendor
-            </Button>
-          </DialogTrigger>
+        {/* Task #107 — submitters cannot create vendors; the API now
+            returns 403 for non-admin/approver POSTs, so we hide the
+            entry point entirely to avoid showing a button that always
+            fails. */}
+        <Dialog open={canManage && open} onOpenChange={canManage ? setOpen : undefined}>
+          {canManage && (
+            <DialogTrigger asChild>
+              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
+                <Plus className="mr-2 h-4 w-4" />
+                New Vendor
+              </Button>
+            </DialogTrigger>
+          )}
           <DialogContent className="sm:max-w-[500px]">
             <DialogHeader>
               <DialogTitle>Create Vendor</DialogTitle>
@@ -372,9 +378,11 @@ export default function VendorsList() {
                 title="No vendors found"
                 description={search ? `No vendors matching "${search}"` : "Your vendor directory is empty."}
                 action={
-                  <Button variant="outline" onClick={() => setOpen(true)}>
-                    <Plus className="mr-2 h-4 w-4" /> Add Vendor
-                  </Button>
+                  canManage ? (
+                    <Button variant="outline" onClick={() => setOpen(true)}>
+                      <Plus className="mr-2 h-4 w-4" /> Add Vendor
+                    </Button>
+                  ) : undefined
                 }
               />
             </div>

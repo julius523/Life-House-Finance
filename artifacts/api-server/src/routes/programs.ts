@@ -78,7 +78,10 @@ router.get("/programs", async (req, res): Promise<void> => {
   res.json(ListProgramsResponse.parse(items));
 });
 
-router.post("/programs", async (req, res): Promise<void> => {
+// Task #107 — program writes are restricted to admin/approver. Submitters
+// retain read access (they need the picker on the bill/expense forms) but
+// must not be able to create, edit, or attach contacts to programs.
+router.post("/programs", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const parsed = CreateProgramBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid body" });
@@ -121,7 +124,7 @@ router.get("/programs/:id", async (req, res): Promise<void> => {
   res.json(GetProgramResponse.parse(formatProgram(program, totalSpend, percentUsed)));
 });
 
-router.put("/programs/:id", async (req, res): Promise<void> => {
+router.put("/programs/:id", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const idParsed = UpdateProgramParams.safeParse({ id: Number(req.params["id"]) });
   if (!idParsed.success) {
     res.status(400).json({ error: "Invalid id" });
@@ -276,7 +279,7 @@ router.get("/programs/:id/contacts", async (req, res): Promise<void> => {
   res.json({ contacts: rows.map(formatProgramContact) });
 });
 
-router.post("/programs/:id/contacts", async (req, res): Promise<void> => {
+router.post("/programs/:id/contacts", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isInteger(id)) {
     res.status(400).json({ error: "Invalid id" });
@@ -305,7 +308,7 @@ router.post("/programs/:id/contacts", async (req, res): Promise<void> => {
   res.status(201).json({ contact: formatProgramContact(created) });
 });
 
-router.put("/program-contacts/:contactId", async (req, res): Promise<void> => {
+router.put("/program-contacts/:contactId", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const cid = Number(req.params["contactId"]);
   if (!Number.isInteger(cid)) {
     res.status(400).json({ error: "Invalid id" });

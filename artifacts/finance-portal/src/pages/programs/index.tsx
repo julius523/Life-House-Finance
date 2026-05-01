@@ -93,13 +93,18 @@ export default function ProgramsList() {
             Manage funding sources, grants, and program allocations.
           </p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
-              <Plus className="mr-2 h-4 w-4" />
-              New Program
-            </Button>
-          </DialogTrigger>
+        {/* Task #107 — submitters cannot create programs; the API now
+            returns 403, so hide the button rather than show one that
+            always fails. */}
+        <Dialog open={canManage && open} onOpenChange={canManage ? setOpen : undefined}>
+          {canManage && (
+            <DialogTrigger asChild>
+              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
+                <Plus className="mr-2 h-4 w-4" />
+                New Program
+              </Button>
+            </DialogTrigger>
+          )}
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
               <DialogTitle>Create Program</DialogTitle>

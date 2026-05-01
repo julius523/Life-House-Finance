@@ -1,6 +1,13 @@
 import { Router, type IRouter } from "express";
 import { requireRole } from "../lib/auth";
 import { canConsumeUpload } from "../lib/objectAuthz";
+import {
+  canReadReceipt,
+  isOwnExpense,
+  isOwnBill,
+  canMutateExpense,
+  canMutateBill,
+} from "../lib/recordAuthz";
 import { db } from "@workspace/db";
 import { receiptsTable, vendorsTable, expensesTable, billsTable, usersTable } from "@workspace/db";
 import { eq, and, desc, count, sql, ilike, or } from "drizzle-orm";
@@ -99,6 +106,14 @@ router.get("/receipts", async (req, res): Promise<void> => {
     );
   }
 
+  // Task #107 — submitters only see receipts they uploaded. Admins and
+  // approvers retain full visibility (approvers need it to review the
+  // attached evidence on any submission).
+  const user = req.authUser!;
+  if (user.role === "submitter") {
+    conditions.push(eq(receiptsTable.uploadedBy, user.id));
+  }
+
   const where = conditions.length > 0 ? and(...conditions) : undefined;
   const offset = (page - 1) * pageSize;
 
@@ -149,6 +164,52 @@ router.post("/receipts", requireRole("admin", "approver", "submitter"), async (r
       return;
     }
   }
+
+  // Task #107 — when the caller links the receipt to an existing expense
+  // or bill, verify they have mutate-rights on that target. Without this,
+  // a submitter could attach a fabricated receipt to anyone else's
+  // expense/bill (and even nudge it out of the missing-receipts report).
+  if (data.linkedExpenseId !== undefined && data.linkedExpenseId !== null) {
+    const [target] = await db
+      .select()
+      .from(expensesTable)
+      .where(eq(expensesTable.id, data.linkedExpenseId));
+    if (!target) {
+      res.status(400).json({ error: "Linked expense not found" });
+      return;
+    }
+    if (user.role === "submitter" && !isOwnExpense(user, target)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    if (!canMutateExpense(user, target)) {
+      res
+        .status(403)
+        .json({ error: "Linked expense is locked from edits at its current status" });
+      return;
+    }
+  }
+  if (data.linkedBillId !== undefined && data.linkedBillId !== null) {
+    const [target] = await db
+      .select()
+      .from(billsTable)
+      .where(eq(billsTable.id, data.linkedBillId));
+    if (!target) {
+      res.status(400).json({ error: "Linked bill not found" });
+      return;
+    }
+    if (user.role === "submitter" && !isOwnBill(user, target)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    if (!canMutateBill(user, target)) {
+      res
+        .status(403)
+        .json({ error: "Linked bill is locked from edits at its current status" });
+      return;
+    }
+  }
+
   const [receipt] = await db
     .insert(receiptsTable)
     .values({
@@ -190,14 +251,33 @@ router.post("/receipts", requireRole("admin", "approver", "submitter"), async (r
   res.status(201).json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName, uploadedByName)));
 });
 
-router.get("/receipts/missing-report", async (_req, res): Promise<void> => {
+router.get("/receipts/missing-report", async (req, res): Promise<void> => {
   const now = new Date();
+
+  // Task #107 — submitters only see missing-receipt rows for their own
+  // expenses. Admins / approvers retain the full org-wide report needed
+  // for follow-up.
+  const user = req.authUser!;
+  const baseConditions = [
+    sql`(${expensesTable.receiptIds} is null or array_length(${expensesTable.receiptIds}, 1) is null)`,
+  ];
+  if (user.role === "submitter") {
+    const display = `${user.firstName} ${user.lastName}`.trim();
+    baseConditions.push(
+      or(
+        eq(expensesTable.submittedByEmail, user.email),
+        and(
+          sql`${expensesTable.submittedByEmail} is null`,
+          eq(expensesTable.submittedBy, display),
+        ),
+      )!,
+    );
+  }
+
   const expenses = await db
     .select()
     .from(expensesTable)
-    .where(
-      sql`(${expensesTable.receiptIds} is null or array_length(${expensesTable.receiptIds}, 1) is null)`
-    );
+    .where(and(...baseConditions));
 
   const items = expenses.map((e) => {
     const submittedDate = new Date(e.createdAt);
@@ -231,6 +311,13 @@ router.get("/receipts/:id", async (req, res): Promise<void> => {
   }
   const [receipt] = await db.select().from(receiptsTable).where(eq(receiptsTable.id, parsed.data.id));
   if (!receipt) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  // Task #107 — gate single-receipt reads. Admins/approvers can always
+  // view; submitters can view only receipts they uploaded. Use 404 (not
+  // 403) so we don't reveal which ids exist.
+  if (!canReadReceipt(req.authUser!, receipt)) {
     res.status(404).json({ error: "Not found" });
     return;
   }

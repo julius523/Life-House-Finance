@@ -1,5 +1,10 @@
 import { Router, type IRouter } from "express";
 import { requireRole } from "../lib/auth";
+import {
+  canReadExpense,
+  canMutateExpense,
+  isOwnExpense,
+} from "../lib/recordAuthz";
 import { db } from "@workspace/db";
 import {
   expensesTable,
@@ -10,7 +15,7 @@ import {
   manualJournalEntryDraftsTable,
   journalEntriesTable,
 } from "@workspace/db";
-import { eq, and, desc, count, sql, ne, inArray } from "drizzle-orm";
+import { eq, and, desc, count, sql, ne, inArray, or } from "drizzle-orm";
 import { createNotification, findUserByEmail } from "../lib/notifications";
 import { generateDraftFromExpense } from "../lib/expenseDraftService";
 import {
@@ -276,6 +281,25 @@ router.get("/expenses", async (req, res): Promise<void> => {
   if (programId) conditions.push(eq(expensesTable.programId, programId));
   if (submittedBy) conditions.push(eq(expensesTable.submittedBy, submittedBy));
 
+  // Task #107 — submitters may only see their own expenses. Admins and
+  // approvers see the full org dataset (needed for approval queues and
+  // reporting). The scope clause is added on top of any client filters.
+  const user = req.authUser!;
+  if (user.role === "submitter") {
+    const display = `${user.firstName} ${user.lastName}`.trim();
+    // Match by email (durable) OR by display name for legacy rows that
+    // were inserted before submittedByEmail was populated.
+    conditions.push(
+      or(
+        eq(expensesTable.submittedByEmail, user.email),
+        and(
+          sql`${expensesTable.submittedByEmail} is null`,
+          eq(expensesTable.submittedBy, display),
+        ),
+      )!,
+    );
+  }
+
   const where = conditions.length > 0 ? and(...conditions) : undefined;
   const offset = (page - 1) * pageSize;
 
@@ -325,11 +349,20 @@ router.post("/expenses", async (req, res): Promise<void> => {
     return;
   }
 
+  // Task #107 — server-derived submitter identity. Previously the route
+  // trusted `submittedBy` / `submittedByEmail` from the request body,
+  // which let an authenticated user file an expense as someone else.
+  // Always overwrite both fields from req.authUser so the audit trail
+  // and ownership checks point at the real caller.
+  const callerUser = req.authUser!;
+  const callerDisplay =
+    `${callerUser.firstName} ${callerUser.lastName}`.trim() || callerUser.email;
+
   const [expense] = await db
     .insert(expensesTable)
     .values({
-      submittedBy: data.submittedBy,
-      submittedByEmail: data.submittedByEmail,
+      submittedBy: callerDisplay,
+      submittedByEmail: callerUser.email,
       expenseDate: data.expenseDate,
       merchant: data.merchant,
       description: data.description,
@@ -368,6 +401,12 @@ router.get("/expenses/:id", async (req, res): Promise<void> => {
   }
   const [expense] = await db.select().from(expensesTable).where(eq(expensesTable.id, parsed.data.id));
   if (!expense) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  // Task #107 — submitters can only view their own expenses. Surface 404
+  // (not 403) to avoid leaking that another user's expense exists at this id.
+  if (!canReadExpense(req.authUser!, expense)) {
     res.status(404).json({ error: "Not found" });
     return;
   }
@@ -417,6 +456,35 @@ router.put("/expenses/:id", async (req, res): Promise<void> => {
     return;
   }
   const data = bodyParsed.data;
+
+  // Task #107 — gate the edit on ownership AND mutable status. Submitters
+  // can only update their own expenses while still in draft / submitted /
+  // needs_correction. Admins always pass; approvers do their workflow
+  // edits through the approve/reject/regenerate routes which are gated
+  // separately. Submitters must not be able to set `status` either.
+  const callerUser = req.authUser!;
+  const [existing] = await db
+    .select()
+    .from(expensesTable)
+    .where(eq(expensesTable.id, idParsed.data.id));
+  if (!existing) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (callerUser.role === "submitter" && !isOwnExpense(callerUser, existing)) {
+    // Same 404 as GET to avoid revealing that the id exists.
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (!canMutateExpense(callerUser, existing)) {
+    res.status(403).json({
+      error:
+        "This expense is locked from edits at its current status. Contact an approver or admin.",
+      code: "EXPENSE_NOT_EDITABLE",
+    });
+    return;
+  }
+
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (data.merchant !== undefined) updates["merchant"] = data.merchant;
   if (data.description !== undefined) updates["description"] = data.description;
@@ -440,7 +508,11 @@ router.put("/expenses/:id", async (req, res): Promise<void> => {
     }
   }
   if (data.receiptIds !== undefined) updates["receiptIds"] = data.receiptIds;
-  if (data.status !== undefined) updates["status"] = data.status;
+  // Task #107 — only admins may directly set `status` here. Submitters
+  // and approvers must use the workflow routes (approve/reject/resubmit).
+  if (data.status !== undefined && callerUser.role === "admin") {
+    updates["status"] = data.status;
+  }
 
   const [expense] = await db
     .update(expensesTable)
@@ -758,7 +830,12 @@ router.post(
   },
 );
 
-router.post("/expenses/:id/dismiss-duplicate", async (req, res): Promise<void> => {
+router.post(
+  "/expenses/:id/dismiss-duplicate",
+  // Task #107 — only admins/approvers can suppress duplicate warnings.
+  // Submitters previously could dismiss the warning on anyone's expense.
+  requireRole("admin", "approver"),
+  async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isInteger(id) || id <= 0) {
     res.status(400).json({ error: "Invalid id" });
@@ -775,6 +852,7 @@ router.post("/expenses/:id/dismiss-duplicate", async (req, res): Promise<void> =
   }
   const programName = await getProgramName(expense.programId);
   res.json(GetExpenseResponse.parse(formatExpense(expense, programName, [])));
-});
+  },
+);
 
 export default router;

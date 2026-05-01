@@ -64,7 +64,10 @@ router.get("/vendors", async (req, res): Promise<void> => {
   res.json(ListVendorsResponse.parse(items));
 });
 
-router.post("/vendors", async (req, res): Promise<void> => {
+// Task #107 — vendor writes are restricted to admin/approver. Submitters
+// keep read access (they need the picker when filing bills/expenses) but
+// must not be able to create, edit, or attach contacts to vendors.
+router.post("/vendors", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const parsed = CreateVendorBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid body" });
@@ -93,7 +96,7 @@ router.get("/vendors/:id", async (req, res): Promise<void> => {
   res.json(GetVendorResponse.parse(formatVendor(vendor, totalSpend)));
 });
 
-router.put("/vendors/:id", async (req, res): Promise<void> => {
+router.put("/vendors/:id", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const idParsed = UpdateVendorParams.safeParse({ id: Number(req.params["id"]) });
   if (!idParsed.success) {
     res.status(400).json({ error: "Invalid id" });
@@ -186,7 +189,7 @@ router.get("/vendors/:id/contacts", async (req, res): Promise<void> => {
   res.json({ contacts: rows.map(formatContact) });
 });
 
-router.post("/vendors/:id/contacts", async (req, res): Promise<void> => {
+router.post("/vendors/:id/contacts", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isInteger(id)) {
     res.status(400).json({ error: "Invalid id" });
@@ -215,7 +218,7 @@ router.post("/vendors/:id/contacts", async (req, res): Promise<void> => {
   res.status(201).json({ contact: formatContact(created) });
 });
 
-router.put("/vendor-contacts/:contactId", async (req, res): Promise<void> => {
+router.put("/vendor-contacts/:contactId", requireRole("admin", "approver"), async (req, res): Promise<void> => {
   const cid = Number(req.params["contactId"]);
   if (!Number.isInteger(cid)) {
     res.status(400).json({ error: "Invalid id" });

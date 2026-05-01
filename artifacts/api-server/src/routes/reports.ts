@@ -14,8 +14,19 @@ import {
 import { sql, and, gte, lte, eq, asc } from "drizzle-orm";
 import { z } from "zod";
 import { GetFinancialSummaryReportResponse } from "@workspace/api-zod";
+import { requireRole } from "../lib/auth";
 
 const router: IRouter = Router();
+
+// Task #107 — every report endpoint exposes org-wide finance data
+// (P&L, balance sheet, account activity, missing receipts itemization,
+// trial balance, reconciliation). Submitters have no UI route into
+// /reports, but without this server-side guard a submitter could call
+// the API directly and bypass the per-record ownership scoping we now
+// enforce on /expenses, /bills, and /receipts. Apply admin/approver
+// at the router level so every current and future /reports/* endpoint
+// inherits the gate.
+router.use(requireRole("admin", "approver"));
 
 // ---------------------------------------------------------------------------
 // Shared ledger-summary helper (Task #63 — reconciliation hardening).

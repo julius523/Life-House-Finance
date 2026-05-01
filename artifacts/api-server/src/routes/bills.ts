@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { requireRole } from "../lib/auth";
+import { canReadBill, canMutateBill, isOwnBill } from "../lib/recordAuthz";
 import { db } from "@workspace/db";
 import {
   billsTable,
@@ -12,7 +13,7 @@ import {
   manualJournalEntryDraftsTable,
   journalEntriesTable,
 } from "@workspace/db";
-import { eq, and, desc, isNull, inArray } from "drizzle-orm";
+import { eq, and, desc, isNull, inArray, or, sql } from "drizzle-orm";
 import { createNotification, findUserByEmail } from "../lib/notifications";
 import {
   generateAccrualDraftFromBill,
@@ -221,6 +222,23 @@ router.get("/bills", async (req, res): Promise<void> => {
   if (submittedByEmail)
     conditions.push(eq(billsTable.submittedByEmail, submittedByEmail));
 
+  // Task #107 — submitters only see their own bills. Match on email
+  // (durable), with a name fallback for legacy rows that pre-date the
+  // submittedByEmail column.
+  const user = req.authUser!;
+  if (user.role === "submitter") {
+    const display = `${user.firstName} ${user.lastName}`.trim();
+    conditions.push(
+      or(
+        eq(billsTable.submittedByEmail, user.email),
+        and(
+          sql`${billsTable.submittedByEmail} is null`,
+          eq(billsTable.submittedBy, display),
+        ),
+      )!,
+    );
+  }
+
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
   const bills = await db
@@ -288,14 +306,14 @@ router.post("/bills", async (req, res): Promise<void> => {
     return;
   }
   const data = parsed.data;
+  // Task #107 — server-derived submitter identity. Previously this route
+  // accepted `req.body.submittedBy` and used it verbatim, letting a
+  // logged-in user file a bill that appeared to come from another staff
+  // member. Always use the authenticated caller as the source of truth.
+  const callerUser = req.authUser!;
   const submittedBy =
-    (req.body && typeof req.body.submittedBy === "string"
-      ? req.body.submittedBy.trim()
-      : "") ||
-    (req.authUser
-      ? `${req.authUser.firstName} ${req.authUser.lastName}`
-      : "Unknown");
-  const submittedByEmail = req.authUser?.email ?? null;
+    `${callerUser.firstName} ${callerUser.lastName}`.trim() || callerUser.email;
+  const submittedByEmail = callerUser.email;
   const [bill] = await db
     .insert(billsTable)
     .values({
@@ -354,6 +372,12 @@ router.get("/bills/:id", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Not found" });
     return;
   }
+  // Task #107 — submitters can only view their own bills. Use 404 (not 403)
+  // to avoid leaking which ids exist.
+  if (!canReadBill(req.authUser!, bill)) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
   const vendorName = await getVendorName(bill.vendorId);
   const programName = await getProgramName(bill.programId);
   const categoryName = await getCategoryName(bill.categoryId);
@@ -381,6 +405,32 @@ router.put("/bills/:id", async (req, res): Promise<void> => {
     return;
   }
   const data = bodyParsed.data;
+
+  // Task #107 — gate edits on ownership AND mutable status, mirroring
+  // the expense PUT handler. Approver workflow edits go through dedicated
+  // approve/reject/regenerate routes that are gated separately.
+  const callerUser = req.authUser!;
+  const [existing] = await db
+    .select()
+    .from(billsTable)
+    .where(eq(billsTable.id, idParsed.data.id));
+  if (!existing) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (callerUser.role === "submitter" && !isOwnBill(callerUser, existing)) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (!canMutateBill(callerUser, existing)) {
+    res.status(403).json({
+      error:
+        "This bill is locked from edits at its current status. Contact an approver or admin.",
+      code: "BILL_NOT_EDITABLE",
+    });
+    return;
+  }
+
   const updates: Record<string, unknown> = {};
   if (data.vendorId !== undefined) updates["vendorId"] = data.vendorId;
   if (data.invoiceNumber !== undefined)

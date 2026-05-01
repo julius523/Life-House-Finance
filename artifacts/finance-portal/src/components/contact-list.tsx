@@ -27,6 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Mail, Phone, Plus, Pencil, Trash2, User } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth";
 
 export type Contact = {
   id: number;
@@ -51,6 +52,14 @@ export function ContactList({ parentId, kind }: Props) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Contact | null>(null);
   const [creating, setCreating] = useState(false);
+  const { user } = useAuth();
+  // Task #107 — vendor/program contact CRUD now requires admin/approver
+  // server-side. Hide the affordances for submitters so they don't see
+  // buttons that always 403. DELETE is still admin-only on the server,
+  // so we gate the trash icon on isAdmin separately to avoid showing
+  // approvers a button that would 403.
+  const canManage = user?.role === "admin" || user?.role === "approver";
+  const isAdmin = user?.role === "admin";
 
   const vendorQuery = useListVendorContacts(parentId, {
     query: { enabled: kind === "vendor" },
@@ -103,9 +112,11 @@ export function ContactList({ parentId, kind }: Props) {
         <h4 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Contacts
         </h4>
-        <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-          <Plus className="h-3 w-3 mr-1" /> Add contact
-        </Button>
+        {canManage && (
+          <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
+            <Plus className="h-3 w-3 mr-1" /> Add contact
+          </Button>
+        )}
       </div>
       {contacts === null ? (
         <div className="text-xs text-muted-foreground">Loading…</div>
@@ -138,19 +149,23 @@ export function ContactList({ parentId, kind }: Props) {
                   )}
                 </div>
               </div>
-              <div className="flex gap-1">
-                <Button size="sm" variant="ghost" onClick={() => setEditing(c)}>
-                  <Pencil className="h-3 w-3" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => handleDelete(c)}
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
+              {canManage && (
+                <div className="flex gap-1">
+                  <Button size="sm" variant="ghost" onClick={() => setEditing(c)}>
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                  {isAdmin && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => handleDelete(c)}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
