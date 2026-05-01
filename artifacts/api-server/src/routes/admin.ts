@@ -15,7 +15,7 @@ import {
   emailSettingsTable,
   emailTemplatesTable,
 } from "@workspace/db";
-import { eq, asc, desc, isNull, inArray, sql } from "drizzle-orm";
+import { eq, asc, desc, isNull, inArray, sql, ne } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth, requireRole, toAuthUser } from "../lib/auth";
 import {
@@ -38,9 +38,14 @@ const router: IRouter = Router();
 router.use("/admin", requireAuth, requireRole("admin"));
 
 router.get("/admin/users", async (_req, res): Promise<void> => {
+  // Hide the automation service account from the user-management UI:
+  // it cannot log in, has no human owner, and is created/managed
+  // exclusively by the seeder. Surfacing it would only invite
+  // accidental edits (and pollute approver/submitter dropdowns).
   const rows = await db
     .select()
     .from(usersTable)
+    .where(ne(usersTable.role, "service"))
     .orderBy(asc(usersTable.email));
   res.json({ users: rows.map(toAuthUser) });
 });

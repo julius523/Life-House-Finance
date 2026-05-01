@@ -6610,7 +6610,12 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, approver, submitter]
+          # `service` is the automation account authenticated via
+          # INTEGRATION_API_KEY bearer token. It is hidden from the
+          # admin user list and never returned by /auth/me or /auth/login,
+          # but is included here so the type union stays consistent
+          # with the server.
+          enum: [admin, approver, submitter, service]
       required:
         - id
         - email

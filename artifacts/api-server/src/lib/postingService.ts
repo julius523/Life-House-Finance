@@ -39,7 +39,7 @@ import { extractCodeFromLegacyAccountString } from "./seedChartOfAccounts";
 
 export type PostingActor = {
   id: number;
-  role: "admin" | "approver" | "submitter";
+  role: "admin" | "approver" | "submitter" | "service";
   firstName: string | null;
   lastName: string | null;
   email: string | null;

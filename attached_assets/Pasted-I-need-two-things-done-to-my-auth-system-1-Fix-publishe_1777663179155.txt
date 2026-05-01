@@ -1,0 +1,30 @@
+I need two things done to my auth system:
+1. Fix published app login
+My login works on the dev URL but returns "Invalid email or password" on the published lifehouseaccounting.replit.app URL. The credentials are julius@lifehousereentry.com / Julius2433!. I think the published deployment has a separate database or the user wasn't seeded there. Please make sure this login works on the published app too — either by syncing the database, re-seeding the admin user on deploy, or whatever the correct fix is for our setup.
+2. Create a service account for API integrations
+I have a Google Apps Script automation that needs to call our API (create credits, push receipts). Right now it logs in with my personal admin account, which isn't ideal. Please create a dedicated service account with these specs:
+
+Email: automation@lifehousereentry.com (doesn't need to be a real email — just the login identifier)
+Password: auto-generate a strong one and show it to me once
+Role: a new role called service or integration — it should be able to:
+
+POST to /api/credits (create new credits)
+POST to /api/receipts (create new receipts)
+GET /api/credits, /api/receipts, /api/bills, /api/expenses (read-only)
+NOT able to: delete anything, access admin settings, manage users, or approve expenses
+
+
+This account should NOT appear in the UI user list or be selectable as an approver
+Add an X-API-Source header check — when requests come from this account, tag them as source: "automation" so we can filter automated entries from manual ones in the UI
+
+3. API key alternative (even better)
+If it's straightforward, I'd prefer a simple API key approach instead of username/password for the service account. Something like:
+
+A POST /api/auth/api-key endpoint or just an Authorization: Bearer <key> header
+The key is stored in an environment variable INTEGRATION_API_KEY
+Requests with a valid key skip the login flow and get the same permissions as the service role above
+I can rotate the key by changing the env var without redeploying
+
+If the API key approach is too much work right now, the service account login is fine — I'll switch to the API key later.
+Keep my personal login (julius@lifehousereentry.com / admin role) working exactly as-is. Don't change my password or permissions.
+Before the next republish, make sure the service account or API key works on the published URL too, not just dev.

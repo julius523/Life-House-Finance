@@ -90,17 +90,30 @@ export function isOwnBill(user: AuthUser, bill: BillLike): boolean {
 }
 
 /**
- * READ authz for an expense: admins and approvers see everything,
- * submitters only their own.
+ * READ authz for an expense: admins, approvers, and the automation
+ * service account see everything, submitters only their own. The
+ * service role gets read-everything because the integration use case
+ * is "scrape the org-wide ledger into an external system" — the same
+ * surface admins and approvers already have.
  */
 export function canReadExpense(user: AuthUser, expense: ExpenseLike): boolean {
-  if (user.role === "admin" || user.role === "approver") return true;
+  if (
+    user.role === "admin" ||
+    user.role === "approver" ||
+    user.role === "service"
+  )
+    return true;
   return isOwnExpense(user, expense);
 }
 
 /** READ authz for a bill, mirroring `canReadExpense`. */
 export function canReadBill(user: AuthUser, bill: BillLike): boolean {
-  if (user.role === "admin" || user.role === "approver") return true;
+  if (
+    user.role === "admin" ||
+    user.role === "approver" ||
+    user.role === "service"
+  )
+    return true;
   return isOwnBill(user, bill);
 }
 
@@ -140,7 +153,12 @@ export function canReadReceipt(
   receipt: ReceiptLike,
   linked: { expense?: ExpenseLike | null; bill?: BillLike | null } = {},
 ): boolean {
-  if (user.role === "admin" || user.role === "approver") return true;
+  if (
+    user.role === "admin" ||
+    user.role === "approver" ||
+    user.role === "service"
+  )
+    return true;
   if (receipt.uploadedBy === user.id) return true;
   if (linked.expense && isOwnExpense(user, linked.expense)) return true;
   if (linked.bill && isOwnBill(user, linked.bill)) return true;

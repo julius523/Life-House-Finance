@@ -29,7 +29,7 @@ export const LoginResponse = zod.object({
     email: zod.string(),
     firstName: zod.string(),
     lastName: zod.string(),
-    role: zod.enum(["admin", "approver", "submitter"]),
+    role: zod.enum(["admin", "approver", "submitter", "service"]),
   }),
 });
 
@@ -49,7 +49,7 @@ export const GetCurrentUserResponse = zod.object({
     email: zod.string(),
     firstName: zod.string(),
     lastName: zod.string(),
-    role: zod.enum(["admin", "approver", "submitter"]),
+    role: zod.enum(["admin", "approver", "submitter", "service"]),
   }),
 });
 
@@ -63,7 +63,7 @@ export const ListAdminUsersResponse = zod.object({
       email: zod.string(),
       firstName: zod.string(),
       lastName: zod.string(),
-      role: zod.enum(["admin", "approver", "submitter"]),
+      role: zod.enum(["admin", "approver", "submitter", "service"]),
     }),
   ),
 });
@@ -4513,7 +4513,7 @@ export const ListJournalEntryActorsResponse = zod.object({
       email: zod.string(),
       firstName: zod.string(),
       lastName: zod.string(),
-      role: zod.enum(["admin", "approver", "submitter"]),
+      role: zod.enum(["admin", "approver", "submitter", "service"]),
     }),
   ),
   approvers: zod.array(
@@ -4522,7 +4522,7 @@ export const ListJournalEntryActorsResponse = zod.object({
       email: zod.string(),
       firstName: zod.string(),
       lastName: zod.string(),
-      role: zod.enum(["admin", "approver", "submitter"]),
+      role: zod.enum(["admin", "approver", "submitter", "service"]),
     }),
   ),
 });

@@ -81,8 +81,14 @@ export function canAccess(role: UserRole | undefined, section: Section): boolean
   if (role === "approver") {
     return section !== "admin";
   }
-  // submitter
-  return SUBMITTER_SECTIONS.has(section);
+  if (role === "submitter") {
+    return SUBMITTER_SECTIONS.has(section);
+  }
+  // The automation service account never logs in via the browser. If
+  // somehow a service-role user surfaces in the auth context (defense
+  // in depth), give it zero UI access — its only legitimate surface is
+  // the bearer-token API.
+  return false;
 }
 
 export type Section =

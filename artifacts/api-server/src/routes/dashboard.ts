@@ -21,7 +21,7 @@ const router: IRouter = Router();
 // `SubmitterDashboard` that does not call any of these endpoints, so
 // gating the entire router to admin/approver matches the UX and
 // closes the residual broken-access-control surface.
-router.use(requireRole("admin", "approver"));
+router.use("/dashboard", requireRole("admin", "approver"));
 
 router.get("/dashboard/summary", async (_req, res): Promise<void> => {
   const now = new Date();

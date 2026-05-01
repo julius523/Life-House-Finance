@@ -8,6 +8,7 @@ Nonprofit bookkeeping monorepo (pnpm workspace).
 - `artifacts/mockup-sandbox` — component preview server
 
 ## Recent shipped work
+- **Service-role + bearer-token API auth** — new role `service` for the Apps Script automation account `automation@lifehousereentry.com` (seeded id=704). Bearer-token auth via `INTEGRATION_API_KEY` env var with timing-safe compare (`src/lib/apiKey.ts`). Service can read `/credits`, `/credit-summary`, `/receipts`, `/bills`, `/expenses` and POST `/credits`, `/receipts`; everything else (writes to bills/expenses, deletes, admin, dashboard, reports, approvals) returns 403. `requireAuth` fails closed when an `Authorization` header is present but invalid (does not silently fall through to cookie). Login route rejects service role; service user is hidden from `/admin/users` and not creatable via UI. Same change set fixes broken production login by self-healing drifted bcrypt hashes for julius/kai/brittney/lifeup on every boot. Also fixed pre-existing routing bug where `dashboard.ts` and `reports.ts` had unscoped `router.use(requireRole(...))` that intercepted unrelated routes.
 - **Step 8** — controlled GL posting (admin/approver only, period-locked, idempotent on `agent_action_id`, reversal-only correction)
 - **Step 9** — Chart of Accounts + accounting settings + trial balance (9-value account_type enum + `defaultNormalBalanceFor()`; admin-only settings)
 - **Task #25** — manual JE direct-post route (`POST /accounting/journal-entries`) + `/accounting/journal-entries/new` page

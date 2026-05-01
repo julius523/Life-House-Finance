@@ -291,7 +291,7 @@ router.get("/bills", async (req, res): Promise<void> => {
   res.json(ListBillsResponse.parse(items));
 });
 
-router.post("/bills", async (req, res): Promise<void> => {
+router.post("/bills", requireRole("admin", "approver", "submitter"), async (req, res): Promise<void> => {
   const parsed = CreateBillBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid body" });
@@ -385,7 +385,7 @@ router.get("/bills/:id", async (req, res): Promise<void> => {
   });
 });
 
-router.put("/bills/:id", async (req, res): Promise<void> => {
+router.put("/bills/:id", requireRole("admin", "approver", "submitter"), async (req, res): Promise<void> => {
   const idParsed = UpdateBillParams.safeParse({ id: Number(req.params["id"]) });
   if (!idParsed.success) {
     res.status(400).json({ error: "Invalid id" });

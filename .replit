@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "postgresql-16", "python-3.11"]
+modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -69,3 +69,8 @@ externalPort = 6000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+INTEGRATION_API_KEY = "95282745ff0a9c0c4bb3d464bb6dc128bd1e0e4f06a1418ee4e762b0ffd7e2ce"

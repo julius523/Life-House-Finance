@@ -26,7 +26,7 @@ const router: IRouter = Router();
 // enforce on /expenses, /bills, and /receipts. Apply admin/approver
 // at the router level so every current and future /reports/* endpoint
 // inherits the gate.
-router.use(requireRole("admin", "approver"));
+router.use("/reports", requireRole("admin", "approver"));
 
 // ---------------------------------------------------------------------------
 // Shared ledger-summary helper (Task #63 — reconciliation hardening).

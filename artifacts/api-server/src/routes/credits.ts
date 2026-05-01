@@ -3,11 +3,17 @@ import { z } from "zod";
 import { db, creditsTable, programsTable, CREDIT_STATUSES } from "@workspace/db";
 import { eq, desc, sql } from "drizzle-orm";
 import { requireAuth, requireRole } from "../lib/auth";
+import { AUTOMATION_DISPLAY_NAME, readApiSource } from "../lib/apiKey";
 
 const router: IRouter = Router();
 
-router.use("/credits", requireAuth, requireRole("admin", "approver"));
-router.use("/credit-summary", requireAuth, requireRole("admin", "approver"));
+// Service role can read /credits & /credit-summary and POST /credits
+// (handled by the per-route gate below). DELETE and PUT remain
+// admin-only and are explicitly gated below — service callers fall
+// through the requireRole gate and receive 403.
+router.use("/credits", requireAuth, requireRole("admin", "approver", "service"));
+router.use("/credit-summary", requireAuth, requireRole("admin", "approver", "service"));
+router.put("/credits/:id", requireRole("admin", "approver"));
 router.delete("/credits/:id", requireRole("admin"));
 
 const StatusEnum = z.enum(CREDIT_STATUSES);
@@ -27,6 +33,14 @@ function formatCredit(
   c: typeof creditsTable.$inferSelect,
   programName?: string | null,
 ) {
+  // entrySource lets the UI filter automation-created rows from manual
+  // ones. Derived from the submittedBy marker that POST /credits sets
+  // for service-account callers (see the "Automation: <source>" prefix
+  // there); legacy/manual rows return "manual".
+  const entrySource: "automation" | "manual" =
+    c.submittedBy && c.submittedBy.startsWith(`${AUTOMATION_DISPLAY_NAME}:`)
+      ? "automation"
+      : "manual";
   return {
     id: c.id,
     source: c.source,
@@ -38,6 +52,7 @@ function formatCredit(
     status: c.status,
     notes: c.notes ?? null,
     submittedBy: c.submittedBy ?? null,
+    entrySource,
     createdAt: c.createdAt.toISOString(),
   };
 }
@@ -68,6 +83,15 @@ router.post("/credits", async (req, res): Promise<void> => {
     return;
   }
   const d = parsed.data;
+  // When the request is authenticated as the service account, force the
+  // submittedBy column to a recognisable marker derived from the
+  // X-API-Source header (default "Automation"). Manual UI submitters
+  // are unaffected.
+  const callerRole = req.authUser?.role;
+  const submittedBy =
+    callerRole === "service"
+      ? `${AUTOMATION_DISPLAY_NAME}: ${readApiSource(req)}`
+      : (d.submittedBy || null);
   const [created] = await db
     .insert(creditsTable)
     .values({
@@ -78,7 +102,7 @@ router.post("/credits", async (req, res): Promise<void> => {
       receivedDate: d.receivedDate || null,
       status: d.status,
       notes: d.notes || null,
-      submittedBy: d.submittedBy || null,
+      submittedBy,
     })
     .returning();
   if (!created) {

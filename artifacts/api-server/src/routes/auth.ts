@@ -38,6 +38,14 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     res.status(401).json({ error: "Invalid email or password" });
     return;
   }
+  // The automation service account authenticates only via the
+  // INTEGRATION_API_KEY bearer token. Reject password login attempts
+  // even if a hash somehow matched, so a leaked password cannot
+  // bypass the bearer-only contract.
+  if (user.role === "service") {
+    res.status(401).json({ error: "Invalid email or password" });
+    return;
+  }
   const ok = await bcrypt.compare(parsed.data.password, user.passwordHash);
   if (!ok) {
     res.status(401).json({ error: "Invalid email or password" });

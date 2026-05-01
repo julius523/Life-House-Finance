@@ -324,7 +324,7 @@ router.get("/expenses", async (req, res): Promise<void> => {
   res.json(ListExpensesResponse.parse({ items, total: totalResult[0]?.cnt ?? 0, page, pageSize }));
 });
 
-router.post("/expenses", async (req, res): Promise<void> => {
+router.post("/expenses", requireRole("admin", "approver", "submitter"), async (req, res): Promise<void> => {
   const parsed = CreateExpenseBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid body" });
@@ -438,7 +438,7 @@ router.get("/expenses/:id", async (req, res): Promise<void> => {
   );
 });
 
-router.put("/expenses/:id", async (req, res): Promise<void> => {
+router.put("/expenses/:id", requireRole("admin", "approver", "submitter"), async (req, res): Promise<void> => {
   const idParsed = UpdateExpenseParams.safeParse({ id: Number(req.params["id"]) });
   if (!idParsed.success) {
     res.status(400).json({ error: "Invalid id" });

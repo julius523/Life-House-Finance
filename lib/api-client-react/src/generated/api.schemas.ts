@@ -1803,6 +1803,7 @@ export const AuthUserRole = {
   admin: "admin",
   approver: "approver",
   submitter: "submitter",
+  service: "service",
 } as const;
 
 export interface AuthUser {

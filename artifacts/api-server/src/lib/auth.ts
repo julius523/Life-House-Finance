@@ -2,6 +2,11 @@ import crypto from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
 import { db, usersTable, type UserRow } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import {
+  AUTOMATION_USER_EMAIL,
+  extractBearerToken,
+  isValidApiKey,
+} from "./apiKey";
 
 const COOKIE_NAME = "lh_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -66,7 +71,7 @@ export type AuthUser = {
   email: string;
   firstName: string;
   lastName: string;
-  role: "admin" | "approver" | "submitter";
+  role: "admin" | "approver" | "submitter" | "service";
 };
 
 declare module "express-serve-static-core" {
@@ -99,6 +104,39 @@ export async function loadUserFromCookie(
     .from(usersTable)
     .where(eq(usersTable.id, decoded.userId));
   if (!user || !user.isActive) return null;
+  // Defense in depth: the service account should never be able to mint
+  // a cookie session, but if one is somehow ever set (e.g. in a test
+  // harness), reject the cookie. Service auth must come from the
+  // bearer-token path below.
+  if (user.role === "service") return null;
+  return toAuthUser(user);
+}
+
+/**
+ * Loads the seeded automation@lifehousereentry.com row when the request
+ * presents a valid INTEGRATION_API_KEY bearer token. Returns null when
+ * no token is presented, the key is unset/invalid, or the seeded row
+ * is missing/inactive/has been re-roled.
+ *
+ * This is checked BEFORE the cookie path in requireAuth — so a single
+ * request that includes both a cookie and a bearer token always runs
+ * as the service account (i.e. tokens win). That's the safe default
+ * because cookies are ambient and would otherwise let a logged-in
+ * browser tab silently elevate any cross-origin request that happened
+ * to also carry the bearer header.
+ */
+export async function loadServiceUserFromBearer(
+  req: Request,
+): Promise<AuthUser | null> {
+  const token = extractBearerToken(req);
+  if (!token) return null;
+  if (!isValidApiKey(token)) return null;
+  const [user] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.email, AUTOMATION_USER_EMAIL));
+  if (!user || !user.isActive) return null;
+  if (user.role !== "service") return null;
   return toAuthUser(user);
 }
 
@@ -107,13 +145,35 @@ export function requireAuth(
   res: Response,
   next: NextFunction
 ): void {
-  loadUserFromCookie(req)
-    .then((user) => {
-      if (!user) {
+  // Bearer token first: when an automation client sends both a cookie
+  // and a bearer token (e.g. an Apps Script that ran in a browser tab
+  // before), we want it to authenticate as the service account, not as
+  // whatever user happens to have a cookie sitting around.
+  //
+  // Fail-closed rule: if the caller sent ANY Authorization header we
+  // do NOT silently fall back to cookie auth on a bad bearer. A typo'd
+  // or rotated key from an automation client must surface as 401 so
+  // the operator notices, instead of quietly running as some
+  // unrelated cookie user that may have ambient access.
+  const hasAuthHeader = typeof req.headers["authorization"] === "string"
+    && req.headers["authorization"].trim().length > 0;
+  loadServiceUserFromBearer(req)
+    .then(async (serviceUser) => {
+      if (serviceUser) {
+        req.authUser = serviceUser;
+        next();
+        return;
+      }
+      if (hasAuthHeader) {
         res.status(401).json({ error: "Not authenticated" });
         return;
       }
-      req.authUser = user;
+      const cookieUser = await loadUserFromCookie(req);
+      if (!cookieUser) {
+        res.status(401).json({ error: "Not authenticated" });
+        return;
+      }
+      req.authUser = cookieUser;
       next();
     })
     .catch((err) => {

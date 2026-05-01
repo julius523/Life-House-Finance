@@ -145,7 +145,7 @@ router.get("/receipts", async (req, res): Promise<void> => {
   res.json(ListReceiptsResponse.parse({ items, total: totalResult[0]?.cnt ?? 0, page }));
 });
 
-router.post("/receipts", requireRole("admin", "approver", "submitter"), async (req, res): Promise<void> => {
+router.post("/receipts", requireRole("admin", "approver", "submitter", "service"), async (req, res): Promise<void> => {
   const user = req.authUser!;
   const parsed = CreateReceiptBody.safeParse(req.body);
   if (!parsed.success) {
@@ -328,7 +328,7 @@ router.get("/receipts/:id", async (req, res): Promise<void> => {
   res.json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName, uploadedByName)));
 });
 
-router.delete("/receipts/:id", async (req, res): Promise<void> => {
+router.delete("/receipts/:id", requireRole("admin", "approver", "submitter"), async (req, res): Promise<void> => {
   const parsed = DeleteReceiptParams.safeParse({ id: Number(req.params["id"]) });
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid id" });
