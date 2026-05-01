@@ -147,6 +147,16 @@ before(async () => {
   app = express();
   app.use(cookieParser());
   app.use(express.json());
+  // Stub `req.log` so route error paths that call req.log.warn/error don't
+  // crash the test process when pino-http isn't mounted.
+  const noop = (): void => undefined;
+  const stubLogger = {
+    info: noop, warn: noop, error: noop, debug: noop, trace: noop, fatal: noop,
+  } as unknown as Express["request"]["log"];
+  app.use("/api", (req, _res, next) => {
+    if (!req.log) (req as { log: typeof stubLogger }).log = stubLogger;
+    next();
+  });
   app.use("/api", (req, res, next) => requireAuth(req, res, next));
   app.use("/api", receiptsRouter);
   app.use("/api", storageRouter);
