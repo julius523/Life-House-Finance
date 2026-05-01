@@ -10,13 +10,12 @@
  *     records they own AND only while those records are still in a
  *     mutable status (draft / submitted / needs_correction).
  *
- * Ownership is matched primarily by email because `expenses.submittedBy`
- * and `bills.submittedBy` are stored as TEXT (display name), not as
- * a foreign key into users. Both tables also carry a `submittedByEmail`
- * column, which is the durable identifier we trust. Where the email
- * column is NULL (legacy rows), we fall back to a case-insensitive
- * match on the display-name string `${firstName} ${lastName}` — the
- * same fallback already used by POST /bills/:id/resubmit.
+ * Ownership is determined exclusively by `submittedByEmail` (Task #119).
+ * Both `expenses` and `bills` carry that column as the durable identity
+ * anchor; when the column is NULL (legacy rows created before the column
+ * existed) the record is treated as unowned by any submitter — name-based
+ * fallback was removed because display names are not unique and allowed
+ * same-named users to access each other's records.
  *
  * Receipts use `uploadedBy` (integer FK) which is the cleanest case.
  */
@@ -69,37 +68,25 @@ export type ReceiptLike = {
   linkedBillId: number | null;
 };
 
-function callerDisplayName(user: AuthUser): string {
-  return `${user.firstName} ${user.lastName}`.trim();
-}
-
 /**
  * Returns true when `user` should be treated as the original submitter
- * of `expense`. Email is the source of truth; we only fall back to a
- * display-name match when the row has no submittedByEmail (legacy).
+ * of `expense`. Email is the sole source of truth. Legacy rows that
+ * have no submittedByEmail are treated as unownable by any submitter —
+ * name-based matching is intentionally absent because display names are
+ * not unique and the fallback would let same-named users access each
+ * other's records (Task #119).
  */
 export function isOwnExpense(user: AuthUser, expense: ExpenseLike): boolean {
-  const callerEmail = user.email.toLowerCase();
   const ownerEmail = expense.submittedByEmail?.toLowerCase() ?? null;
-  if (ownerEmail !== null) return ownerEmail === callerEmail;
-  // Legacy row with no email recorded — name-based fallback.
-  const display = callerDisplayName(user);
-  return (
-    display.length > 0 &&
-    expense.submittedBy.trim().toLowerCase() === display.toLowerCase()
-  );
+  if (ownerEmail === null) return false;
+  return ownerEmail === user.email.toLowerCase();
 }
 
 /** Same semantics as `isOwnExpense`, applied to a bill row. */
 export function isOwnBill(user: AuthUser, bill: BillLike): boolean {
-  const callerEmail = user.email.toLowerCase();
   const ownerEmail = bill.submittedByEmail?.toLowerCase() ?? null;
-  if (ownerEmail !== null) return ownerEmail === callerEmail;
-  const display = callerDisplayName(user);
-  if (display.length === 0) return false;
-  const submittedBy = bill.submittedBy?.trim() ?? "";
-  if (submittedBy.length === 0) return false;
-  return submittedBy.toLowerCase() === display.toLowerCase();
+  if (ownerEmail === null) return false;
+  return ownerEmail === user.email.toLowerCase();
 }
 
 /**

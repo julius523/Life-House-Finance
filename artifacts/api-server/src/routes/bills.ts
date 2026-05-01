@@ -13,7 +13,7 @@ import {
   manualJournalEntryDraftsTable,
   journalEntriesTable,
 } from "@workspace/db";
-import { eq, and, desc, isNull, inArray, or, sql } from "drizzle-orm";
+import { eq, and, desc, isNull, inArray } from "drizzle-orm";
 import { createNotification, findUserByEmail } from "../lib/notifications";
 import {
   generateAccrualDraftFromBill,
@@ -222,21 +222,13 @@ router.get("/bills", async (req, res): Promise<void> => {
   if (submittedByEmail)
     conditions.push(eq(billsTable.submittedByEmail, submittedByEmail));
 
-  // Task #107 — submitters only see their own bills. Match on email
-  // (durable), with a name fallback for legacy rows that pre-date the
-  // submittedByEmail column.
+  // Task #107 / Task #119 — submitters only see their own bills. Match
+  // exclusively on submittedByEmail (the durable, unique identifier).
+  // Name-based matching was removed because display names are not unique
+  // and allowed same-named users to see each other's legacy records.
   const user = req.authUser!;
   if (user.role === "submitter") {
-    const display = `${user.firstName} ${user.lastName}`.trim();
-    conditions.push(
-      or(
-        eq(billsTable.submittedByEmail, user.email),
-        and(
-          sql`${billsTable.submittedByEmail} is null`,
-          eq(billsTable.submittedBy, display),
-        ),
-      )!,
-    );
+    conditions.push(eq(billsTable.submittedByEmail, user.email));
   }
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;

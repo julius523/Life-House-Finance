@@ -15,7 +15,7 @@ import {
   manualJournalEntryDraftsTable,
   journalEntriesTable,
 } from "@workspace/db";
-import { eq, and, desc, count, sql, ne, inArray, or } from "drizzle-orm";
+import { eq, and, desc, count, sql, ne, inArray } from "drizzle-orm";
 import { createNotification, findUserByEmail } from "../lib/notifications";
 import { generateDraftFromExpense } from "../lib/expenseDraftService";
 import {
@@ -286,18 +286,12 @@ router.get("/expenses", async (req, res): Promise<void> => {
   // reporting). The scope clause is added on top of any client filters.
   const user = req.authUser!;
   if (user.role === "submitter") {
-    const display = `${user.firstName} ${user.lastName}`.trim();
-    // Match by email (durable) OR by display name for legacy rows that
-    // were inserted before submittedByEmail was populated.
-    conditions.push(
-      or(
-        eq(expensesTable.submittedByEmail, user.email),
-        and(
-          sql`${expensesTable.submittedByEmail} is null`,
-          eq(expensesTable.submittedBy, display),
-        ),
-      )!,
-    );
+    // Task #119 — match exclusively on submittedByEmail (the durable,
+    // unique identifier). Legacy rows with a NULL email are excluded
+    // from submitter-scoped results; name-based matching was removed
+    // because display names are not unique and allowed same-named users
+    // to see each other's records.
+    conditions.push(eq(expensesTable.submittedByEmail, user.email));
   }
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;

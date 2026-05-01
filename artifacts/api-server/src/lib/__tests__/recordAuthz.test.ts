@@ -406,7 +406,7 @@ test("isOwnExpense: matches by email when present (case-insensitive)", () => {
   );
 });
 
-test("isOwnExpense: legacy NULL email falls back to display name match", () => {
+test("isOwnExpense: legacy NULL email is never owned (Task #119 — name match removed)", () => {
   const u = {
     id: 1,
     email: "foo@bar.com",
@@ -414,13 +414,16 @@ test("isOwnExpense: legacy NULL email falls back to display name match", () => {
     lastName: "Doe",
     role: "submitter" as const,
   };
+  // Even when the display name matches exactly, a NULL submittedByEmail
+  // must not grant ownership — names are non-unique and the fallback
+  // allowed same-named users to access each other's records.
   assert.equal(
     isOwnExpense(u, {
       status: "submitted",
       submittedBy: "Jane Doe",
       submittedByEmail: null,
     }),
-    true,
+    false,
   );
   assert.equal(
     isOwnExpense(u, {
@@ -444,6 +447,25 @@ test("isOwnBill: legacy null submittedBy + null email is never owned", () => {
     isOwnBill(u, {
       status: "submitted",
       submittedBy: null,
+      submittedByEmail: null,
+    }),
+    false,
+  );
+});
+
+test("isOwnBill: legacy NULL email is never owned even when name matches (Task #119)", () => {
+  const u = {
+    id: 1,
+    email: "x@x.com",
+    firstName: "Jane",
+    lastName: "Doe",
+    role: "submitter" as const,
+  };
+  // Name match must NOT grant ownership when submittedByEmail is NULL.
+  assert.equal(
+    isOwnBill(u, {
+      status: "submitted",
+      submittedBy: "Jane Doe",
       submittedByEmail: null,
     }),
     false,
@@ -608,7 +630,7 @@ test("isMutableExpenseStatus / isMutableBillStatus", () => {
 
 // ---------- 2. Integration tests against the real routers ----------
 
-test("GET /expenses: submitter only sees own rows (incl. legacy NULL-email)", async () => {
+test("GET /expenses: submitter only sees own rows (legacy NULL-email rows excluded)", async () => {
   const res = await fetch(`${baseUrl}/expenses`, {
     headers: { cookie: cookieFor(submitterAId) },
   });
@@ -616,11 +638,16 @@ test("GET /expenses: submitter only sees own rows (incl. legacy NULL-email)", as
   const body = (await res.json()) as { items?: { description: string }[] };
   const items = body.items ?? [];
   // Subset assertion — there may be other rows from concurrent tests, but
-  // none of them should be subB's row.
+  // none of them should be subB's row or the legacy NULL-email row.
   const descriptions = items.map((i) => i.description);
   assert.ok(descriptions.includes("subA submitted"));
   assert.ok(descriptions.includes("subA approved"));
-  assert.ok(descriptions.includes("legacy subA"));
+  // Task #119 — legacy rows with no submittedByEmail must NOT appear for
+  // the submitter (name-based fallback removed to prevent same-name collision).
+  assert.ok(
+    !descriptions.includes("legacy subA"),
+    "submitter must not receive legacy NULL-email rows via name match",
+  );
   assert.ok(
     !descriptions.includes("subB submitted"),
     "subA must not see subB's expense in the list",
@@ -741,6 +768,41 @@ test("GET /bills: submitter only sees own rows", async () => {
   assert.ok(numbers.includes(`${TAG}-A1`));
   assert.ok(numbers.includes(`${TAG}-A2`));
   assert.ok(!numbers.includes(`${TAG}-B1`));
+});
+
+test("GET /bills: submitter does not see legacy NULL-email bill even when name matches (Task #119)", async () => {
+  // Seed a legacy bill: submittedByEmail = NULL, submittedBy = display
+  // name of submitterA. Before Task #119 this would have been returned
+  // to submitterA via the name-based fallback.
+  const display = `${submitterAUser.firstName} ${submitterAUser.lastName}`;
+  const [legacy] = await db
+    .insert(billsTable)
+    .values({
+      vendorId,
+      invoiceNumber: `${TAG}-legacy-null-email`,
+      dueDate: "2024-03-01",
+      amount: "999.00",
+      submittedBy: display,
+      submittedByEmail: null,
+      status: "submitted",
+    })
+    .returning();
+  try {
+    const res = await fetch(`${baseUrl}/bills`, {
+      headers: { cookie: cookieFor(submitterAId) },
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { invoiceNumber: string }[];
+    const numbers = body.map((b) => b.invoiceNumber);
+    assert.ok(
+      !numbers.includes(`${TAG}-legacy-null-email`),
+      "submitter must not receive legacy NULL-email bill via name match",
+    );
+  } finally {
+    if (legacy?.id) {
+      await db.delete(billsTable).where(eq(billsTable.id, legacy.id));
+    }
+  }
 });
 
 test("GET /bills/:id: submitter targeting another user's bill gets 404", async () => {
