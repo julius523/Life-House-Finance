@@ -25,9 +25,10 @@ Per project assumptions, `artifacts/mockup-sandbox` is a development-only previe
 ## Scan Anchors
 
 - Production entry points: `artifacts/api-server/src/app.ts`, `artifacts/api-server/src/routes/*.ts`, `artifacts/finance-portal/src/pages/**`
-- Highest-risk areas: role/session enforcement in `artifacts/api-server/src/lib/auth.ts`; operational finance routes such as `expenses.ts`, `bills.ts`, `receipts.ts`, `vendors.ts`, `programs.ts`; reviewer/reporting/control routes such as `dashboard.ts`, `approvals.ts`, `reports.ts`, `month-end.ts`, `accounting.ts`; file/object routes such as `storage.ts` and `ai.ts`
+- Highest-risk areas: role/session enforcement in `artifacts/api-server/src/lib/auth.ts`; operational finance routes such as `expenses.ts`, `bills.ts`, `receipts.ts`, `vendors.ts`, `programs.ts`; reviewer/reporting/control routes such as `dashboard.ts`, `approvals.ts`, `reports.ts`, `month-end.ts`, `accounting.ts`; file/object routes such as `storage.ts` and `ai.ts`; copilot tool execution and prompt-to-data boundaries in `artifacts/api-server/src/lib/copilotTools.ts`
 - Public vs authenticated vs admin: `/api` is globally authenticated in `app.ts`; many routes rely on that baseline and require additional per-role or per-record authorization; accounting/admin/reviewer actions must be restricted server-side, not just hidden in the client
 - Dev-only areas usually skipped: `artifacts/mockup-sandbox/**`
+- Special boundary reminders from this scan: `POST /api/ai/parse-bank-statement` and the `/api/accounting` copilot endpoints are production-reachable authenticated entry points that can mutate or disclose shared finance data even when the corresponding UI sections are hidden from submitters; legacy ownership fallbacks that use display names instead of durable user identifiers remain sensitive
 
 ## Threat Categories
 
@@ -37,7 +38,7 @@ The application relies on a signed session cookie and server-side user lookup to
 
 ### Tampering
 
-Users can create and modify financial records, attach receipts, import statements, and trigger accounting workflows. The server must compute or validate security-sensitive fields itself, enforce record ownership where applicable, and ensure lower-privilege roles cannot change status, approval, vendor, program, month-end, or accounting state outside their remit.
+Users can create and modify financial records, attach receipts, import statements, and trigger accounting workflows. The server must compute or validate security-sensitive fields itself, enforce record ownership where applicable, and ensure lower-privilege roles cannot change status, approval, vendor, program, month-end, transaction-ledger, or accounting state outside their remit. AI-assisted imports and copilot-triggered tool calls are part of this tampering surface because they can write shared finance records on behalf of the caller.
 
 ### Repudiation
 
@@ -45,7 +46,7 @@ Expense, bill, receipt, reporting-control, and accounting mutations need reliabl
 
 ### Information Disclosure
 
-Expense, bill, receipt, dashboard, approvals, reporting, and accounting endpoints expose organization financial data and uploaded documents. Responses must be scoped by role and need-to-know, and file download or AI-processing routes must not treat a database identifier or storage path as sufficient authorization on its own.
+Expense, bill, receipt, dashboard, approvals, reporting, and accounting endpoints expose organization financial data and uploaded documents. Responses must be scoped by role and need-to-know, and file download or AI-processing routes must not treat a database identifier or storage path as sufficient authorization on its own. Copilot tool calls and document-search features must enforce the same role and ownership limits as the underlying direct routes.
 
 ### Denial of Service
 
@@ -53,4 +54,4 @@ Authenticated users can trigger list views, file-processing flows, and potential
 
 ### Elevation of Privilege
 
-This project has a strong authenticated-but-differently-privileged threat model. The main risk is broken access control: a submitter or other low-privilege user reaching approver/admin capabilities or other users’ records through direct API calls. All privileged finance and accounting operations must be authorized server-side per route and, where relevant, per record ownership.
+This project has a strong authenticated-but-differently-privileged threat model. The main risk is broken access control: a submitter or other low-privilege user reaching approver/admin capabilities or other users’ records through direct API calls, AI-assisted import endpoints, or copilot tool execution. All privileged finance and accounting operations must be authorized server-side per route and, where relevant, per record ownership with durable identifiers rather than non-unique display names.
