@@ -47,6 +47,18 @@ overrides:
   '@tootallnate/once': '^3.0.0'
   brace-expansion: '^2.0.3'
   yaml: '^2.8.3'
+  # Task #112 — security overrides for transitive dependencies.
+  # fast-xml-parser <5.7.0: GHSA-gh4j-gqv2-49f6 (XMLBuilder XML
+  #   comment / CDATA injection). Pulled in by @google-cloud/storage.
+  # postcss <8.5.10: GHSA-qx2v-qp2m-jg93 (XSS via unescaped </style>
+  #   in stringify output). Pulled in transitively by Vite.
+  # uuid <14.0.0: GHSA-w5hq-g745-h8pq (missing buffer bounds check
+  #   in v3/v5/v6). Pulled in by @google-cloud/storage and gaxios.
+  #   The Google libs only call uuid.v4() (unaffected function and
+  #   API-stable across the bump), so the override is safe.
+  fast-xml-parser: '^5.7.2'
+  postcss: '^8.5.10'
+  uuid: '^14.0.0'
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'
