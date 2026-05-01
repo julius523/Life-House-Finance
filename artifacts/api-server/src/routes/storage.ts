@@ -5,8 +5,8 @@ import {
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { db, receiptsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, uploadedObjectsTable } from "@workspace/db";
+import { canReadObject } from "../lib/objectAuthz";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -19,6 +19,11 @@ const objectStorageService = new ObjectStorageService();
  * Then uploads the file directly to the returned presigned URL.
  */
 router.post("/storage/uploads/request-url", async (req: Request, res: Response) => {
+  const user = req.authUser;
+  if (!user) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
   const parsed = RequestUploadUrlBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Missing or invalid required fields" });
@@ -30,6 +35,17 @@ router.post("/storage/uploads/request-url", async (req: Request, res: Response) 
 
     const uploadURL = await objectStorageService.getObjectEntityUploadURL();
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
+
+    // Record the uploader so future requests that reference this objectPath
+    // (POST /receipts, POST /ai/parse-bank-statement, GET /storage/objects/*)
+    // can enforce ownership-based authorization.
+    await db.insert(uploadedObjectsTable).values({
+      objectPath,
+      uploadedBy: user.id,
+      fileName: name,
+      contentType,
+      size,
+    });
 
     res.json(
       RequestUploadUrlResponse.parse({
@@ -87,19 +103,21 @@ router.get("/storage/public-objects/*filePath", async (req: Request, res: Respon
  */
 router.get("/storage/objects/*path", async (req: Request, res: Response) => {
   try {
+    const user = req.authUser;
+    if (!user) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
     const raw = req.params.path;
     const wildcardPath = Array.isArray(raw) ? raw.join("/") : raw;
     const objectPath = `/objects/${wildcardPath}`;
 
-    // ACL: only serve private objects that are registered as receipts in the
-    // application database. This prevents enumeration of arbitrary objects in
-    // the bucket and limits exposure to files explicitly tracked by the app.
-    const known = await db
-      .select({ id: receiptsTable.id })
-      .from(receiptsTable)
-      .where(eq(receiptsTable.fileUrl, objectPath))
-      .limit(1);
-    if (known.length === 0) {
+    // Ownership-based authorization: admins and approvers may read any
+    // private object (receipts review workflow). Submitters may only read
+    // objects they uploaded themselves. Objects not registered in
+    // uploaded_objects are treated as not-found to avoid bucket enumeration.
+    const allowed = await canReadObject(user, objectPath);
+    if (!allowed) {
       res.status(404).json({ error: "Object not found" });
       return;
     }

@@ -7,6 +7,7 @@ import {
   ParseBankStatementResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { canConsumeUpload } from "../lib/objectAuthz";
 import { z } from "zod";
 
 const router: IRouter = Router();
@@ -42,10 +43,13 @@ Rules:
 - Do not include any text outside the JSON object.`;
 
 router.post("/ai/parse-bank-statement", async (req, res): Promise<void> => {
-  if (!openai) {
-    res
-      .status(503)
-      .json({ error: "AI integration is not configured on this server." });
+  // Authn + authz BEFORE the AI-availability check so unauthorized callers
+  // receive a deterministic 401/403 regardless of whether OpenAI is wired
+  // up. (Otherwise a misconfigured server would mask the security gate
+  // behind a 503 and obscure ownership enforcement.)
+  const user = req.authUser;
+  if (!user) {
+    res.status(401).json({ error: "Not authenticated" });
     return;
   }
 
@@ -55,6 +59,23 @@ router.post("/ai/parse-bank-statement", async (req, res): Promise<void> => {
     return;
   }
   const data = parsed.data;
+
+  // Authz: only the uploader (or an admin) may feed an objectPath into the
+  // AI parser. Without this check, any authenticated user could submit an
+  // arbitrary path and exfiltrate another user's statement contents via the
+  // returned line items.
+  const allowed = await canConsumeUpload(user, data.objectPath);
+  if (!allowed) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  if (!openai) {
+    res
+      .status(503)
+      .json({ error: "AI integration is not configured on this server." });
+    return;
+  }
 
   let buffer: Buffer;
   try {

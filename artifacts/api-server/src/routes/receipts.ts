@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { requireRole } from "../lib/auth";
+import { canConsumeUpload } from "../lib/objectAuthz";
 import { db } from "@workspace/db";
 import { receiptsTable, vendorsTable, expensesTable, billsTable, usersTable } from "@workspace/db";
 import { eq, and, desc, count, sql, ilike, or } from "drizzle-orm";
@@ -130,12 +131,24 @@ router.get("/receipts", async (req, res): Promise<void> => {
 });
 
 router.post("/receipts", requireRole("admin", "approver", "submitter"), async (req, res): Promise<void> => {
+  const user = req.authUser!;
   const parsed = CreateReceiptBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid body" });
     return;
   }
   const data = parsed.data;
+  // Authz: a fileUrl must reference an object the caller actually uploaded
+  // (or the caller must be admin). Without this guard, any user could attach
+  // another user's private object to one of their own receipts and read it
+  // back through GET /storage/objects/*.
+  if (data.fileUrl) {
+    const allowed = await canConsumeUpload(user, data.fileUrl);
+    if (!allowed) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+  }
   const [receipt] = await db
     .insert(receiptsTable)
     .values({

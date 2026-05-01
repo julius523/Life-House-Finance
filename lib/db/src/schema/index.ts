@@ -4,6 +4,7 @@ export * from "./vendor_contacts";
 export * from "./programs";
 export * from "./program_contacts";
 export * from "./receipts";
+export * from "./uploaded_objects";
 export * from "./expenses";
 export * from "./expense_categories";
 export * from "./bills";
