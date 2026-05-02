@@ -16,3 +16,4 @@
 // type from `generated/types`, add an explicit `export type { Name }`
 // re-export below.
 export * from "./generated/api";
+export * from "./generated/types";

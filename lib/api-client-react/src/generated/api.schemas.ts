@@ -5,8 +5,25 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+export type HealthStatusStatus =
+  (typeof HealthStatusStatus)[keyof typeof HealthStatusStatus];
+
+export const HealthStatusStatus = {
+  ok: "ok",
+  degraded: "degraded",
+} as const;
+
+export interface HealthProbe {
+  ok: boolean;
+  detail?: string;
+}
+
 export interface HealthStatus {
-  status: string;
+  status: HealthStatusStatus;
+  db: HealthProbe;
+  schema: HealthProbe;
+  scheduler: HealthProbe;
+  env: HealthProbe;
 }
 
 /**

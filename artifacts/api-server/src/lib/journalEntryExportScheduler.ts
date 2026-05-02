@@ -552,12 +552,19 @@ async function onScheduleAutoPaused(
 }
 
 async function tick(): Promise<void> {
+  // If a previous tick is still running, do NOT bump lastTickAt — that
+  // would mask a wedged tick and keep /healthz green forever. Liveness
+  // is only proven by a tick that actually reached the end of its body.
   if (inFlight) return;
   inFlight = true;
   try {
     await tickBody(runSchedule);
+    lastTickAt = new Date();
   } catch (err) {
     logger.error({ err }, "Journal-entry export scheduler tick failed");
+    // Errors are recoverable (a single tick threw, the next will retry)
+    // so we still update lastTickAt — the timer is provably alive.
+    lastTickAt = new Date();
   } finally {
     inFlight = false;
   }
@@ -642,8 +649,38 @@ async function tickBody(
   }
 }
 
+/**
+ * Liveness state for /healthz.
+ *
+ * `lastTickAt` is set by `tick()` ONLY after a tick body reaches the
+ * end of its critical section — a wedged tick that holds `inFlight` for
+ * minutes will leave this stale, which is what we want.
+ *
+ * `startedAt` is set the moment the timer is installed. /healthz uses
+ * it to skip the staleness check during the first tick interval after
+ * boot (otherwise `lastTickAt: null` would always look stale).
+ */
+let lastTickAt: Date | null = null;
+let startedAt: Date | null = null;
+
+export type SchedulerHealth = {
+  running: boolean;
+  inFlight: boolean;
+  lastTickAt: Date | null;
+  startedAt: Date | null;
+};
+
+export function getSchedulerHealth(): SchedulerHealth {
+  return { running: timer !== null, inFlight, lastTickAt, startedAt };
+}
+
+export function __setLastTickAtForTests(d: Date | null): void {
+  lastTickAt = d;
+}
+
 export function startJournalEntryExportScheduler(): void {
   if (timer) return;
+  startedAt = new Date();
   timer = setInterval(() => {
     void tick();
   }, TICK_INTERVAL_MS);

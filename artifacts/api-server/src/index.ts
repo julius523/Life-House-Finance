@@ -1,3 +1,13 @@
+// Boot guard: this import MUST come before any module that touches the
+// DB at evaluation time (e.g. ./app -> ./lib/auth -> @workspace/db,
+// which throws synchronously if DATABASE_URL is missing). envCheck only
+// depends on the logger, which has no DB chain — so importing it first
+// guarantees that a missing required var produces our structured fatal
+// log rather than the bare DB import-time stack trace.
+// See docs/runbooks/admin-env-vars.md.
+import { assertRequiredEnvVarsOrExit } from "./lib/envCheck";
+assertRequiredEnvVarsOrExit();
+
 import app from "./app";
 import { logger } from "./lib/logger";
 import { seedUsers } from "./lib/seedUsers";

@@ -11,6 +11,9 @@ Nonprofit bookkeeping monorepo (pnpm workspace).
 Short, in-product runbooks for finance staff. Each is one printable page or less and follows the same structure (when to use, prerequisites, step-by-step, success, common errors, escalate to). They live in `docs/runbooks/` and are bundled into the finance-portal at build time via `import.meta.glob` (see `artifacts/finance-portal/src/lib/runbooks.ts`).
 
 - `docs/runbooks/index.md` — 5-minute tour and master index
+- `docs/runbooks/admin-emergency.md` — on-call admin runbook (login down, JE post failures, blocked-queue jam, scheduled-export stalls, integrity findings)
+- `docs/runbooks/admin-backup-restore.md` — Postgres backup + restore drill (Task #139, verified 2026-05-02 against dev)
+- `docs/runbooks/admin-env-vars.md` — required vs optional environment variables, kept in sync with `src/lib/envCheck.ts`
 - `docs/runbooks/submit-expense.md`
 - `docs/runbooks/review-approve-expense.md`
 - `docs/runbooks/enter-bill-record-payment.md`

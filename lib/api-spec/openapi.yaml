@@ -3764,8 +3764,31 @@ components:
       properties:
         status:
           type: string
+          enum: [ok, degraded]
+        db:
+          $ref: "#/components/schemas/HealthProbe"
+        schema:
+          $ref: "#/components/schemas/HealthProbe"
+        scheduler:
+          $ref: "#/components/schemas/HealthProbe"
+        env:
+          $ref: "#/components/schemas/HealthProbe"
       required:
         - status
+        - db
+        - schema
+        - scheduler
+        - env
+
+    HealthProbe:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        detail:
+          type: string
+      required:
+        - ok
 
     BalanceSheetAccount:
       type: object
