@@ -73,4 +73,6 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-INTEGRATION_API_KEY = "95282745ff0a9c0c4bb3d464bb6dc128bd1e0e4f06a1418ee4e762b0ffd7e2ce"
+
+[userenv.development]
+SEED_DEV_USERS = "true"
