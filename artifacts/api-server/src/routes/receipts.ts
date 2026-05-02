@@ -289,16 +289,10 @@ router.get("/receipts/missing-report", async (req, res): Promise<void> => {
     sql`(${expensesTable.receiptIds} is null or array_length(${expensesTable.receiptIds}, 1) is null)`,
   ];
   if (user.role === "submitter") {
-    const display = `${user.firstName} ${user.lastName}`.trim();
-    baseConditions.push(
-      or(
-        eq(expensesTable.submittedByEmail, user.email),
-        and(
-          sql`${expensesTable.submittedByEmail} is null`,
-          eq(expensesTable.submittedBy, display),
-        ),
-      )!,
-    );
+    // Authorize only by the unique email identifier. Display-name matching was
+    // removed because names are not unique and could grant access to another
+    // user's legacy rows.
+    baseConditions.push(eq(expensesTable.submittedByEmail, user.email));
   }
 
   const expenses = await db

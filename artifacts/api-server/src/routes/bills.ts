@@ -783,19 +783,18 @@ router.post("/bills/:id/resubmit", async (req, res): Promise<void> => {
   const ownerEmail = existing.submittedByEmail?.toLowerCase() ?? null;
   const isOwnerByEmail =
     callerEmail !== null && ownerEmail !== null && callerEmail === ownerEmail;
-  const submitterName = req.authUser
-    ? `${req.authUser.firstName} ${req.authUser.lastName}`
-    : null;
-  const isOwnerByName =
-    ownerEmail === null &&
-    submitterName !== null &&
-    existing.submittedBy === submitterName;
-  if (!isAdmin && !isOwnerByEmail && !isOwnerByName) {
+  // Display-name matching was removed because names are not unique — a
+  // same-named staff member could resubmit another employee's legacy bill.
+  // Legacy rows with a NULL submittedByEmail are only accessible to admins.
+  if (!isAdmin && !isOwnerByEmail) {
     res
       .status(403)
       .json({ error: "Only the original submitter can resubmit this bill" });
     return;
   }
+  const submitterName = req.authUser
+    ? `${req.authUser.firstName} ${req.authUser.lastName}`
+    : null;
   const actorName = submitterName ?? existing.submittedBy ?? "Submitter";
 
   const [bill] = await db
