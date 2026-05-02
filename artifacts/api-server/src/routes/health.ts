@@ -1,5 +1,7 @@
 import { Router, type IRouter } from "express";
-import { sql } from "drizzle-orm";
+import { sql, getTableName, getTableColumns, is } from "drizzle-orm";
+import { PgTable } from "drizzle-orm/pg-core";
+import * as dbExports from "@workspace/db";
 import { db } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { getSchedulerHealth } from "../lib/journalEntryExportScheduler";
@@ -8,30 +10,34 @@ import { getMissingRequiredEnvVars } from "../lib/envCheck";
 const router: IRouter = Router();
 
 /**
- * Tables that MUST exist for the application to function. Used as a
- * cheap schema-parity smoke test — if any of these are missing the
- * deployment is fundamentally broken (e.g. drizzle-kit push didn't run,
- * or someone restored an empty DB) and we should fail health.
- *
- * Not exhaustive: this is a smoke test, not a full schema diff.
+ * Build the expected schema fingerprint by walking every Drizzle
+ * `pgTable` exported from `@workspace/db`. This means new tables and
+ * columns are picked up automatically — we don't have to maintain a
+ * hand-curated list (which was the weakness the code review flagged).
  */
-const REQUIRED_TABLES = [
-  "users",
-  "expenses",
-  "bills",
-  "receipts",
-  "vendors",
-  "programs",
-  "journal_entries",
-  "chart_of_accounts",
-  "activity_log",
-];
+type ExpectedTable = { table: string; columns: string[] };
+
+function buildExpectedSchema(): ExpectedTable[] {
+  const out: ExpectedTable[] = [];
+  for (const v of Object.values(dbExports)) {
+    if (!is(v as object, PgTable)) continue;
+    const t = v as PgTable;
+    const cols = getTableColumns(t);
+    out.push({
+      table: getTableName(t),
+      columns: Object.values(cols).map((c) => c.name),
+    });
+  }
+  return out;
+}
+
+const EXPECTED_SCHEMA: ExpectedTable[] = buildExpectedSchema();
 
 /**
- * Scheduler is considered live if it is running AND has either ticked
- * in the last 5 minutes OR has not been started long enough to have
- * ticked yet. The 5-minute window is 5x the 60-second tick interval
- * so a single missed tick does not flap health.
+ * Scheduler is healthy if it is running AND has either ticked in the
+ * last 5 minutes OR is still inside the post-boot grace window. The
+ * 5-minute window is 5x the 60-second tick interval so a single
+ * missed tick does not flap health.
  */
 const SCHEDULER_STALE_MS = 5 * 60 * 1000;
 
@@ -52,20 +58,57 @@ async function probeDatabase(): Promise<ProbeResult> {
   }
 }
 
+/**
+ * Schema-parity probe: every table the application's Drizzle schema
+ * declares must exist in the live DB, with every expected column
+ * present (by name). Catches a forgotten `drizzle-kit push` after a
+ * schema change, an empty DB after an accidental restore, and most
+ * cases where production has drifted away from the schema the code
+ * was built against.
+ *
+ * NOT a full migration verifier: types, defaults, and constraints are
+ * not compared (those are best handled by `drizzle-kit check`, which
+ * the post-merge hook runs at deploy time). The intent here is the
+ * "fail-fast on catastrophic drift" tier.
+ */
 async function probeSchema(): Promise<ProbeResult> {
   try {
-    const result = await db.execute<{ table_name: string }>(sql`
-      SELECT table_name
-      FROM information_schema.tables
+    const result = await db.execute<{
+      table_name: string;
+      column_name: string;
+    }>(sql`
+      SELECT table_name, column_name
+      FROM information_schema.columns
       WHERE table_schema = 'public'
-        AND table_type = 'BASE TABLE'
     `);
-    const present = new Set(result.rows.map((r) => r.table_name));
-    const missing = REQUIRED_TABLES.filter((t) => !present.has(t));
+    const present = new Map<string, Set<string>>();
+    for (const row of result.rows) {
+      let cols = present.get(row.table_name);
+      if (!cols) {
+        cols = new Set();
+        present.set(row.table_name, cols);
+      }
+      cols.add(row.column_name);
+    }
+    const missing: string[] = [];
+    for (const expected of EXPECTED_SCHEMA) {
+      const live = present.get(expected.table);
+      if (!live) {
+        missing.push(`table:${expected.table}`);
+        continue;
+      }
+      for (const col of expected.columns) {
+        if (!live.has(col)) missing.push(`${expected.table}.${col}`);
+      }
+    }
     if (missing.length > 0) {
+      // Cap the detail string so a totally-empty DB doesn't produce a
+      // multi-KB response body.
+      const head = missing.slice(0, 10).join(", ");
+      const more = missing.length > 10 ? ` (+${missing.length - 10} more)` : "";
       return {
         ok: false,
-        detail: `missing required tables: ${missing.join(", ")}`,
+        detail: `schema drift — missing: ${head}${more}`,
       };
     }
     return { ok: true };
@@ -87,10 +130,9 @@ function probeScheduler(): ProbeResult {
     }
     return { ok: true };
   }
-  // No tick has completed yet. That is healthy ONLY during a brief
-  // grace window after boot — beyond that, a null lastTickAt means the
-  // very first tick is wedged (or never fired) and we must report
-  // degraded so this is not silently green forever.
+  // No tick has completed yet. Healthy ONLY during the brief grace
+  // window after boot — beyond that, a null lastTickAt means the very
+  // first tick is wedged or never fired and we must report degraded.
   if (h.startedAt) {
     const age = Date.now() - h.startedAt.getTime();
     if (age > SCHEDULER_STALE_MS) {

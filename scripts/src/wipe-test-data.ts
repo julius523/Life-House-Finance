@@ -1,16 +1,20 @@
 /**
  * Targeted wipe of test-account data.
  *
- * Unlike POST /api/admin/wipe-data (which nukes EVERY non-user row), this
- * script removes only rows owned by an explicit allowlist of test
- * accounts. Safe to run periodically against production after a QA pass
- * to clear out test fixtures without touching real data.
+ * Unlike POST /api/admin/wipe-data (which nukes EVERY non-user row),
+ * this script removes only rows owned by an explicit allowlist of test
+ * accounts. Safe to run periodically against production after a QA
+ * pass to clear out test fixtures without touching real data.
  *
- * Test accounts are identified by:
- *   1. Email match against the dev-only.example domain (the existing
- *      synthetic seed convention — see seedUsers.ts).
- *   2. Plus any emails listed in the WIPE_TEST_USER_EMAILS env var
- *      (comma-separated). Useful for QA staff accounts.
+ * Test-account selection is intentionally narrow:
+ *   - Always: emails matching the @dev-only.example domain (the
+ *     existing synthetic seed convention — see seedUsers.ts).
+ *   - Additionally in non-production: emails listed in
+ *     WIPE_TEST_USER_EMAILS (comma-separated).
+ *
+ * In production, WIPE_TEST_USER_EMAILS is intentionally IGNORED — only
+ * the @dev-only.example domain match is honoured. A typo in the env
+ * var must not be able to delete a real user's data.
  *
  * Modes:
  *   --dry-run        (default) — print counts, do not delete.
@@ -18,15 +22,42 @@
  *   --yes            — explicit acknowledgement.
  *   --reason="..."   — free-text reason recorded in activity_log.
  *
+ * What gets deleted (per matched test user):
+ *   - expenses where submitted_by_email ∈ matched_emails
+ *   - bills    where submitted_by_email ∈ matched_emails
+ *   - receipts where uploaded_by ∈ matched_user_ids
+ *   - manual_journal_entry_drafts where created_by_user_id OR
+ *     submitted_by_user_id ∈ matched_user_ids
+ *   - accounting_source_links where created_by_user_id ∈ matched_user_ids
+ *   - journal_entry_export_schedules where created_by_user_id
+ *     ∈ matched_user_ids
+ *   - copilot_threads, copilot_messages (cascade), copilot_tool_calls
+ *     (cascade) where user_id ∈ matched_user_ids
+ *   - notifications where user_id ∈ matched_user_ids
+ *
+ * What is intentionally NOT deleted:
+ *   - journal_entries / journal_entry_lines: posted JEs are immutable
+ *     (the lock trigger in ensureSchema.ts will reject any DELETE). A
+ *     test account should never have posted real ledger entries; if
+ *     it has, that is itself a finding and the script will refuse to
+ *     run (see "refusal" below).
+ *   - activity_log: audit trail is preserved across wipes by design.
+ *     One fresh activity_log row IS added describing the wipe.
+ *
+ * Refusals (exit 1):
+ *   - No test users matched.
+ *   - In production: any matched user does not end with the
+ *     @dev-only.example domain (i.e. someone tried to use
+ *     WIPE_TEST_USER_EMAILS in prod).
+ *   - In production: any matched user has role admin/approver.
+ *   - Any matched user has posted journal entries (would be a real
+ *     data loss, and the lock trigger would block the delete anyway).
+ *   - --commit without --yes or without --reason.
+ *
  * Exit codes:
  *   0 — succeeded (dry-run or commit).
- *   1 — refusal (no test users matched, or admin/approver caught in
- *       allowlist, or missing required flags in commit mode).
+ *   1 — refusal as above.
  *   2 — runtime error.
- *
- * NOTE: activity_log rows owned by the test users are NOT deleted —
- * the audit trail is intentionally preserved across wipes. The script
- * also adds one fresh activity_log row describing what it did.
  *
  * Usage from repo root:
  *   pnpm --filter @workspace/scripts run wipe-test-data
@@ -41,7 +72,12 @@ import {
   activityLogTable,
   notificationsTable,
   manualJournalEntryDraftsTable,
+  accountingSourceLinksTable,
+  journalEntryExportSchedulesTable,
   copilotThreadsTable,
+  copilotMessagesTable,
+  copilotToolCallsTable,
+  journalEntriesTable,
 } from "@workspace/db";
 import { inArray, like, or, sql } from "drizzle-orm";
 
@@ -65,6 +101,10 @@ function parseArgs(argv: string[]): Args {
   return out;
 }
 
+function isProduction(): boolean {
+  return (process.env["NODE_ENV"] ?? "").toLowerCase() === "production";
+}
+
 function getAllowlistEmails(): string[] {
   const raw = process.env["WIPE_TEST_USER_EMAILS"] ?? "";
   return raw
@@ -76,14 +116,18 @@ function getAllowlistEmails(): string[] {
 async function findTestUsers(): Promise<
   { id: number; email: string; role: string }[]
 > {
-  const allowlist = getAllowlistEmails();
   const conditions = [like(usersTable.email, `%${TEST_EMAIL_DOMAIN}`)];
-  if (allowlist.length > 0) {
-    conditions.push(inArray(usersTable.email, allowlist));
+  // Allowlist is dev-only on purpose: we never want WIPE_TEST_USER_EMAILS
+  // to be the authority on "is this a test account" in production.
+  if (!isProduction()) {
+    const allowlist = getAllowlistEmails();
+    if (allowlist.length > 0) {
+      conditions.push(inArray(usersTable.email, allowlist));
+    }
   }
   const where =
     conditions.length === 1 ? conditions[0]! : or(...conditions)!;
-  const rows = await db
+  return db
     .select({
       id: usersTable.id,
       email: usersTable.email,
@@ -91,61 +135,134 @@ async function findTestUsers(): Promise<
     })
     .from(usersTable)
     .where(where);
-  return rows;
 }
+
+type Counts = Record<string, number>;
 
 async function countOwned(
   userIds: number[],
   emails: string[],
-): Promise<Record<string, number>> {
-  if (userIds.length === 0) return {};
-  const expenses = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(expensesTable)
-    .where(inArray(expensesTable.submittedByEmail, emails));
-  const bills = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(billsTable)
-    .where(inArray(billsTable.submittedByEmail, emails));
-  const receipts = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(receiptsTable)
-    .where(inArray(receiptsTable.uploadedBy, userIds));
-  const drafts = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(manualJournalEntryDraftsTable)
-    .where(inArray(manualJournalEntryDraftsTable.createdByUserId, userIds));
-  const threads = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(copilotThreadsTable)
-    .where(inArray(copilotThreadsTable.userId, userIds));
-  const notifications = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(notificationsTable)
-    .where(inArray(notificationsTable.userId, userIds));
+): Promise<Counts> {
+  const c = async (q: Promise<{ n: number }[]>) =>
+    (await q)[0]?.n ?? 0;
   return {
-    expenses: expenses[0]?.n ?? 0,
-    bills: bills[0]?.n ?? 0,
-    receipts: receipts[0]?.n ?? 0,
-    manual_journal_entry_drafts: drafts[0]?.n ?? 0,
-    copilot_threads: threads[0]?.n ?? 0,
-    notifications: notifications[0]?.n ?? 0,
+    expenses: await c(
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(expensesTable)
+        .where(inArray(expensesTable.submittedByEmail, emails)),
+    ),
+    bills: await c(
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(billsTable)
+        .where(inArray(billsTable.submittedByEmail, emails)),
+    ),
+    receipts: await c(
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(receiptsTable)
+        .where(inArray(receiptsTable.uploadedBy, userIds)),
+    ),
+    manual_journal_entry_drafts: await c(
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(manualJournalEntryDraftsTable)
+        .where(
+          or(
+            inArray(manualJournalEntryDraftsTable.createdByUserId, userIds),
+            inArray(
+              manualJournalEntryDraftsTable.submittedByUserId,
+              userIds,
+            ),
+          )!,
+        ),
+    ),
+    accounting_source_links: await c(
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(accountingSourceLinksTable)
+        .where(inArray(accountingSourceLinksTable.createdByUserId, userIds)),
+    ),
+    journal_entry_export_schedules: await c(
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(journalEntryExportSchedulesTable)
+        .where(
+          inArray(journalEntryExportSchedulesTable.createdByUserId, userIds),
+        ),
+    ),
+    copilot_threads: await c(
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(copilotThreadsTable)
+        .where(inArray(copilotThreadsTable.userId, userIds)),
+    ),
+    notifications: await c(
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(notificationsTable)
+        .where(inArray(notificationsTable.userId, userIds)),
+    ),
   };
+}
+
+async function countPostedJournalEntries(userIds: number[]): Promise<number> {
+  const r = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(journalEntriesTable)
+    .where(
+      or(
+        inArray(journalEntriesTable.postedByUserId, userIds),
+        inArray(journalEntriesTable.approverUserId, userIds),
+      )!,
+    );
+  return r[0]?.n ?? 0;
 }
 
 async function deleteOwned(
   userIds: number[],
   emails: string[],
-): Promise<Record<string, number>> {
-  if (userIds.length === 0) return {};
-  const out: Record<string, number> = {};
-  // Order: rows that other tables FK-reference go last. Posted journal
-  // entries are intentionally NOT deleted — the lock trigger in
-  // ensureSchema.ts will reject the DELETE, and a test account should
-  // never have posted real ledger entries anyway.
+): Promise<Counts> {
+  // Order: child / FK-pointing tables first; tables that other tables
+  // FK-reference go last. copilot_messages and copilot_tool_calls have
+  // ON DELETE CASCADE from copilot_threads but we delete them
+  // explicitly anyway so the deleted-row counts surface in the report.
+  const out: Counts = {};
+  const toolCalls = await db
+    .delete(copilotToolCallsTable)
+    .where(
+      sql`thread_id in (select id from copilot_threads where user_id = any(${userIds}::int[]))`,
+    );
+  out["copilot_tool_calls"] = toolCalls.rowCount ?? 0;
+  const messages = await db
+    .delete(copilotMessagesTable)
+    .where(
+      sql`thread_id in (select id from copilot_threads where user_id = any(${userIds}::int[]))`,
+    );
+  out["copilot_messages"] = messages.rowCount ?? 0;
+  const threads = await db
+    .delete(copilotThreadsTable)
+    .where(inArray(copilotThreadsTable.userId, userIds));
+  out["copilot_threads"] = threads.rowCount ?? 0;
+  const sourceLinks = await db
+    .delete(accountingSourceLinksTable)
+    .where(inArray(accountingSourceLinksTable.createdByUserId, userIds));
+  out["accounting_source_links"] = sourceLinks.rowCount ?? 0;
+  const schedules = await db
+    .delete(journalEntryExportSchedulesTable)
+    .where(
+      inArray(journalEntryExportSchedulesTable.createdByUserId, userIds),
+    );
+  out["journal_entry_export_schedules"] = schedules.rowCount ?? 0;
   const drafts = await db
     .delete(manualJournalEntryDraftsTable)
-    .where(inArray(manualJournalEntryDraftsTable.createdByUserId, userIds));
+    .where(
+      or(
+        inArray(manualJournalEntryDraftsTable.createdByUserId, userIds),
+        inArray(manualJournalEntryDraftsTable.submittedByUserId, userIds),
+      )!,
+    );
   out["manual_journal_entry_drafts"] = drafts.rowCount ?? 0;
   const receipts = await db
     .delete(receiptsTable)
@@ -163,17 +280,19 @@ async function deleteOwned(
     .delete(notificationsTable)
     .where(inArray(notificationsTable.userId, userIds));
   out["notifications"] = notifications.rowCount ?? 0;
-  const threads = await db
-    .delete(copilotThreadsTable)
-    .where(inArray(copilotThreadsTable.userId, userIds));
-  out["copilot_threads"] = threads.rowCount ?? 0;
   return out;
+}
+
+function printCounts(label: string, counts: Counts): void {
+  console.log(label);
+  for (const [k, v] of Object.entries(counts)) {
+    console.log(`  ${k.padEnd(34)} ${v}`);
+  }
 }
 
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
-  const isProd =
-    (process.env["NODE_ENV"] ?? "").toLowerCase() === "production";
+  const prod = isProduction();
 
   const users = await findTestUsers();
   if (users.length === 0) {
@@ -181,9 +300,23 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  // Refuse to touch admin/approver accounts in production, even if the
-  // operator explicitly listed them in WIPE_TEST_USER_EMAILS.
-  if (isProd) {
+  // In production: every matched user MUST be a @dev-only.example
+  // address. WIPE_TEST_USER_EMAILS is dev-only by construction
+  // (findTestUsers ignores it in prod), but a real production user
+  // could in theory have a dev-only address — we still hard-block
+  // anyone with role admin/approver as a second seatbelt.
+  if (prod) {
+    const offDomain = users.filter(
+      (u) => !u.email.toLowerCase().endsWith(TEST_EMAIL_DOMAIN),
+    );
+    if (offDomain.length > 0) {
+      console.error(
+        `Refusing to wipe in production: matched non-test-domain users: ${offDomain
+          .map((u) => u.email)
+          .join(", ")}`,
+      );
+      return 1;
+    }
     const privileged = users.filter(
       (u) => u.role === "admin" || u.role === "approver",
     );
@@ -199,16 +332,27 @@ async function main(): Promise<number> {
 
   const userIds = users.map((u) => u.id);
   const emails = users.map((u) => u.email);
+
+  // Refuse if any matched user has touched the posted ledger. The
+  // lock trigger would block the DELETE anyway, but failing here gives
+  // a clear, actionable message instead of an obscure trigger error.
+  const postedJEs = await countPostedJournalEntries(userIds);
+  if (postedJEs > 0) {
+    console.error(
+      `Refusing to wipe: matched test users have ${postedJEs} posted journal_entries (or are recorded as approver). ` +
+        `This indicates the test allowlist contains a real ledger participant. ` +
+        `Investigate before proceeding.`,
+    );
+    return 1;
+  }
+
   const counts = await countOwned(userIds, emails);
 
   console.log("Matched test users:");
   for (const u of users) {
     console.log(`  - ${u.email} (id=${u.id}, role=${u.role})`);
   }
-  console.log("Owned-row counts:");
-  for (const [k, v] of Object.entries(counts)) {
-    console.log(`  ${k.padEnd(32)} ${v}`);
-  }
+  printCounts("Owned-row counts:", counts);
 
   if (!args.commit) {
     console.log(
@@ -239,10 +383,7 @@ async function main(): Promise<number> {
     },
   });
 
-  console.log("\nDeleted-row counts:");
-  for (const [k, v] of Object.entries(deleted)) {
-    console.log(`  ${k.padEnd(32)} ${v}`);
-  }
+  printCounts("\nDeleted-row counts:", deleted);
   console.log("\nactivity_log entry recorded.");
   return 0;
 }

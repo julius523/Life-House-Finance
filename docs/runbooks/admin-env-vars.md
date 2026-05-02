@@ -32,7 +32,7 @@ in `artifacts/api-server/src/lib/envCheck.ts`.
 | `REPLIT_DEV_DOMAIN` | no | Local dev preview hostname. Used to populate dev-side CORS allowlist. | Dev preview blocked by CORS. |
 | `SEED_DEV_USERS` | no | Set to `true` only in `NODE_ENV=development` to insert the synthetic seed accounts (`dev-admin1@dev-only.example` etc.). The startup guard halts the process if this flag is set in any non-development environment. | Dev users not seeded. Setting it in production is a hard exit. |
 
-## Drizzle migrations
+## Drizzle migrations and the rollback gate
 
 This repo does **not** ship a `lib/db/migrations/` directory. Schema
 changes are applied by:
@@ -41,9 +41,26 @@ changes are applied by:
 3. Re-publishing — Replit's publish flow diffs dev → prod and applies
    the SQL automatically (see `.local/skills/database/references/database-migrations-on-publish.md`).
 
-There are therefore no per-migration rollback annotations. Rollback is
-"restore from the most recent backup" — see
-`docs/runbooks/admin-backup-restore.md`.
+Because there are no per-migration files, there are no per-migration
+rollback annotations. We replace that gate with two layers:
+
+1. **Schema parity gate** — `scripts/src/schema-parity-check.ts` runs
+   in `scripts/post-merge.sh` immediately after `drizzle-kit push`. It
+   walks every `pgTable` declared in `@workspace/db` and asserts that
+   each table and each column exists in the live DB by name. A
+   missing table or column hard-fails the merge (exit 1), so a publish
+   that "succeeded" but actually failed to apply schema changes
+   cannot silently go live.
+2. **Health-time parity check** — `/api/healthz` runs the same
+   walk against the live DB on every probe, returning 503 if any
+   declared table or column is absent. This catches drift introduced
+   between deploys (e.g. an out-of-band restore from an older dump).
+
+Rollback procedure itself is "restore from the most recent backup" —
+see `docs/runbooks/admin-backup-restore.md`. The schema parity gate
+ensures the database the code is talking to has the columns the code
+expects; rollback is how you recover the *data* when that no longer
+holds.
 
 ## Verifying
 
