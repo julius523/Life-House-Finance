@@ -1,0 +1,556 @@
+V1 Advanced Layer — Additional Finish Phases
+Phase 7 — Advanced AP Subledger
+Goal
+
+Turn bills/AP from “bill records that generate journal drafts” into a true AP subledger with aging, vendor balances, payment status, credit memos, partial payments, and reconciliation to the general ledger.
+
+Task 14 — AP Subledger Core Tables
+
+What & Why
+Bills exist, but we need a reliable AP subledger that tracks what is owed, what has been paid, what is overdue, and how it ties to the ledger.
+
+Done looks like
+
+Each vendor has an AP balance.
+Each bill has:
+original amount
+open balance
+paid amount
+status: draft, submitted, approved, posted, partially_paid, paid, voided
+due date
+aging bucket
+Partial payments are supported.
+Vendor credits / credit memos are supported.
+AP subledger total reconciles to the AP liability account in the ledger.
+
+Hard gates
+
+No payment can exceed the open bill balance.
+Voided bills cannot be paid.
+Paid bills cannot be edited except through reversal/adjustment workflows.
+AP subledger total must tie to the AP account in Trial Balance.
+Task 15 — Bill Payment Workflow
+
+What & Why
+Once bills are posted to AP, the app needs a controlled way to record payments without bypassing accounting controls.
+
+Done looks like
+
+Admin/Finance can record a payment against one or more bills.
+Payment creates a draft JE:
+Debit AP
+Credit Cash / Bank / Credit Card / Clearing
+Supports partial payments.
+Supports one payment paying multiple bills.
+Payment draft goes through the same JE approval workflow.
+Bill balances update only after the payment JE is posted.
+
+Hard gates
+
+No direct ledger post.
+No silent payment status update before JE post.
+Payment draft must link back to bill(s).
+Payment reversal restores bill open balance correctly.
+Task 16 — AP Aging Report
+
+What & Why
+You need to know what Life House owes, to whom, and how old it is.
+
+Done looks like
+
+New report: /reports/ap-aging
+Aging buckets:
+Current
+1–30
+31–60
+61–90
+90+
+Grouped by vendor.
+Drilldown from vendor total to bill detail.
+Export CSV.
+Total AP Aging equals AP subledger open balance.
+
+Hard gates
+
+Report excludes voided bills.
+Paid bills show only if user selects “include paid.”
+Report total reconciles to the AP control account.
+Task 17 — Vendor Statement / Vendor Ledger
+
+What & Why
+For each vendor, staff should be able to see every bill, credit, payment, and open balance.
+
+Done looks like
+
+Vendor detail page has AP Ledger tab.
+Shows:
+bills
+payments
+credits
+adjustments
+running balance
+Links to JE detail, bill detail, and payment detail.
+CSV export.
+Phase 8 — Fancy Anomaly Dashboards
+Goal
+
+Give Finance/Admin a visual command center that flags unusual, risky, duplicated, stale, or inconsistent finance activity before it becomes a mess.
+
+Task 18 — Anomaly Detection Rules Engine
+
+What & Why
+Before AI predicts anything, we need deterministic rule-based anomaly checks.
+
+Done looks like
+A rules engine detects:
+
+duplicate expenses
+duplicate bills
+missing receipts
+unusually high expense amounts
+bills past due
+expenses submitted after long delay
+vendor with sudden spend spike
+JE posted to unusual account
+manual JE over threshold
+stale draft JEs
+blocked accounting items
+integrity findings
+AP Aging risk
+unreconciled transactions
+
+Each anomaly has:
+
+type
+severity
+source record
+reason
+suggested next action
+status: open, reviewed, dismissed, resolved
+
+Hard gates
+
+Rules are explainable.
+No AI-only black-box anomalies in this task.
+Every anomaly links to source record.
+Task 19 — Finance Risk Dashboard
+
+What & Why
+Admins need one page that says, “What needs attention today?”
+
+Done looks like
+New page: /dashboard/finance-risk
+
+Cards:
+
+Open blocked accounting items
+Integrity findings
+Overdue bills
+AP Aging 60+
+Missing receipts
+Stale JE drafts
+Pending approvals
+Unusual spend
+Duplicate warnings
+Failed imports
+AI review queue
+
+Charts:
+
+AP Aging by bucket
+Expenses by program
+Spend by vendor
+Monthly revenue/expense trend
+Blocked items by reason
+Approval bottlenecks
+
+Hard gates
+
+Every card drills into a real filtered list.
+No vanity chart without action.
+Counts must match underlying list pages.
+Task 20 — Anomaly Review Queue
+
+What & Why
+Dashboards are useful, but queues get work done.
+
+Done looks like
+New page: /accounting/anomalies
+
+Operators can:
+
+view anomalies
+filter by severity/type/status
+open source record
+mark reviewed
+dismiss with required note
+assign to user
+export CSV
+
+Out of scope
+
+Auto-fixing anomalies.
+AI auto-dismissal.
+Phase 9 — Extra Report Visual Polish
+Goal
+
+Make reports feel executive-ready, auditor-friendly, and usable by non-accountants.
+
+Task 21 — Executive Financial Dashboard
+
+What & Why
+Leadership needs a polished summary without reading raw accounting reports.
+
+Done looks like
+New dashboard includes:
+
+cash balance
+revenue month-to-date
+expenses month-to-date
+net income
+AP outstanding
+blocked accounting count
+pending approvals
+budget vs actual summary
+top 5 vendors
+top 5 programs by spend
+
+Visuals:
+
+monthly trend lines
+spend pie/bar charts
+AP aging chart
+program spend comparison
+
+Hard gates
+
+Each visual links to the source report.
+Numbers match reports exactly.
+No separate calculation logic that can drift.
+Task 22 — Report Drilldown Polish
+
+What & Why
+The reports already have drilldowns, but V1 should make them clean and pleasant.
+
+Done looks like
+
+P&L rows expand smoothly.
+Balance Sheet rows expand smoothly.
+Trial Balance rows expand smoothly.
+Drilldowns show:
+JE number
+date
+account
+memo
+source: manual / expense / bill / remediation
+amount
+link to detail
+Empty states are friendly.
+CSV export available from every drilldown.
+Task 23 — Report Presentation Mode
+
+What & Why
+You will want to show reports to board members, funders, auditors, or internal leadership.
+
+Done looks like
+A “Presentation View” for key reports:
+
+hides app chrome
+shows clean Life House branding
+summary cards
+chart visuals
+export PDF button
+print-friendly layout
+
+Reports included:
+
+Executive Summary
+P&L
+Balance Sheet
+Trial Balance
+AP Aging
+Program Spend
+Vendor Spend
+Task 24 — Budget vs Actual Foundation
+
+What & Why
+To make dashboards meaningful, you need budget comparison.
+
+Done looks like
+
+Admin can create budgets by:
+account
+program
+month
+fiscal year
+Reports show:
+actual
+budget
+variance
+variance %
+Dashboard highlights large variances.
+
+Hard gates
+
+Budget entries are separate from ledger entries.
+Budget edits are audit-logged.
+Actuals come from posted ledger only.
+Phase 10 — Autonomous AI Actions, Safely
+
+This is the risky one. Yes, you can include it in V1, but it must be staged.
+
+The rule should be:
+
+AI can prepare, suggest, draft, classify, flag, and queue. AI cannot silently post, approve, delete, pay, or override controls.
+
+Task 25 — AI Action Policy Engine
+
+What & Why
+Before AI can do anything autonomous, the app needs rules that define what AI is allowed to do.
+
+Done looks like
+Create an AI action policy matrix:
+
+Allowed autonomous actions:
+
+classify receipt
+suggest expense category
+suggest CoA mapping
+flag duplicate
+create draft memo
+create draft JE from approved source if deterministic mapping exists
+create anomaly finding
+prepare explanation
+suggest remediation
+
+Human approval required:
+
+submit JE
+approve JE
+post JE
+mark not applicable
+dismiss anomaly
+change vendor master data
+change program master data
+record payment
+reverse JE
+remediate posted entries
+
+Never allowed:
+
+approve its own draft
+post directly to ledger
+delete audit history
+change closed periods
+bypass idempotency
+bypass role permissions
+alter source documents
+
+Hard gates
+
+Every AI action has:
+action type
+actor = AI service identity
+human reviewer when required
+source evidence
+confidence
+reason
+audit log
+Task 26 — AI Task Queue
+
+What & Why
+Autonomous AI needs a queue where actions are visible before they affect records.
+
+Done looks like
+New page: /ai/actions
+
+Shows:
+
+suggested actions
+pending human review
+completed actions
+rejected actions
+failed actions
+
+Each action includes:
+
+title
+source record
+proposed change
+evidence
+confidence
+risk level
+approve/reject buttons where human review is required
+
+Hard gates
+
+AI action cannot mutate protected records unless approved.
+Rejected actions remain in history.
+Approved actions execute through existing service paths only.
+Task 27 — Autonomous Receipt Classification
+
+What & Why
+Good first autonomous AI feature because it is useful but low-risk if controlled.
+
+Done looks like
+When a receipt is uploaded, AI can:
+
+extract merchant
+extract date
+extract total
+suggest category
+suggest linked expense/bill
+flag poor image quality
+flag missing required fields
+
+AI may update low-risk metadata only if confidence is high.
+
+Human review required for:
+
+linking to an expense/bill
+creating an expense
+changing accounting category
+affecting ledger
+Task 28 — AI Expense Review Assistant
+
+What & Why
+AI helps staff review expenses faster.
+
+Done looks like
+AI reviews submitted expenses and flags:
+
+missing receipt
+duplicate risk
+unusual amount
+category mismatch
+policy concern
+wrong program
+unclear description
+
+AI can:
+
+add review notes
+create anomaly finding
+recommend approve/reject/request-info
+
+AI cannot:
+
+approve expense
+reject expense
+change amount
+change submitter
+post accounting
+Task 29 — AI Bill Review Assistant
+
+What & Why
+Same idea for bills/AP.
+
+Done looks like
+AI reviews bills for:
+
+duplicate invoice number
+vendor mismatch
+missing W-9 marker if applicable
+unusual terms
+overdue due date
+suspicious amount
+missing category
+AP mapping issue
+
+AI can create review notes and anomaly findings.
+
+Human approval required for every financial state change.
+
+Task 30 — AI Report Explainer
+
+What & Why
+This is safe and very useful.
+
+Done looks like
+On reports, Copilot can explain:
+
+why revenue changed
+why expenses increased
+which vendors drove spend
+what caused AP growth
+why Trial Balance changed
+which blocked items affect reports
+whether P&L and Balance Sheet tie to ledger
+
+Hard gates
+
+Every explanation must cite retrieved report rows or ledger records.
+No unsupported claims.
+If data is missing, AI says so.
+No legal/tax/CPA final conclusions.
+Task 31 — AI Remediation Suggestion Engine
+
+What & Why
+AI can help explain how to fix integrity findings or anomalies without fixing them automatically.
+
+Done looks like
+For each finding, AI suggests:
+
+likely cause
+affected records
+recommended repair path
+risk level
+whether human review is required
+
+AI cannot execute repair unless a human approves and the existing remediation workflow supports it.
+
+Task 32 — AI Evaluation + Guardrail Suite
+
+What & Why
+If AI is in V1, it needs tests. Period.
+
+Done looks like
+Test suite covers:
+
+refuses to post directly
+refuses to approve its own draft
+refuses unsupported GAAP claim
+cites evidence
+handles missing data honestly
+does not expose unauthorized records
+does not bypass permissions
+does not mutate closed periods
+routes protected changes to human review
+
+Hard gate
+No autonomous AI feature ships without eval coverage.
+
+Updated V1 Finish Order With Your Advanced Features Included
+
+Here is the correct final order:
+
+Integrity Findings UI
+Guided Integrity Repair Workflow
+Permission Matrix + Enforcement Audit
+Authorization Regression Suite
+Accounting End-to-End Smoke Suite
+State-Machine Audit
+Reporting Regression / Parity Suite
+Scheduled Export Filter/Shareable-Link Parity
+AP Subledger Core
+Bill Payment Workflow
+AP Aging Report
+Vendor AP Ledger
+Anomaly Rules Engine
+Finance Risk Dashboard
+Anomaly Review Queue
+Executive Financial Dashboard
+Report Drilldown Polish
+Report Presentation Mode
+Budget vs Actual Foundation
+AI Action Policy Engine
+AI Task Queue
+Autonomous Receipt Classification
+AI Expense Review Assistant
+AI Bill Review Assistant
+AI Report Explainer
+AI Remediation Suggestions
+AI Evaluation + Guardrail Suite
+Production Safety Pack
+Operator Runbooks + Training Pack
+Launch Readiness Review
