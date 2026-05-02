@@ -1,3 +1,4 @@
+import { HelpLink } from "@/components/help-link";
 import { useState } from "react";
 import { Link } from "wouter";
 import { useListMonthEndChecklists, useCreateMonthEndChecklist, getListMonthEndChecklistsQueryKey } from "@workspace/api-client-react";
@@ -69,7 +70,10 @@ export default function MonthEndList() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Month-End Close</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold tracking-tight">Month-End Close</h1>
+            <HelpLink topic="month-end-close" />
+          </div>
           <p className="text-muted-foreground mt-1">
             Track and manage monthly accounting close procedures.
           </p>

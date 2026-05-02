@@ -1,3 +1,4 @@
+import { HelpLink } from "@/components/help-link";
 import { useEffect, useState } from "react";
 import {
   listUsers,
@@ -103,6 +104,7 @@ export default function AdminPage() {
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <Shield className="h-7 w-7 text-primary" />
             Admin — User Management
+            <HelpLink topic="invite-manage-users" />
           </h1>
           <p className="text-muted-foreground mt-1">
             Add staff accounts and change passwords.

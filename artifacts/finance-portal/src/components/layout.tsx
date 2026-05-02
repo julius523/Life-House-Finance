@@ -15,8 +15,9 @@ import {
   Shield,
   Calculator,
   LogOut,
+  HelpCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth, canAccess, type Section } from "@/lib/auth";
@@ -26,6 +27,9 @@ import {
   useGetBlockedBillsCount,
 } from "@workspace/api-client-react";
 import { Badge } from "@/components/ui/badge";
+import { HelpDrawer } from "@/components/help-drawer";
+import { openHelp } from "@/lib/runbooks";
+import { useToast } from "@/hooks/use-toast";
 
 const NAV_ITEMS: Array<{
   href: string;
@@ -55,6 +59,28 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, logout } = useAuth();
+  const { toast } = useToast();
+
+  // First-login one-time tour pointer. Keyed by user email so each new
+  // user sees it exactly once on this device. Safe no-op if email is
+  // missing or if localStorage is unavailable.
+  useEffect(() => {
+    if (!user?.email) return;
+    try {
+      const key = `lh-tour-seen:${user.email.toLowerCase()}`;
+      if (window.localStorage.getItem(key)) return;
+      window.localStorage.setItem(key, new Date().toISOString());
+      toast({
+        title: `Welcome, ${user.firstName ?? ""}`.trim() + "!",
+        description:
+          "New here? Open the 5-minute tour from the Help item in the sidebar.",
+        duration: 10_000,
+      });
+    } catch {
+      /* localStorage unavailable — silently skip */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.email]);
 
   const visible = NAV_ITEMS.filter((item) => canAccess(user?.role, item.section));
 
@@ -125,6 +151,21 @@ export function Layout({ children }: { children: React.ReactNode }) {
           );
         })}
       </nav>
+      <div className="px-4 pb-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start text-sidebar-foreground/80 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent"
+          onClick={() => {
+            setMobileOpen(false);
+            openHelp("index");
+          }}
+          data-testid="button-sidebar-help"
+        >
+          <HelpCircle className="mr-2 h-4 w-4" />
+          Help
+        </Button>
+      </div>
       {user && (
         <div className="p-4 border-t border-sidebar-border/50 space-y-2">
           <div className="flex items-start justify-between gap-2">
@@ -192,6 +233,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 overflow-auto">
         <div className="mx-auto max-w-6xl p-4 md:p-8">{children}</div>
       </main>
+
+      {/* Help drawer (mounted once at app shell so any HelpLink can open it) */}
+      <HelpDrawer />
     </div>
   );
 }

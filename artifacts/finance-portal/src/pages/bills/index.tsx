@@ -1,3 +1,4 @@
+import { HelpLink } from "@/components/help-link";
 import { useState } from "react";
 import { Link } from "wouter";
 import { useListBills } from "@workspace/api-client-react";
@@ -34,7 +35,10 @@ export default function BillsList() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Vendor Bills</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold tracking-tight">Vendor Bills</h1>
+            <HelpLink topic="enter-bill-record-payment" />
+          </div>
           <p className="text-muted-foreground mt-1">
             Manage incoming invoices and accounts payable.
           </p>

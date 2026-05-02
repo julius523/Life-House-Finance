@@ -1,3 +1,4 @@
+import { HelpLink } from "@/components/help-link";
 /**
  * Accounting → Remediation queue.
  *
@@ -235,8 +236,9 @@ export default function AccountingRemediationPage() {
   return (
     <div className="space-y-6 p-6" data-testid="page-accounting-remediation">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">
+        <h1 className="text-2xl font-bold tracking-tight inline-flex items-center gap-2">
           Accounting remediation
+          <HelpLink topic="resolve-blocked-queue" />
         </h1>
         <p className="text-sm text-muted-foreground">
           Every line-level integrity failure surfaced by reconciliation,

@@ -1,3 +1,4 @@
+import { HelpLink } from "@/components/help-link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   useGetFinancialSummaryReport,
@@ -1506,7 +1507,10 @@ export default function ReportsPage() {
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 no-print">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Reports</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold tracking-tight">Reports</h1>
+            <HelpLink topic="reports-and-scheduled-exports" />
+          </div>
           <p className="text-muted-foreground mt-1">
             Generate a printable financial summary across any date range.
           </p>

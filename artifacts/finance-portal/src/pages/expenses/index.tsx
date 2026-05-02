@@ -1,3 +1,4 @@
+import { HelpLink } from "@/components/help-link";
 import { useEffect, useState } from "react";
 import { Link, useSearch } from "wouter";
 import { useListExpenses } from "@workspace/api-client-react";
@@ -57,7 +58,10 @@ export default function ExpensesList() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Expenses</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold tracking-tight">Expenses</h1>
+            <HelpLink topic="submit-expense" />
+          </div>
           <p className="text-muted-foreground mt-1">
             Manage and track staff expense claims.
           </p>

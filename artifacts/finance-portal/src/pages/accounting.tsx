@@ -1,3 +1,4 @@
+import { HelpLink } from "@/components/help-link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, Link } from "wouter";
 import {
@@ -402,6 +403,7 @@ export default function AccountingPage() {
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <Calculator className="h-7 w-7 text-primary" />
             Accounting
+            <HelpLink topic="resolve-blocked-queue" />
           </h1>
           <p className="text-muted-foreground mt-1">
             Ask the Life House GAAP Copilot about classifications,

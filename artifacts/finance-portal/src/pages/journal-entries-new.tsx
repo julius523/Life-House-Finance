@@ -1,3 +1,4 @@
+import { HelpLink } from "@/components/help-link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, Link, useSearch } from "wouter";
 import {
@@ -556,7 +557,10 @@ export default function JournalEntriesNewPage() {
   if (!canPost) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-bold">New journal entry</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold">New journal entry</h1>
+          <HelpLink topic="post-manual-journal-entry" />
+        </div>
         <p className="text-muted-foreground">
           Only admins and approvers can post manual journal entries.
         </p>
@@ -571,6 +575,7 @@ export default function JournalEntriesNewPage() {
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <BookOpen className="h-7 w-7 text-primary" />
             {draftId !== null ? "Resume journal entry draft" : "New journal entry"}
+            <HelpLink topic="post-manual-journal-entry" />
           </h1>
           <p className="text-muted-foreground mt-1">
             Record an adjusting, accrual, depreciation, or reclass entry by

@@ -7,6 +7,27 @@ Nonprofit bookkeeping monorepo (pnpm workspace).
 - `artifacts/api-server` — Express + Drizzle/Postgres
 - `artifacts/mockup-sandbox` — component preview server
 
+## Operator docs
+Short, in-product runbooks for finance staff. Each is one printable page or less and follows the same structure (when to use, prerequisites, step-by-step, success, common errors, escalate to). They live in `docs/runbooks/` and are bundled into the finance-portal at build time via `import.meta.glob` (see `artifacts/finance-portal/src/lib/runbooks.ts`).
+
+- `docs/runbooks/index.md` — 5-minute tour and master index
+- `docs/runbooks/submit-expense.md`
+- `docs/runbooks/review-approve-expense.md`
+- `docs/runbooks/enter-bill-record-payment.md`
+- `docs/runbooks/post-manual-journal-entry.md`
+- `docs/runbooks/resolve-blocked-queue.md`
+- `docs/runbooks/month-end-close.md`
+- `docs/runbooks/reports-and-scheduled-exports.md`
+- `docs/runbooks/invite-manage-users.md`
+
+In-app surfaces:
+- Sidebar **Help** button opens the drawer (`HelpDrawer`) at the master index.
+- Each major page exposes a small `<HelpLink topic="…" />` next to the page title that deep-links into the matching runbook (Expenses, Bills, Approvals, Accounting, Remediation, Month End, Reports, Admin, Journal Entries — New).
+- First-login toast (keyed by `lh-tour-seen:<email>` in localStorage) points new users at the 5-minute tour. Fires exactly once per user per device.
+- Drawer is mounted once at the app shell. Cross-runbook links inside markdown navigate within the drawer (no page reload). HelpLink components communicate with the drawer via a `lh:open-help` `CustomEvent` — no React Context plumbing.
+
+To edit a runbook, edit the markdown file directly; Vite picks it up on next build.
+
 ## Recent shipped work
 - **Service-role + bearer-token API auth** — new role `service` for the Apps Script automation account `automation@lifehousereentry.com` (seeded id=704). Bearer-token auth via `INTEGRATION_API_KEY` env var with timing-safe compare (`src/lib/apiKey.ts`). Service can read `/credits`, `/credit-summary`, `/receipts`, `/bills`, `/expenses` and POST `/credits`, `/receipts`; everything else (writes to bills/expenses, deletes, admin, dashboard, reports, approvals) returns 403. `requireAuth` fails closed when an `Authorization` header is present but invalid (does not silently fall through to cookie). Login route rejects service role; service user is hidden from `/admin/users` and not creatable via UI. Same change set fixes broken production login by self-healing drifted bcrypt hashes for julius/kai/brittney/lifeup on every boot. Also fixed pre-existing routing bug where `dashboard.ts` and `reports.ts` had unscoped `router.use(requireRole(...))` that intercepted unrelated routes.
 - **Production login CORS fix (2026-05-02)** — production HTTPS login was returning HTTP 500 with bare HTML because `cors.ts` did a case-sensitive `Set.has(origin)` comparison while the deployed URL `https://Lifehouseaccounting.replit.app` carried a capital "L" in the Origin header but `REPLIT_DOMAINS` stored the host lowercased. Fix: `cors.ts` now lowercases both stored origins and incoming origins via a `normalize()` helper; `app.ts` uses `isAllowedOrigin(origin)` instead of touching the Set directly. DNS hosts are case-insensitive per RFC, so this matches expected behavior. Verified mixed-case Origin headers now return 401 (auth failure) instead of 500 (CORS crash).

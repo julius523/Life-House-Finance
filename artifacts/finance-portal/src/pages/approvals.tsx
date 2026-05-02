@@ -1,3 +1,4 @@
+import { HelpLink } from "@/components/help-link";
 import { useState } from "react";
 import { RejectDialog } from "@/components/reject-dialog";
 import { 
@@ -121,7 +122,10 @@ export default function Approvals() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Approval Queue</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-3xl font-bold tracking-tight">Approval Queue</h1>
+          <HelpLink topic="review-approve-expense" />
+        </div>
         <p className="text-muted-foreground mt-1">
           Review and approve pending expenses and bills.
         </p>
