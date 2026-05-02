@@ -5,7 +5,9 @@ import {
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
+import { isAllowedMimeType } from "../lib/allowedMimeTypes";
 import { db, uploadedObjectsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { canReadObject } from "../lib/objectAuthz";
 
 const router: IRouter = Router();
@@ -27,6 +29,11 @@ router.post("/storage/uploads/request-url", async (req: Request, res: Response) 
   const parsed = RequestUploadUrlBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Missing or invalid required fields" });
+    return;
+  }
+
+  if (!isAllowedMimeType(parsed.data.contentType)) {
+    res.status(400).json({ error: "Unsupported file type" });
     return;
   }
 
@@ -122,11 +129,28 @@ router.get("/storage/objects/*path", async (req: Request, res: Response) => {
       return;
     }
 
-    const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
+    const [objectFile, objectRecords] = await Promise.all([
+      objectStorageService.getObjectEntityFile(objectPath),
+      db.select().from(uploadedObjectsTable).where(eq(uploadedObjectsTable.objectPath, objectPath)).limit(1),
+    ]);
+    const objectRecord = objectRecords[0];
     const response = await objectStorageService.downloadObject(objectFile);
 
     res.status(response.status);
     response.headers.forEach((value, key) => res.setHeader(key, value));
+
+    // Security: always force download for private objects so active-content
+    // types (HTML, SVG, etc.) cannot execute in the browser on the same
+    // origin. Also neutralize the Content-Type and add nosniff so the
+    // browser cannot guess an executable MIME type.
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const safeFileName = objectRecord?.fileName ?? "download";
+    const encodedName = encodeURIComponent(safeFileName).replace(/'/g, "%27");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${encodedName}"; filename*=UTF-8''${encodedName}`,
+    );
 
     if (response.body) {
       const nodeStream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);

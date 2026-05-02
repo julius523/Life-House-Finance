@@ -1,6 +1,6 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, Download, FileBox } from "lucide-react";
+import { Download, FileBox } from "lucide-react";
 
 export interface ReceiptViewerFile {
   fileUrl?: string | null;
@@ -35,12 +35,6 @@ export function ReceiptViewer({ file, open, onOpenChange }: ReceiptViewerProps) 
             {href && (
               <div className="flex items-center gap-2 shrink-0">
                 <Button asChild variant="outline" size="sm">
-                  <a href={href} target="_blank" rel="noreferrer">
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    Open
-                  </a>
-                </Button>
-                <Button asChild variant="outline" size="sm">
                   <a href={href} download={file?.fileName}>
                     <Download className="mr-2 h-4 w-4" />
                     Download
@@ -63,11 +57,19 @@ export function ReceiptViewer({ file, open, onOpenChange }: ReceiptViewerProps) 
               className="max-h-full max-w-full object-contain"
             />
           ) : (
-            <iframe
-              src={href}
-              title={file?.fileName ?? "Receipt"}
-              className="w-full h-full bg-background"
-            />
+            <div className="text-center text-muted-foreground space-y-4">
+              <FileBox className="h-12 w-12 mx-auto opacity-40" />
+              <div className="text-sm font-medium">{file?.fileName}</div>
+              <div className="text-xs opacity-70">
+                Preview is not available for this file type.
+              </div>
+              <Button asChild variant="outline" size="sm">
+                <a href={href} download={file?.fileName}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Download to view
+                </a>
+              </Button>
+            </div>
           )}
         </div>
       </DialogContent>

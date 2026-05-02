@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { getAutomationUserId, requireRole } from "../lib/auth";
 import { isServiceCreatedRecord } from "../lib/apiKey";
 import { canConsumeUpload } from "../lib/objectAuthz";
+import { isAllowedMimeType } from "../lib/allowedMimeTypes";
 import {
   canReadReceipt,
   isOwnExpense,
@@ -169,6 +170,15 @@ router.post("/receipts", requireRole("admin", "approver", "submitter", "service"
     return;
   }
   const data = parsed.data;
+
+  // Reject any receipt whose fileType is not on the safe allowlist to
+  // prevent active-content types (HTML, SVG, etc.) from being stored
+  // and later embedded or linked in the reviewer UI.
+  if (data.fileType && !isAllowedMimeType(data.fileType)) {
+    res.status(400).json({ error: "Unsupported file type" });
+    return;
+  }
+
   // Authz: a fileUrl must reference an object the caller actually uploaded
   // (or the caller must be admin). Without this guard, any user could attach
   // another user's private object to one of their own receipts and read it
