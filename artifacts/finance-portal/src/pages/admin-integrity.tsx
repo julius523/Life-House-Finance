@@ -1,12 +1,16 @@
 /**
  * Task #104 — Integrity Findings UI (read-only snapshot viewer).
+ * Task #131 — Guided integrity-repair workflow.
  *
- * Renders a single sweep snapshot from `GET /api/admin/integrity/sweep`
- * (the locked, read-only contract added in Task #103). No write actions,
- * no history view, no fix buttons — just visibility on a single live
- * snapshot for pre-launch hardening.
+ * Renders a single sweep snapshot from `GET /api/admin/integrity/sweep`.
+ * Safe-set checks (loaded from /admin/integrity/repair-registry) gain a
+ * "Repair…" affordance that opens a confirmation modal listing the
+ * affected IDs and the planned change in plain English. Submitting the
+ * modal POSTs to /admin/integrity/sweep/repair, then re-fetches both the
+ * sweep snapshot and the recent-repairs feed so the operator sees the
+ * count drop and the per-ID outcomes (✓ repaired / ✗ skipped + reason).
  *
- * Behavior is locked by task-104.md:
+ * Behaviour locked by task-104.md:
  *   - Critical-hoist section pinned above the categorized sections.
  *   - Categorized sections render in this fixed order:
  *       structural → status_mismatch → missing_bridge → reversal →
@@ -24,7 +28,7 @@
  */
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { customFetch } from "@workspace/api-client-react";
 import {
   INTEGRITY_CATEGORIES,
@@ -44,14 +48,25 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertTriangle,
   CheckCircle2,
   Copy,
   Download,
+  History,
   RefreshCw,
   ShieldAlert,
+  Wrench,
+  XCircle,
 } from "lucide-react";
 import {
   downloadCsv,
@@ -204,6 +219,36 @@ export function buildIntegrityCsvRows(
 }
 
 // ---------------------------------------------------------------------------
+// Repair types
+// ---------------------------------------------------------------------------
+
+export type RepairRegistryItem = {
+  checkKey: string;
+  label: string;
+  description: string;
+  idLabel: string;
+};
+
+export type RepairOutcome = {
+  checkKey: string;
+  repaired: number[];
+  skipped: { id: number; reason: string }[];
+};
+
+type IntegrityRepairLogItem = {
+  id: number;
+  type: string;
+  description: string;
+  actor: string;
+  actorUserId: number | null;
+  actorEmail: string | null;
+  referenceType: string | null;
+  referenceId: number | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+// ---------------------------------------------------------------------------
 // Presentational pieces
 // ---------------------------------------------------------------------------
 
@@ -297,7 +342,17 @@ function SampleRefItem({ refItem }: { refItem: IntegritySampleRef }) {
   );
 }
 
-function CheckRow({ check }: { check: IntegrityCheckResult }) {
+function CheckRow({
+  check,
+  repairItem,
+  outcome,
+  onRepair,
+}: {
+  check: IntegrityCheckResult;
+  repairItem: RepairRegistryItem | null;
+  outcome: RepairOutcome | null;
+  onRepair: (check: IntegrityCheckResult, item: RepairRegistryItem) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const canExpand = check.sampleRefs.length > VISIBLE_SAMPLE_CAP;
   const visible = expanded
@@ -319,12 +374,40 @@ function CheckRow({ check }: { check: IntegrityCheckResult }) {
           <SeverityBadge severity={check.severity} />
           <span className="text-xs text-muted-foreground">{check.key}</span>
         </div>
-        <span
-          className="font-mono text-sm"
-          data-testid={`integrity-count-${check.key}`}
-        >
-          {check.count.toLocaleString()}
-        </span>
+        <div className="flex items-center gap-2">
+          <span
+            className="font-mono text-sm"
+            data-testid={`integrity-count-${check.key}`}
+          >
+            {check.count.toLocaleString()}
+          </span>
+          {repairItem ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => onRepair(check, repairItem)}
+              disabled={check.sampleRefs.length === 0}
+              data-testid={`integrity-repair-${check.key}`}
+              title={
+                check.sampleRefs.length === 0
+                  ? "No sample IDs returned by the sweep — nothing to repair"
+                  : repairItem.description
+              }
+            >
+              <Wrench className="mr-1 h-3 w-3" />
+              Repair…
+            </Button>
+          ) : (
+            <span
+              className="text-[11px] text-muted-foreground"
+              data-testid={`integrity-manual-${check.key}`}
+              title="This check is not in the safe-set repair registry."
+            >
+              Manual review required
+            </span>
+          )}
+        </div>
       </div>
       {check.sampleRefs.length > 0 && (
         <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
@@ -357,14 +440,78 @@ function CheckRow({ check }: { check: IntegrityCheckResult }) {
           )}
         </div>
       )}
+      {outcome && (
+        <RepairOutcomePanel checkKey={check.key} outcome={outcome} />
+      )}
     </li>
+  );
+}
+
+function RepairOutcomePanel({
+  checkKey,
+  outcome,
+}: {
+  checkKey: string;
+  outcome: RepairOutcome;
+}) {
+  return (
+    <div
+      className="mt-2 rounded border border-emerald-200 bg-emerald-50/40 px-2 py-2 text-xs"
+      data-testid={`integrity-outcome-${checkKey}`}
+    >
+      <div className="font-medium text-emerald-900">
+        Last repair · {outcome.repaired.length} repaired ·{" "}
+        {outcome.skipped.length} skipped
+      </div>
+      {outcome.repaired.length > 0 && (
+        <div
+          className="mt-1 flex flex-wrap items-center gap-1"
+          data-testid={`integrity-outcome-repaired-${checkKey}`}
+        >
+          <CheckCircle2 className="h-3 w-3 text-emerald-700" />
+          <span className="text-emerald-900">Repaired:</span>
+          {outcome.repaired.map((id) => (
+            <span
+              key={`r-${id}`}
+              className="rounded bg-emerald-100 px-1 py-0.5 font-mono text-[11px] text-emerald-900"
+            >
+              #{id}
+            </span>
+          ))}
+        </div>
+      )}
+      {outcome.skipped.length > 0 && (
+        <ul
+          className="mt-1 space-y-0.5"
+          data-testid={`integrity-outcome-skipped-${checkKey}`}
+        >
+          {outcome.skipped.map((s) => (
+            <li
+              key={`s-${s.id}`}
+              className="flex items-start gap-1 text-amber-900"
+            >
+              <XCircle className="mt-[2px] h-3 w-3 shrink-0 text-amber-700" />
+              <span>
+                <span className="font-mono">#{s.id}</span> — {s.reason}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
 export function IntegrityReportView({
   report,
+  registry,
+  outcomes,
+  onRepair,
 }: {
   report: IntegritySweepReport;
+  registry?: Record<string, RepairRegistryItem>;
+  outcomes?: Record<string, RepairOutcome>;
+  onRepair?: (check: IntegrityCheckResult, item: RepairRegistryItem) => void;
 }) {
   const grouped = useMemo(() => groupAndOrderChecks(report), [report]);
   const generatedAt = useMemo(
@@ -393,6 +540,16 @@ export function IntegrityReportView({
     );
   }
 
+  const renderCheck = (c: IntegrityCheckResult) => (
+    <CheckRow
+      key={c.key}
+      check={c}
+      repairItem={registry?.[c.key] ?? null}
+      outcome={outcomes?.[c.key] ?? null}
+      onRepair={onRepair ?? (() => undefined)}
+    />
+  );
+
   return (
     <div className="space-y-6">
       {grouped.critical.length > 0 && (
@@ -413,9 +570,7 @@ export function IntegrityReportView({
           </CardHeader>
           <CardContent>
             <ul className="space-y-2">
-              {grouped.critical.map((c) => (
-                <CheckRow key={c.key} check={c} />
-              ))}
+              {grouped.critical.map(renderCheck)}
             </ul>
           </CardContent>
         </Card>
@@ -431,11 +586,7 @@ export function IntegrityReportView({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="space-y-2">
-              {checks.map((c) => (
-                <CheckRow key={c.key} check={c} />
-              ))}
-            </ul>
+            <ul className="space-y-2">{checks.map(renderCheck)}</ul>
           </CardContent>
         </Card>
       ))}
@@ -444,10 +595,170 @@ export function IntegrityReportView({
 }
 
 // ---------------------------------------------------------------------------
+// Repair confirmation modal
+// ---------------------------------------------------------------------------
+
+function RepairConfirmDialog({
+  open,
+  check,
+  item,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  check: IntegrityCheckResult | null;
+  item: RepairRegistryItem | null;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!check || !item) {
+    return (
+      <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
+        <DialogContent />
+      </Dialog>
+    );
+  }
+  const ids = check.sampleRefs.map((r) => r.id);
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent
+        className="max-w-lg"
+        data-testid="integrity-repair-dialog"
+      >
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Wrench className="h-5 w-5" />
+            {item.label}
+          </DialogTitle>
+          <DialogDescription>
+            Confirm before applying. Each repair runs in its own
+            transaction and is replay-safe.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p>
+            <span className="font-semibold">What will change:</span>{" "}
+            {item.description}
+          </p>
+          <p>
+            <span className="font-semibold">
+              {item.idLabel}
+              {ids.length === 1 ? "" : "s"} that will be touched ({ids.length}
+              {check.sampleRefs.length < check.count
+                ? ` of ${check.count.toLocaleString()} — sweep capped samples`
+                : ""}
+              ):
+            </span>
+          </p>
+          <div
+            className="max-h-40 overflow-y-auto rounded border bg-muted/40 p-2 font-mono text-xs"
+            data-testid="integrity-repair-dialog-ids"
+          >
+            {ids.join(", ")}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            An audit row of type{" "}
+            <code className="rounded bg-muted px-1">integrity_repair</code>{" "}
+            will be written for each successful repair, attributed to your
+            user account.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={onCancel}
+            disabled={pending}
+            data-testid="integrity-repair-cancel"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={onConfirm}
+            disabled={pending || ids.length === 0}
+            data-testid="integrity-repair-confirm"
+          >
+            {pending
+              ? "Repairing…"
+              : `Repair ${ids.length} ${item.idLabel}${ids.length === 1 ? "" : "s"}`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Recent repairs panel (audit-log review path)
+// ---------------------------------------------------------------------------
+
+function RecentRepairsPanel({
+  items,
+  loading,
+}: {
+  items: IntegrityRepairLogItem[];
+  loading: boolean;
+}) {
+  return (
+    <Card data-testid="integrity-recent-repairs">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <History className="h-4 w-4" />
+          Recent integrity repairs
+          <Badge variant="secondary" className="ml-2 text-[11px]">
+            type=integrity_repair
+          </Badge>
+        </CardTitle>
+        <CardDescription>
+          Audit-log entries written by the guided repair workflow. Each row
+          is the result of one transaction.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-12 w-full" />
+        ) : items.length === 0 ? (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="integrity-recent-repairs-empty"
+          >
+            No integrity repairs have run yet.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {items.map((it) => (
+              <li
+                key={it.id}
+                className="rounded border border-border/60 px-3 py-2 text-sm"
+                data-testid={`integrity-recent-repair-${it.id}`}
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="font-medium">{it.description}</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {new Date(it.createdAt).toLocaleString()}
+                  </span>
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  by {it.actor}
+                  {it.actorEmail ? ` (${it.actorEmail})` : ""}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 const SWEEP_QUERY_KEY = ["admin", "integrity", "sweep"] as const;
+const REGISTRY_QUERY_KEY = ["admin", "integrity", "repair-registry"] as const;
+const REPAIRS_QUERY_KEY = ["admin", "integrity", "repairs"] as const;
 
 async function fetchSweep(): Promise<IntegritySweepReport> {
   return customFetch<IntegritySweepReport>("/api/admin/integrity/sweep", {
@@ -455,8 +766,35 @@ async function fetchSweep(): Promise<IntegritySweepReport> {
   });
 }
 
+async function fetchRegistry(): Promise<{ items: RepairRegistryItem[] }> {
+  return customFetch<{ items: RepairRegistryItem[] }>(
+    "/api/admin/integrity/repair-registry",
+    { responseType: "json" },
+  );
+}
+
+async function fetchRepairs(): Promise<{ items: IntegrityRepairLogItem[] }> {
+  return customFetch<{ items: IntegrityRepairLogItem[] }>(
+    "/api/admin/integrity/repairs",
+    { responseType: "json" },
+  );
+}
+
+async function postRepair(input: {
+  checkKey: string;
+  ids: number[];
+}): Promise<RepairOutcome> {
+  return customFetch<RepairOutcome>("/api/admin/integrity/sweep/repair", {
+    method: "POST",
+    body: JSON.stringify(input),
+    responseType: "json",
+  });
+}
+
 export default function AdminIntegrityPage() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+
   const query = useQuery({
     queryKey: SWEEP_QUERY_KEY,
     queryFn: fetchSweep,
@@ -464,6 +802,89 @@ export default function AdminIntegrityPage() {
     retry: false,
     staleTime: 0,
   });
+
+  const registryQuery = useQuery({
+    queryKey: REGISTRY_QUERY_KEY,
+    queryFn: fetchRegistry,
+    refetchOnWindowFocus: false,
+    retry: false,
+    staleTime: 60_000,
+  });
+
+  const repairsQuery = useQuery({
+    queryKey: REPAIRS_QUERY_KEY,
+    queryFn: fetchRepairs,
+    refetchOnWindowFocus: false,
+    retry: false,
+    staleTime: 0,
+  });
+
+  const registryByKey = useMemo(() => {
+    const out: Record<string, RepairRegistryItem> = {};
+    for (const it of registryQuery.data?.items ?? []) {
+      out[it.checkKey] = it;
+    }
+    return out;
+  }, [registryQuery.data]);
+
+  const [outcomes, setOutcomes] = useState<Record<string, RepairOutcome>>({});
+  const [dialogState, setDialogState] = useState<{
+    check: IntegrityCheckResult | null;
+    item: RepairRegistryItem | null;
+  }>({ check: null, item: null });
+
+  const repairMutation = useMutation({
+    mutationFn: postRepair,
+    onSuccess: async (result) => {
+      setOutcomes((prev) => ({ ...prev, [result.checkKey]: result }));
+      const repaired = result.repaired.length;
+      const skipped = result.skipped.length;
+      toast({
+        title: `${repaired} repaired · ${skipped} skipped`,
+        description:
+          skipped > 0
+            ? "Some IDs were skipped — see the per-row outcomes below the check."
+            : "Refreshing the sweep…",
+      });
+      setDialogState({ check: null, item: null });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SWEEP_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: REPAIRS_QUERY_KEY }),
+      ]);
+    },
+    onError: (err) => {
+      toast({
+        title: "Repair failed",
+        description: err instanceof Error ? err.message : undefined,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const onRepair = useCallback(
+    (check: IntegrityCheckResult, item: RepairRegistryItem) => {
+      setDialogState({ check, item });
+    },
+    [],
+  );
+
+  const onConfirmRepair = useCallback(() => {
+    const { check, item } = dialogState;
+    if (!check || !item) return;
+    const ids = check.sampleRefs
+      .map((r) => Number(r.id))
+      .filter((n) => Number.isInteger(n) && n > 0);
+    if (ids.length === 0) {
+      toast({
+        title: "Nothing to repair",
+        description: "No usable sample IDs on this check.",
+        variant: "destructive",
+      });
+      setDialogState({ check: null, item: null });
+      return;
+    }
+    repairMutation.mutate({ checkKey: item.checkKey, ids });
+  }, [dialogState, repairMutation, toast]);
 
   const report = query.data ?? null;
   const fetching = query.isFetching;
@@ -475,7 +896,8 @@ export default function AdminIntegrityPage() {
 
   const onRerun = useCallback(() => {
     void query.refetch();
-  }, [query]);
+    void repairsQuery.refetch();
+  }, [query, repairsQuery]);
 
   const onExport = useCallback(() => {
     if (!report) return;
@@ -505,7 +927,8 @@ export default function AdminIntegrityPage() {
           <p className="text-muted-foreground mt-1 max-w-2xl">
             Read-only snapshot of the database integrity sweep. Findings are
             grouped by category, with critical issues hoisted to the top.
-            Re-run regenerates the snapshot — no fixes are applied here.
+            Re-run regenerates the snapshot. Safe-set checks expose a
+            "Repair…" button for guided one-click repair.
           </p>
         </div>
         <div className="flex gap-2">
@@ -578,9 +1001,28 @@ export default function AdminIntegrityPage() {
               {report.failingChecks.toLocaleString()} failing
             </p>
           )}
-          <IntegrityReportView report={report} />
+          <IntegrityReportView
+            report={report}
+            registry={registryByKey}
+            outcomes={outcomes}
+            onRepair={onRepair}
+          />
         </>
       )}
+
+      <RecentRepairsPanel
+        items={repairsQuery.data?.items ?? []}
+        loading={repairsQuery.isLoading}
+      />
+
+      <RepairConfirmDialog
+        open={dialogState.check != null}
+        check={dialogState.check}
+        item={dialogState.item}
+        pending={repairMutation.isPending}
+        onCancel={() => setDialogState({ check: null, item: null })}
+        onConfirm={onConfirmRepair}
+      />
     </div>
   );
 }

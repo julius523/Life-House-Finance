@@ -21,13 +21,57 @@ import { Router as WouterRouter } from "wouter";
 import type { IntegritySweepReport } from "@workspace/db/integrity-types";
 
 // ---- Mocks must be hoisted -------------------------------------------------
-const { useQueryMock, customFetchMock } = vi.hoisted(() => ({
-  useQueryMock: vi.fn(),
-  customFetchMock: vi.fn(),
-}));
+const { useQueryMock, useMutationMock, useQueryClientMock, customFetchMock } =
+  vi.hoisted(() => ({
+    useQueryMock: vi.fn(),
+    useMutationMock: vi.fn(),
+    useQueryClientMock: vi.fn(),
+    customFetchMock: vi.fn(),
+  }));
+
+// The page now calls useQuery three times — sweep, repair-registry,
+// recent-repairs. Tests only care about the sweep call; for the other
+// two we return inert empty payloads keyed off queryKey so mocks set
+// up by individual tests for the sweep don't get consumed by the
+// other two queries.
+function defaultUseQueryImpl(opts: { queryKey?: readonly unknown[] }) {
+  const key = Array.isArray(opts?.queryKey) ? opts.queryKey.join("/") : "";
+  if (key === "admin/integrity/repair-registry") {
+    return {
+      data: { items: [] },
+      error: null,
+      isFetching: false,
+      isLoading: false,
+      refetch: vi.fn(),
+    };
+  }
+  if (key === "admin/integrity/repairs") {
+    return {
+      data: { items: [] },
+      error: null,
+      isFetching: false,
+      isLoading: false,
+      refetch: vi.fn(),
+    };
+  }
+  // Sweep call: use the per-test mock controller.
+  return useQueryMock(opts);
+}
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (...args: unknown[]) => useQueryMock(...args),
+  useQuery: (opts: { queryKey?: readonly unknown[] }) =>
+    defaultUseQueryImpl(opts),
+  useMutation: (...args: unknown[]) =>
+    useMutationMock(...args) ?? {
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+      isPending: false,
+      reset: vi.fn(),
+    },
+  useQueryClient: () =>
+    useQueryClientMock() ?? {
+      invalidateQueries: vi.fn().mockResolvedValue(undefined),
+    },
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
