@@ -1610,6 +1610,11 @@ export const ListReceiptsResponse = zod.object({
         .describe(
           'Display name of the uploader, or \"Unknown\" for legacy receipts',
         ),
+      entrySource: zod
+        .enum(["automation", "manual"])
+        .describe(
+          '\"automation\" when the receipt was uploaded by the automation\nservice account (e.g. a scheduled Apps Script import); \"manual\"\nfor every other uploader. Lets the UI filter or label rows by\norigin without exposing the raw service-account user id.\n',
+        ),
       createdAt: zod.coerce.date(),
     }),
   ),
@@ -1664,6 +1669,11 @@ export const GetReceiptResponse = zod.object({
     .optional()
     .describe(
       'Display name of the uploader, or \"Unknown\" for legacy receipts',
+    ),
+  entrySource: zod
+    .enum(["automation", "manual"])
+    .describe(
+      '\"automation\" when the receipt was uploaded by the automation\nservice account (e.g. a scheduled Apps Script import); \"manual\"\nfor every other uploader. Lets the UI filter or label rows by\norigin without exposing the raw service-account user id.\n',
     ),
   createdAt: zod.coerce.date(),
 });
@@ -3884,6 +3894,11 @@ export const ListCreditsResponse = zod.object({
       ]),
       notes: zod.string().nullable(),
       submittedBy: zod.string().nullable(),
+      entrySource: zod
+        .enum(["automation", "manual"])
+        .describe(
+          '\"automation\" when this credit was created via the automation\nservice account (the row\'s submittedBy starts with the\n\"Automation:\" marker); \"manual\" for every other entry.\n',
+        ),
       createdAt: zod.string(),
     }),
   ),
@@ -3943,6 +3958,11 @@ export const UpdateCreditResponse = zod.object({
     ]),
     notes: zod.string().nullable(),
     submittedBy: zod.string().nullable(),
+    entrySource: zod
+      .enum(["automation", "manual"])
+      .describe(
+        '\"automation\" when this credit was created via the automation\nservice account (the row\'s submittedBy starts with the\n\"Automation:\" marker); \"manual\" for every other entry.\n',
+      ),
     createdAt: zod.string(),
   }),
 });

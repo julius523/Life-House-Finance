@@ -4515,12 +4515,21 @@ components:
         uploadedByName:
           type: string
           description: Display name of the uploader, or "Unknown" for legacy receipts
+        entrySource:
+          type: string
+          enum: [automation, manual]
+          description: |
+            "automation" when the receipt was uploaded by the automation
+            service account (e.g. a scheduled Apps Script import); "manual"
+            for every other uploader. Lets the UI filter or label rows by
+            origin without exposing the raw service-account user id.
         createdAt:
           type: string
           format: date-time
       required:
         - id
         - fileName
+        - entrySource
         - createdAt
 
     ReceiptListResponse:
@@ -6485,6 +6494,13 @@ components:
         submittedBy:
           type: string
           nullable: true
+        entrySource:
+          type: string
+          enum: [automation, manual]
+          description: |
+            "automation" when this credit was created via the automation
+            service account (the row's submittedBy starts with the
+            "Automation:" marker); "manual" for every other entry.
         createdAt:
           type: string
       required:
@@ -6498,6 +6514,7 @@ components:
         - status
         - notes
         - submittedBy
+        - entrySource
         - createdAt
 
     CreditSummary:

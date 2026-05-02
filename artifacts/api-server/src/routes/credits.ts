@@ -3,7 +3,11 @@ import { z } from "zod";
 import { db, creditsTable, programsTable, CREDIT_STATUSES } from "@workspace/db";
 import { eq, desc, sql } from "drizzle-orm";
 import { requireAuth, requireRole } from "../lib/auth";
-import { AUTOMATION_DISPLAY_NAME, readApiSource } from "../lib/apiKey";
+import {
+  AUTOMATION_DISPLAY_NAME,
+  isServiceCreatedRecord,
+  readApiSource,
+} from "../lib/apiKey";
 
 const router: IRouter = Router();
 
@@ -37,10 +41,11 @@ function formatCredit(
   // ones. Derived from the submittedBy marker that POST /credits sets
   // for service-account callers (see the "Automation: <source>" prefix
   // there); legacy/manual rows return "manual".
-  const entrySource: "automation" | "manual" =
-    c.submittedBy && c.submittedBy.startsWith(`${AUTOMATION_DISPLAY_NAME}:`)
-      ? "automation"
-      : "manual";
+  const entrySource: "automation" | "manual" = isServiceCreatedRecord({
+    submittedBy: c.submittedBy,
+  })
+    ? "automation"
+    : "manual";
   return {
     id: c.id,
     source: c.source,

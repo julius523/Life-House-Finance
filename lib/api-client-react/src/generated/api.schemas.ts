@@ -526,6 +526,21 @@ export interface CreateBillBody {
   submittedBy?: string;
 }
 
+/**
+ * "automation" when the receipt was uploaded by the automation
+service account (e.g. a scheduled Apps Script import); "manual"
+for every other uploader. Lets the UI filter or label rows by
+origin without exposing the raw service-account user id.
+
+ */
+export type ReceiptEntrySource =
+  (typeof ReceiptEntrySource)[keyof typeof ReceiptEntrySource];
+
+export const ReceiptEntrySource = {
+  automation: "automation",
+  manual: "manual",
+} as const;
+
 export interface Receipt {
   id: number;
   fileName: string;
@@ -543,6 +558,12 @@ export interface Receipt {
   uploadedBy?: number;
   /** Display name of the uploader, or "Unknown" for legacy receipts */
   uploadedByName?: string;
+  /** "automation" when the receipt was uploaded by the automation
+service account (e.g. a scheduled Apps Script import); "manual"
+for every other uploader. Lets the UI filter or label rows by
+origin without exposing the raw service-account user id.
+ */
+  entrySource: ReceiptEntrySource;
   createdAt: string;
 }
 
@@ -1739,6 +1760,20 @@ export const CreditStatus = {
   opportunity: "opportunity",
 } as const;
 
+/**
+ * "automation" when this credit was created via the automation
+service account (the row's submittedBy starts with the
+"Automation:" marker); "manual" for every other entry.
+
+ */
+export type CreditEntrySource =
+  (typeof CreditEntrySource)[keyof typeof CreditEntrySource];
+
+export const CreditEntrySource = {
+  automation: "automation",
+  manual: "manual",
+} as const;
+
 export interface Credit {
   id: number;
   source: string;
@@ -1750,6 +1785,11 @@ export interface Credit {
   status: CreditStatus;
   notes: string | null;
   submittedBy: string | null;
+  /** "automation" when this credit was created via the automation
+service account (the row's submittedBy starts with the
+"Automation:" marker); "manual" for every other entry.
+ */
+  entrySource: CreditEntrySource;
   createdAt: string;
 }
 

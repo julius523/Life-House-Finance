@@ -140,6 +140,36 @@ export async function loadServiceUserFromBearer(
   return toAuthUser(user);
 }
 
+/**
+ * Lazy, process-lifetime cache of the seeded automation user's row id.
+ * Used by formatReceipt to derive `entrySource` from the receipt's
+ * uploadedBy FK without joining on every row. The lookup is performed
+ * at most once per process; if it misses (e.g. seedUsers hasn't run
+ * yet on a brand-new DB) we re-attempt on the next call instead of
+ * caching the null.
+ */
+let cachedAutomationUserId: number | null = null;
+
+export async function getAutomationUserId(): Promise<number | null> {
+  if (cachedAutomationUserId !== null) return cachedAutomationUserId;
+  const [user] = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(eq(usersTable.email, AUTOMATION_USER_EMAIL));
+  if (!user) return null;
+  cachedAutomationUserId = user.id;
+  return cachedAutomationUserId;
+}
+
+/**
+ * Test hook: force-reset the automation-user-id cache so a test can
+ * mutate the seeded row and re-observe the lookup. Production code
+ * never calls this.
+ */
+export function __resetAutomationUserIdCacheForTests(): void {
+  cachedAutomationUserId = null;
+}
+
 export function requireAuth(
   req: Request,
   res: Response,

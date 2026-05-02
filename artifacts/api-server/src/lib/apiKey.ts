@@ -92,3 +92,54 @@ export function readApiSource(req: Request): string {
   const trimmed = raw.trim().slice(0, 64);
   return trimmed.length > 0 ? trimmed : API_SOURCE_DEFAULT;
 }
+
+/**
+ * The marker prefix POST /credits stamps onto `submittedBy` for service
+ * callers (e.g. "Automation: payroll-script"). Used by formatCredit to
+ * derive the public `entrySource` field, and by tests/integrations that
+ * need to recognise an automation-created credit row from the durable
+ * column alone.
+ */
+export const AUTOMATION_SUBMITTED_BY_PREFIX = `${AUTOMATION_DISPLAY_NAME}:`;
+
+/**
+ * Returns true when the given identity hint indicates a record created
+ * by the automation service account. Two hint shapes are accepted:
+ *
+ *   - { submittedByEmail: string | null }   — credits/expenses/bills
+ *     where the durable identity column is the submitter's email.
+ *   - { submittedBy: string | null }        — credits' historical text
+ *     column carrying the "Automation: <source>" marker.
+ *   - { uploadedByUserId, automationUserId }— receipts, where uploads
+ *     are attributed by integer user FK rather than a free-text field.
+ *
+ * Any of the three matching produces a true result; missing hints are
+ * treated as "not automation". Pure: does no IO.
+ */
+export function isServiceCreatedRecord(hint: {
+  submittedBy?: string | null;
+  submittedByEmail?: string | null;
+  uploadedByUserId?: number | null;
+  automationUserId?: number | null;
+}): boolean {
+  if (
+    typeof hint.submittedBy === "string" &&
+    hint.submittedBy.startsWith(AUTOMATION_SUBMITTED_BY_PREFIX)
+  ) {
+    return true;
+  }
+  if (
+    typeof hint.submittedByEmail === "string" &&
+    hint.submittedByEmail.toLowerCase() === AUTOMATION_USER_EMAIL.toLowerCase()
+  ) {
+    return true;
+  }
+  if (
+    typeof hint.uploadedByUserId === "number" &&
+    typeof hint.automationUserId === "number" &&
+    hint.uploadedByUserId === hint.automationUserId
+  ) {
+    return true;
+  }
+  return false;
+}

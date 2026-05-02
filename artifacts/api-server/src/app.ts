@@ -6,7 +6,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { requireAuth } from "./lib/auth";
 import { ensureTodaySnapshot } from "./lib/dailySnapshot";
-import { allowedOrigins } from "./lib/cors";
+import { isAllowedOrigin } from "./lib/cors";
 
 const app: Express = express();
 
@@ -36,7 +36,7 @@ app.use(
         callback(null, true);
         return;
       }
-      if (allowedOrigins.has(origin)) {
+      if (isAllowedOrigin(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`CORS: origin '${origin}' is not allowed`));

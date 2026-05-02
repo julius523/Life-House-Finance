@@ -5,6 +5,7 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { ReceiptEntrySource } from "./receiptEntrySource";
 
 export interface Receipt {
   id: number;
@@ -23,5 +24,11 @@ export interface Receipt {
   uploadedBy?: number;
   /** Display name of the uploader, or "Unknown" for legacy receipts */
   uploadedByName?: string;
+  /** "automation" when the receipt was uploaded by the automation
+service account (e.g. a scheduled Apps Script import); "manual"
+for every other uploader. Lets the UI filter or label rows by
+origin without exposing the raw service-account user id.
+ */
+  entrySource: ReceiptEntrySource;
   createdAt: Date;
 }

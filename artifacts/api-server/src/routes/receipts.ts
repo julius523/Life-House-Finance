@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
-import { requireRole } from "../lib/auth";
+import { getAutomationUserId, requireRole } from "../lib/auth";
+import { isServiceCreatedRecord } from "../lib/apiKey";
 import { canConsumeUpload } from "../lib/objectAuthz";
 import {
   canReadReceipt,
@@ -43,7 +44,20 @@ function formatReceipt(
   r: typeof receiptsTable.$inferSelect,
   vendorName?: string,
   uploadedByName?: string,
+  automationUserId?: number | null,
 ) {
+  // entrySource lets the UI badge automation-uploaded receipts (e.g.
+  // "auto" pill) without exposing the raw service-account user id.
+  // Resolves via the cached automation user id; if that lookup ever
+  // fails (fresh DB before seedUsers ran) we fall back to "manual",
+  // which is the safe default — automation rows can't exist without a
+  // seeded service account.
+  const entrySource: "automation" | "manual" = isServiceCreatedRecord({
+    uploadedByUserId: r.uploadedBy,
+    automationUserId: automationUserId ?? null,
+  })
+    ? "automation"
+    : "manual";
   return {
     id: r.id,
     fileName: r.fileName,
@@ -59,6 +73,7 @@ function formatReceipt(
     linkedBillId: r.linkedBillId ?? undefined,
     uploadedBy: r.uploadedBy ?? undefined,
     uploadedByName: uploadedByName ?? "Unknown",
+    entrySource,
     createdAt: r.createdAt.toISOString(),
   };
 }
@@ -135,11 +150,12 @@ router.get("/receipts", async (req, res): Promise<void> => {
     db.select({ cnt: count() }).from(receiptsTable).where(where),
   ]);
 
+  const automationUserId = await getAutomationUserId();
   const items = rows.map(({ receipt, vendorName, uploaderFirst, uploaderLast }) => {
     const uploadedByName = uploaderFirst || uploaderLast
       ? `${uploaderFirst ?? ""} ${uploaderLast ?? ""}`.trim()
       : "Unknown";
-    return formatReceipt(receipt, vendorName ?? undefined, uploadedByName);
+    return formatReceipt(receipt, vendorName ?? undefined, uploadedByName, automationUserId);
   });
 
   res.json(ListReceiptsResponse.parse({ items, total: totalResult[0]?.cnt ?? 0, page }));
@@ -244,11 +260,12 @@ router.post("/receipts", requireRole("admin", "approver", "submitter", "service"
       .where(eq(expensesTable.id, data.linkedExpenseId));
   }
 
-  const [vendorName, uploadedByName] = await Promise.all([
+  const [vendorName, uploadedByName, automationUserId] = await Promise.all([
     getVendorName(receipt.vendorId),
     getUploaderName(receipt.uploadedBy),
+    getAutomationUserId(),
   ]);
-  res.status(201).json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName, uploadedByName)));
+  res.status(201).json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName, uploadedByName, automationUserId)));
 });
 
 router.get("/receipts/missing-report", async (req, res): Promise<void> => {
@@ -321,11 +338,12 @@ router.get("/receipts/:id", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Not found" });
     return;
   }
-  const [vendorName, uploadedByName] = await Promise.all([
+  const [vendorName, uploadedByName, automationUserId] = await Promise.all([
     getVendorName(receipt.vendorId),
     getUploaderName(receipt.uploadedBy),
+    getAutomationUserId(),
   ]);
-  res.json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName, uploadedByName)));
+  res.json(GetReceiptResponse.parse(formatReceipt(receipt, vendorName, uploadedByName, automationUserId)));
 });
 
 router.delete("/receipts/:id", requireRole("admin", "approver", "submitter"), async (req, res): Promise<void> => {

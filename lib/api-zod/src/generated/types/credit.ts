@@ -5,6 +5,7 @@
  * Life House Reentry Finance Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { CreditEntrySource } from "./creditEntrySource";
 import type { CreditStatus } from "./creditStatus";
 
 export interface Credit {
@@ -18,5 +19,10 @@ export interface Credit {
   status: CreditStatus;
   notes: string | null;
   submittedBy: string | null;
+  /** "automation" when this credit was created via the automation
+service account (the row's submittedBy starts with the
+"Automation:" marker); "manual" for every other entry.
+ */
+  entrySource: CreditEntrySource;
   createdAt: string;
 }
