@@ -6,6 +6,8 @@ Life House Reentry is a nonprofit bookkeeping application in a pnpm monorepo. Th
 
 Per project assumptions, `artifacts/mockup-sandbox` is a development-only preview environment and is not deployed to production. Production traffic is terminated with platform-managed TLS, so this scan focuses on production-reachable application-layer issues.
 
+This scan confirmed that production risk is concentrated in authenticated authorization drift, unsafe rendering of private uploads, and credential/secret exposure rather than network transport or mockup-only code. Deterministic scans produced one actionable SAST secret finding and no HoundDog findings.
+
 ## Assets
 
 - **User sessions and role assignments** — the signed `lh_session` cookie and server-side role lookup determine whether a user acts as an admin, approver, or submitter. Compromise or misuse allows broad access to financial workflows.
@@ -20,6 +22,8 @@ Per project assumptions, `artifacts/mockup-sandbox` is a development-only previe
 - **Authenticated user to privileged role boundary** — submitters, approvers, and admins have materially different permissions. Role and ownership checks must be enforced in backend route handlers and services, not only in frontend route guards.
 - **API to PostgreSQL** — the API server can read and mutate all financial records. Input validation and safe query construction are required to prevent unauthorized access or data corruption.
 - **API to object storage / file-processing services** — receipt and statement files cross into storage and AI-processing flows. Object identifiers and storage paths must be treated as sensitive capabilities and checked against caller authorization.
+- **Stored document to browser execution boundary** — uploaded private files are attacker-controlled content. Any inline same-origin rendering path can turn a document upload into script execution in a reviewer’s authenticated browser session.
+- **Repository/configuration to production identity boundary** — source-controlled passwords and bearer tokens must be treated as production secrets because this codebase seeds real accounts and authenticates a live automation principal from environment configuration.
 - **Production to dev-only boundary** — `artifacts/mockup-sandbox` is intentionally out of production scope unless production reachability is demonstrated.
 
 ## Scan Anchors
@@ -29,12 +33,13 @@ Per project assumptions, `artifacts/mockup-sandbox` is a development-only previe
 - Public vs authenticated vs admin: `/api` is globally authenticated in `app.ts`; many routes rely on that baseline and require additional per-role or per-record authorization; accounting/admin/reviewer actions must be restricted server-side, not just hidden in the client
 - Dev-only areas usually skipped: `artifacts/mockup-sandbox/**`
 - Special boundary reminders from this scan: `POST /api/ai/parse-bank-statement` and the `/api/accounting` copilot endpoints are production-reachable authenticated entry points that can mutate or disclose shared finance data even when the corresponding UI sections are hidden from submitters; legacy ownership fallbacks that use display names instead of durable user identifiers remain sensitive
+- Confirmed hot spots from this scan: `src/lib/seedUsers.ts` + `src/index.ts` for boot-time credential seeding, `.replit` + `src/lib/apiKey.ts` for machine-token exposure, `src/routes/storage.ts` + `src/lib/objectStorage.ts` + `receipt-viewer.tsx` for same-origin file rendering, `src/lib/copilotTools.ts` and `src/routes/coa.ts` for accounting metadata disclosure to submitters, and legacy name-based ownership checks in `bills.ts` / `receipts.ts`
 
 ## Threat Categories
 
 ### Spoofing
 
-The application relies on a signed session cookie and server-side user lookup to identify staff users. The API must reject unauthenticated requests, bind all sensitive actions to the authenticated principal, and avoid trusting client-supplied identity fields such as submitter names or email addresses when creating or mutating records.
+The application relies on a signed session cookie and server-side user lookup to identify staff users. The API must reject unauthenticated requests, bind all sensitive actions to the authenticated principal, avoid shipping reusable built-in human credentials, and avoid trusting client-supplied or non-unique identity fields such as submitter names when creating or mutating records.
 
 ### Tampering
 
@@ -46,7 +51,7 @@ Expense, bill, receipt, reporting-control, and accounting mutations need reliabl
 
 ### Information Disclosure
 
-Expense, bill, receipt, dashboard, approvals, reporting, and accounting endpoints expose organization financial data and uploaded documents. Responses must be scoped by role and need-to-know, and file download or AI-processing routes must not treat a database identifier or storage path as sufficient authorization on its own. Copilot tool calls and document-search features must enforce the same role and ownership limits as the underlying direct routes.
+Expense, bill, receipt, dashboard, approvals, reporting, and accounting endpoints expose organization financial data and uploaded documents. Responses must be scoped by role and need-to-know, and file download or AI-processing routes must not treat a database identifier or storage path as sufficient authorization on its own. Copilot tool calls and document-search features must enforce the same role and ownership limits as the underlying direct routes. Private uploads must also be rendered as inert downloads or safely sandboxed, because otherwise a low-privilege uploader can turn a receipt into an active-content exfiltration path against privileged reviewers.
 
 ### Denial of Service
 
@@ -54,4 +59,4 @@ Authenticated users can trigger list views, file-processing flows, and potential
 
 ### Elevation of Privilege
 
-This project has a strong authenticated-but-differently-privileged threat model. The main risk is broken access control: a submitter or other low-privilege user reaching approver/admin capabilities or other users’ records through direct API calls, AI-assisted import endpoints, or copilot tool execution. All privileged finance and accounting operations must be authorized server-side per route and, where relevant, per record ownership with durable identifiers rather than non-unique display names.
+This project has a strong authenticated-but-differently-privileged threat model. The main risk is broken access control: a submitter or other low-privilege user reaching approver/admin capabilities or other users’ records through direct API calls, AI-assisted import endpoints, or copilot tool execution. All privileged finance and accounting operations must be authorized server-side per route and, where relevant, per record ownership with durable identifiers rather than non-unique display names. Separate from role drift, any source-controlled bearer token or boot-seeded admin password should be treated as an elevation-of-privilege vector because it collapses the authentication boundary altogether.
