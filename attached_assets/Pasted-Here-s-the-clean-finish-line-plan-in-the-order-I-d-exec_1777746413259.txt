@@ -1,0 +1,193 @@
+Here’s the clean finish-line plan, in the order I’d execute it so you finish properly, quickly, and without creating new mistakes.
+
+Current state
+
+The good news: the core accounting bridge is already in place. Expenses and bills both feed the accounting control layer through draft JEs, and the integrity sweep came back clean at 32/32 checks OK. The roadmap note after that sweep said the remaining work is: integrity report UI, regression pass, final reporting hardening if needed, then copilot reconciliation.  ￼
+
+Also, the Integrity Sweep detection layer is already shipped with the locked typed contract, sample IDs, admin-only API, and CLI. That means the next integrity task is the UI, not redoing detection.  ￼
+
+Finish the app in this order
+
+Phase 1 — Make integrity visible
+
+These are the next two tasks.
+
+1. Integrity Findings UI
+    Build the read-only admin snapshot page for integrity findings.
+    Done means:
+    * /admin/integrity exists
+    * it loads the live sweep snapshot
+    * findings are grouped by category
+    * sample IDs deep-link to expense, bill, JE, or draft detail when possible
+    * unknown IDs show raw value + copy action
+    * CSV export works
+    * empty/all-clear state is clean
+    * rerun is manual and read-only
+        This is already defined as Task #104.  ￼
+2. Guided integrity repair workflow
+    Keep this separate from the UI.
+    Done means:
+    * findings that are safely repairable get explicit repair actions
+    * every repair is transactional, idempotent, and audit-logged
+    * no silent auto-fixes
+    * unsafe findings stay manual-review only
+        The integrity notes already established the pattern for safe repairs: transactional, idempotent, audit-safe, and honest about system provenance.  ￼
+
+Phase 2 — Lock permissions and role boundaries
+
+Your own requirements already define the role model and minimum permissions. Finish enforcing them everywhere, not just in the UI. Roles include System Admin, Finance Admin, Finance Staff, Program Manager Approver, Staff Submitter, Read-Only Auditor, and Executive Read-Only. Submitters should only see and act on their own records; auditors are read-only; finance roles handle posting and close.  ￼
+
+3. Full permission matrix task
+    Done means:
+    * every page and endpoint has an owner role list
+    * frontend visibility matches backend enforcement
+    * submitters only see their own expenses/receipts/bills where intended
+    * finance/admin-only pages are locked properly
+    * report access is explicit, not accidental
+4. Authorization regression suite
+    Done means:
+    * admin / approver / finance staff / submitter / auditor test coverage exists
+    * unauthorized reads return safe responses
+    * unauthorized writes fail closed
+    * attachment, receipt, bill, expense, vendor, and program access are all covered
+
+Phase 3 — Prove the workflows end to end
+
+This is the biggest launch-confidence multiplier after integrity.
+
+5. Accounting workflow smoke suite
+    Create one end-to-end suite that covers:
+    * expense create → approve → accounting draft → submit → approve → post
+    * blocked expense → mapping fix → retry → draft created
+    * bill accrual draft path
+    * bill payment draft path
+    * manual JE workflow
+    * blocked queue retry / mark not applicable
+    * remediation happy path
+    * report drilldown to JE detail
+    * export happy path
+        The system already has the expected workflow rules for expenses, bills, and manual JE approval; this task proves they still work together.
+6. State-machine audit task
+    Done means every major object has a written allowed-transition table:
+    * expenses
+    * bills
+    * manual JE drafts
+    * posted JEs
+    * blocked queue items
+    * remediation entries
+    * not-applicable flows
+        This catches weird impossible states before users do.
+
+Phase 4 — Finish reporting trust
+
+The reports/export layer is close, but this is where you lock confidence.
+
+7. Reporting regression pass
+    Done means:
+    * report totals reconcile to ledger
+    * drilldowns reconcile to the clicked row
+    * exports use the same filters/date ranges as the screen
+    * empty/partial/error states are safe
+    * unmapped rows stay visible where appropriate
+        The roadmap note after the clean integrity sweep explicitly said final reporting hardening could likely fold into regression instead of becoming a giant separate effort.  ￼
+8. Scheduled export/editor parity
+    Finish small consistency items like URL-synced schedule-editor filters so shared preview links reproduce the same filter state. This kind of shareable-link consistency already exists elsewhere and should be mirrored for scheduled exports.  ￼
+
+Phase 5 — Launch hardening
+
+This is the “boring but important” finish line.
+
+9. Post-merge / CI reliability task
+    Done means:
+    * test runner is stable
+    * timeouts are sane
+    * no flaky DB cleanup races
+    * workflows recover cleanly after merges
+        You have already seen merge-gate instability from test timing and old fixture pollution. This task makes that stop being a recurring tax.
+10. Production safety pack
+    Done means:
+
+* backup / restore steps are documented and tested
+* migration / rollback steps are documented
+* env var checklist exists
+* health checks exist
+* seed/test-data cleanup procedure exists
+* admin emergency runbook exists
+    Your own implementation guide called out backup policy, export capability, auditability, and low-cost but production-safe hosting as requirements.
+
+11. Operator documentation + training
+    Done means:
+
+* finance users can learn the basic workflows fast
+* there is one short runbook for each major flow
+* blocked-item resolution is documented
+* month-end/report/export basics are documented
+    Your requirements already say staff should be trainable in under 2 hours for basic workflows.  ￼
+
+Phase 6 — AI copilot, but only after the above
+
+This should happen last for launch readiness.
+
+12. Copilot reconciliation foundation
+    Start with read-only / suggestion-only capabilities:
+
+* explain blocked items
+* suggest categorization or likely fixes
+* explain reports and JE effects
+* prepare audit support
+* flag missing info
+    The launch notes for the accounting agent already say it must launch in phases: explain + policy lookup first, then transaction review/document checks, then draft accounting memos/entries, then advanced automation later. It must never auto-post or finalize compliance without human review.  ￼
+
+13. Copilot UI integration
+    Add the assistant panel where it helps most:
+
+* blocked queues
+* expense detail
+* bill detail
+* report explanation
+* audit prep
+    The agent architecture and evaluation requirements are already written down; this is a deployment phase, not a blank-sheet design task.
+
+The tasks you can create now
+
+If you want this as a concrete task board, I’d create them exactly like this:
+
+1. Integrity Findings UI
+2. Guided Integrity Repair Workflow
+3. Permission Matrix + Enforcement Audit
+4. Authorization Regression Suite
+5. Accounting End-to-End Smoke Suite
+6. State-Machine Audit
+7. Reporting Regression / Parity Suite
+8. Scheduled Export Filter/Shareable-Link Parity
+9. Post-Merge / CI Reliability Hardening
+10. Production Safety Pack
+11. Operator Runbooks + Training Pack
+12. Copilot Reconciliation Foundation
+13. Copilot UI Integration
+
+What can wait until v2
+
+Do not let these delay launch:
+
+* autonomous AI actions
+* fancy anomaly dashboards
+* extra report visual polish
+* vendor/program override intelligence
+* advanced AP subledger features
+* multi-entity / multi-currency
+
+The shortest safe path
+
+If you want the absolute shortest path to “done enough to launch,” do these first:
+
+1. Integrity Findings UI
+2. Permission Matrix + Enforcement Audit
+3. Authorization Regression Suite
+4. Accounting End-to-End Smoke Suite
+5. Reporting Regression / Parity Suite
+6. Production Safety Pack
+
+That gets you to a system that is visible, controlled, testable, and operable.
+
+If you want, I can turn this into a paste-ready task brief for each item in the same tracked-task format you’ve been using.
