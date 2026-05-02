@@ -70,10 +70,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
       const key = `lh-tour-seen:${user.email.toLowerCase()}`;
       if (window.localStorage.getItem(key)) return;
       window.localStorage.setItem(key, new Date().toISOString());
+      // Auto-open the Help drawer to the 5-minute tour as the default
+      // landing for a brand-new user, AND show a one-time toast so the
+      // pointer is visible even after they close the drawer.
+      openHelp("index");
       toast({
         title: `Welcome, ${user.firstName ?? ""}`.trim() + "!",
         description:
-          "New here? Open the 5-minute tour from the Help item in the sidebar.",
+          "We opened the 5-minute tour for you. Reopen it any time from the Help item in the sidebar.",
         duration: 10_000,
       });
     } catch {
