@@ -74,14 +74,14 @@ export const TOOL_ROLE_SCOPES: Readonly<Record<string, ReadonlyArray<CopilotRole
   // Privileged record lookup: submitters are restricted to their own records via
   // the UI and must not be able to fetch arbitrary records through the copilot.
   get_current_record: ["admin", "approver"],
-  get_accounting_dimensions: ["admin", "approver", "submitter"],
+  get_accounting_dimensions: ["admin", "approver"],
   // Open-tasks, missing-receipts, and reconciliation status expose org-wide
   // accounting operations data that is gated behind the reports and month-end
   // screens — which submitters cannot access. Keep these admin/approver only.
   get_open_tasks: ["admin", "approver"],
   get_missing_receipts: ["admin", "approver"],
   get_reconciliation_status: ["admin", "approver"],
-  search_chart_of_accounts: ["admin", "approver", "submitter"],
+  search_chart_of_accounts: ["admin", "approver"],
   // Internal policy documents are admin-managed; searching them is likewise
   // restricted to admin and approver to match the document ingestion boundary.
   search_internal_policies: ["admin", "approver"],

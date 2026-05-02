@@ -1,22 +1,22 @@
 /**
- * Task #116 — Accounting Copilot Authorization
+ * Task #116 / Task #126 — Accounting Copilot Authorization
  *
  * Regression tests for the TOOL_ROLE_SCOPES access matrix.
  *
  * Verifies that:
- *   1. Submitters are denied the five sensitive tools that previously
- *      exposed privileged organization-wide accounting data:
+ *   1. Submitters are denied the seven sensitive tools that expose
+ *      privileged organization-wide accounting data:
  *        - get_current_record
  *        - get_open_tasks
  *        - get_missing_receipts
  *        - get_reconciliation_status
  *        - search_internal_policies
+ *        - get_accounting_dimensions  (Task #126: was incorrectly submitter-accessible)
+ *        - search_chart_of_accounts   (Task #126: was incorrectly submitter-accessible)
  *   2. Admin and approver are still allowed on each of those tools.
  *   3. Submitter access is preserved for the non-privileged tools
  *      that submitters legitimately need:
  *        - get_current_page_context
- *        - get_accounting_dimensions
- *        - search_chart_of_accounts
  *        - draft_memo
  *        - escalate_to_human
  *
@@ -33,12 +33,12 @@ const PRIVILEGED_TOOLS = [
   "get_missing_receipts",
   "get_reconciliation_status",
   "search_internal_policies",
+  "get_accounting_dimensions",
+  "search_chart_of_accounts",
 ] as const;
 
 const SUBMITTER_TOOLS = [
   "get_current_page_context",
-  "get_accounting_dimensions",
-  "search_chart_of_accounts",
   "draft_memo",
   "escalate_to_human",
 ] as const;

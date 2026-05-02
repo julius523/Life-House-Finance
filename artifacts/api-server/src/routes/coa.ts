@@ -603,7 +603,9 @@ router.get(
 // ---------------------------------------------------------------------------
 router.get(
   "/accounting/dashboard-status",
-  async (_req, res): Promise<void> => {
+  async (_req: Request, res: Response): Promise<void> => {
+    if (!requireAdminOrApprover(_req, res)) return;
+
     const today = new Date().toISOString().slice(0, 10);
     const [openPeriod] = await db
       .select()
