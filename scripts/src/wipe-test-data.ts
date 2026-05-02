@@ -220,67 +220,88 @@ async function countPostedJournalEntries(userIds: number[]): Promise<number> {
   return r[0]?.n ?? 0;
 }
 
-async function deleteOwned(
+async function deleteOwnedAndAudit(
+  users: { id: number; email: string }[],
   userIds: number[],
   emails: string[],
+  reason: string,
 ): Promise<Counts> {
+  // The deletion of every user-linked table AND the activity_log
+  // insert run in a single transaction. Either every row goes and the
+  // audit row is recorded, or nothing changes — never a partial wipe
+  // with no audit trail (or vice versa).
+  //
   // Order: child / FK-pointing tables first; tables that other tables
   // FK-reference go last. copilot_messages and copilot_tool_calls have
   // ON DELETE CASCADE from copilot_threads but we delete them
   // explicitly anyway so the deleted-row counts surface in the report.
-  const out: Counts = {};
-  const toolCalls = await db
-    .delete(copilotToolCallsTable)
-    .where(
-      sql`thread_id in (select id from copilot_threads where user_id = any(${userIds}::int[]))`,
-    );
-  out["copilot_tool_calls"] = toolCalls.rowCount ?? 0;
-  const messages = await db
-    .delete(copilotMessagesTable)
-    .where(
-      sql`thread_id in (select id from copilot_threads where user_id = any(${userIds}::int[]))`,
-    );
-  out["copilot_messages"] = messages.rowCount ?? 0;
-  const threads = await db
-    .delete(copilotThreadsTable)
-    .where(inArray(copilotThreadsTable.userId, userIds));
-  out["copilot_threads"] = threads.rowCount ?? 0;
-  const sourceLinks = await db
-    .delete(accountingSourceLinksTable)
-    .where(inArray(accountingSourceLinksTable.createdByUserId, userIds));
-  out["accounting_source_links"] = sourceLinks.rowCount ?? 0;
-  const schedules = await db
-    .delete(journalEntryExportSchedulesTable)
-    .where(
-      inArray(journalEntryExportSchedulesTable.createdByUserId, userIds),
-    );
-  out["journal_entry_export_schedules"] = schedules.rowCount ?? 0;
-  const drafts = await db
-    .delete(manualJournalEntryDraftsTable)
-    .where(
-      or(
-        inArray(manualJournalEntryDraftsTable.createdByUserId, userIds),
-        inArray(manualJournalEntryDraftsTable.submittedByUserId, userIds),
-      )!,
-    );
-  out["manual_journal_entry_drafts"] = drafts.rowCount ?? 0;
-  const receipts = await db
-    .delete(receiptsTable)
-    .where(inArray(receiptsTable.uploadedBy, userIds));
-  out["receipts"] = receipts.rowCount ?? 0;
-  const expenses = await db
-    .delete(expensesTable)
-    .where(inArray(expensesTable.submittedByEmail, emails));
-  out["expenses"] = expenses.rowCount ?? 0;
-  const bills = await db
-    .delete(billsTable)
-    .where(inArray(billsTable.submittedByEmail, emails));
-  out["bills"] = bills.rowCount ?? 0;
-  const notifications = await db
-    .delete(notificationsTable)
-    .where(inArray(notificationsTable.userId, userIds));
-  out["notifications"] = notifications.rowCount ?? 0;
-  return out;
+  return db.transaction(async (tx) => {
+    const out: Counts = {};
+    const toolCalls = await tx
+      .delete(copilotToolCallsTable)
+      .where(
+        sql`thread_id in (select id from copilot_threads where user_id = any(${userIds}::int[]))`,
+      );
+    out["copilot_tool_calls"] = toolCalls.rowCount ?? 0;
+    const messages = await tx
+      .delete(copilotMessagesTable)
+      .where(
+        sql`thread_id in (select id from copilot_threads where user_id = any(${userIds}::int[]))`,
+      );
+    out["copilot_messages"] = messages.rowCount ?? 0;
+    const threads = await tx
+      .delete(copilotThreadsTable)
+      .where(inArray(copilotThreadsTable.userId, userIds));
+    out["copilot_threads"] = threads.rowCount ?? 0;
+    const sourceLinks = await tx
+      .delete(accountingSourceLinksTable)
+      .where(inArray(accountingSourceLinksTable.createdByUserId, userIds));
+    out["accounting_source_links"] = sourceLinks.rowCount ?? 0;
+    const schedules = await tx
+      .delete(journalEntryExportSchedulesTable)
+      .where(
+        inArray(journalEntryExportSchedulesTable.createdByUserId, userIds),
+      );
+    out["journal_entry_export_schedules"] = schedules.rowCount ?? 0;
+    const drafts = await tx
+      .delete(manualJournalEntryDraftsTable)
+      .where(
+        or(
+          inArray(manualJournalEntryDraftsTable.createdByUserId, userIds),
+          inArray(manualJournalEntryDraftsTable.submittedByUserId, userIds),
+        )!,
+      );
+    out["manual_journal_entry_drafts"] = drafts.rowCount ?? 0;
+    const receipts = await tx
+      .delete(receiptsTable)
+      .where(inArray(receiptsTable.uploadedBy, userIds));
+    out["receipts"] = receipts.rowCount ?? 0;
+    const expenses = await tx
+      .delete(expensesTable)
+      .where(inArray(expensesTable.submittedByEmail, emails));
+    out["expenses"] = expenses.rowCount ?? 0;
+    const bills = await tx
+      .delete(billsTable)
+      .where(inArray(billsTable.submittedByEmail, emails));
+    out["bills"] = bills.rowCount ?? 0;
+    const notifications = await tx
+      .delete(notificationsTable)
+      .where(inArray(notificationsTable.userId, userIds));
+    out["notifications"] = notifications.rowCount ?? 0;
+
+    await tx.insert(activityLogTable).values({
+      type: "wipe_test_data",
+      description: `wipe-test-data: deleted rows for ${users.length} test user(s). Reason: ${reason}`,
+      actor: "wipe-test-data-script",
+      actorUserId: null,
+      metadata: {
+        reason,
+        matchedUsers: users.map((u) => ({ id: u.id, email: u.email })),
+        deletedCounts: out,
+      },
+    });
+    return out;
+  });
 }
 
 function printCounts(label: string, counts: Counts): void {
@@ -369,22 +390,15 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  const deleted = await deleteOwned(userIds, emails);
-
-  await db.insert(activityLogTable).values({
-    type: "wipe_test_data",
-    description: `wipe-test-data: deleted rows for ${users.length} test user(s). Reason: ${args.reason}`,
-    actor: "wipe-test-data-script",
-    actorUserId: null,
-    metadata: {
-      reason: args.reason,
-      matchedUsers: users.map((u) => ({ id: u.id, email: u.email })),
-      deletedCounts: deleted,
-    },
-  });
+  const deleted = await deleteOwnedAndAudit(
+    users,
+    userIds,
+    emails,
+    args.reason,
+  );
 
   printCounts("\nDeleted-row counts:", deleted);
-  console.log("\nactivity_log entry recorded.");
+  console.log("\nactivity_log entry recorded (same transaction).");
   return 0;
 }
 
