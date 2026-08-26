@@ -32,6 +32,7 @@ const OPTIONAL_ENV_VARS = [
   "ACCOUNTING_AGENT_MODEL",
   "REPLIT_DEV_DOMAIN",
   "SEED_DEV_USERS",
+  "MASTER_WIPE_PASSWORD",
 ] as const;
 
 export type RequiredEnvVar = (typeof REQUIRED_ENV_VARS)[number];

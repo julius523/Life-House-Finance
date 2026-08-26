@@ -31,7 +31,13 @@ import {
   resendNotificationEmail,
 } from "../lib/notifications";
 
-const MASTER_WIPE_PASSWORD = "Leg@ci2433!";
+// Confirmation password for the destructive wipe/restore endpoints below,
+// on top of the existing requireAuth+requireRole("admin") gate. Must come
+// from the environment — never hardcode this, it guards data-loss actions.
+function getMasterWipePassword(): string | undefined {
+  const v = process.env["MASTER_WIPE_PASSWORD"];
+  return v && v.trim().length > 0 ? v : undefined;
+}
 
 const router: IRouter = Router();
 
@@ -130,7 +136,8 @@ router.post("/admin/wipe-data", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Master password is required" });
     return;
   }
-  if (parsed.data.masterPassword !== MASTER_WIPE_PASSWORD) {
+  const masterWipePassword = getMasterWipePassword();
+  if (!masterWipePassword || parsed.data.masterPassword !== masterWipePassword) {
     res.status(403).json({ error: "Incorrect master password" });
     return;
   }
@@ -162,7 +169,8 @@ router.post("/admin/restore-day", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Master password is required" });
     return;
   }
-  if (parsed.data.masterPassword !== MASTER_WIPE_PASSWORD) {
+  const masterWipePassword = getMasterWipePassword();
+  if (!masterWipePassword || parsed.data.masterPassword !== masterWipePassword) {
     res.status(403).json({ error: "Incorrect master password" });
     return;
   }
