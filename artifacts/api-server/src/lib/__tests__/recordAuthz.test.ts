@@ -520,6 +520,7 @@ test("canMutateExpense: submitter blocked once status leaves mutable set", () =>
         status,
         submittedBy: "Sub A",
         submittedByEmail: "a@x.com",
+        accountingStatus: "pending",
       }),
       true,
       `expected mutable for ${status}`,
@@ -531,6 +532,7 @@ test("canMutateExpense: submitter blocked once status leaves mutable set", () =>
         status,
         submittedBy: "Sub A",
         submittedByEmail: "a@x.com",
+        accountingStatus: "pending",
       }),
       false,
       `expected locked for ${status}`,
@@ -553,12 +555,36 @@ test("canMutateExpense: approver does NOT get a blanket override", () => {
       status: "submitted",
       submittedBy: "Someone Else",
       submittedByEmail: "x@x.com",
+      accountingStatus: "pending",
     }),
     false,
   );
 });
 
-test("canMutateBill: admin always passes regardless of status", () => {
+test("canMutateExpense: locked once posted, even for admin", () => {
+  // A posted journal entry is immutable; the expense record must stay
+  // in lockstep with it, so direct edits are blocked for everyone once
+  // accountingStatus flips to 'posted'. Corrections go through a
+  // reversal + new entry instead.
+  const admin = {
+    id: 1,
+    email: "admin@x.com",
+    firstName: "A",
+    lastName: "D",
+    role: "admin" as const,
+  };
+  assert.equal(
+    canMutateExpense(admin, {
+      status: "approved",
+      submittedBy: "anyone",
+      submittedByEmail: "anyone@x.com",
+      accountingStatus: "posted",
+    }),
+    false,
+  );
+});
+
+test("canMutateBill: admin always passes regardless of workflow status", () => {
   const admin = {
     id: 1,
     email: "admin@x.com",
@@ -572,10 +598,44 @@ test("canMutateBill: admin always passes regardless of status", () => {
         status,
         submittedBy: "anyone",
         submittedByEmail: "anyone@x.com",
+        accountingStatus: "pending",
+        accountingPaymentStatus: "pending",
       }),
       true,
     );
   }
+});
+
+test("canMutateBill: locked once either accounting bridge is posted, even for admin", () => {
+  const admin = {
+    id: 1,
+    email: "admin@x.com",
+    firstName: "A",
+    lastName: "D",
+    role: "admin" as const,
+  };
+  assert.equal(
+    canMutateBill(admin, {
+      status: "approved",
+      submittedBy: "anyone",
+      submittedByEmail: "anyone@x.com",
+      accountingStatus: "posted",
+      accountingPaymentStatus: "pending",
+    }),
+    false,
+    "expected locked when accrual is posted",
+  );
+  assert.equal(
+    canMutateBill(admin, {
+      status: "approved",
+      submittedBy: "anyone",
+      submittedByEmail: "anyone@x.com",
+      accountingStatus: "pending",
+      accountingPaymentStatus: "posted",
+    }),
+    false,
+    "expected locked when payment is posted",
+  );
 });
 
 test("canReadReceipt: uploader always sees their own; otherwise via linked record", () => {

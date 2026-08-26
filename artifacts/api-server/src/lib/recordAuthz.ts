@@ -62,6 +62,16 @@ export type BillLike = {
   submittedByEmail: string | null;
 };
 
+// Narrower additions used only by canMutateExpense/canMutateBill — kept
+// off the base ExpenseLike/BillLike types so callers of the read-side
+// helpers (isOwnExpense, canReadExpense, etc.) aren't forced to supply
+// accounting-status fields they don't need.
+export type MutableExpenseLike = ExpenseLike & { accountingStatus: string };
+export type MutableBillLike = BillLike & {
+  accountingStatus: string;
+  accountingPaymentStatus: string;
+};
+
 export type ReceiptLike = {
   uploadedBy: number | null;
   linkedExpenseId: number | null;
@@ -118,22 +128,38 @@ export function canReadBill(user: AuthUser, bill: BillLike): boolean {
 }
 
 /**
- * Submitter MUTATION authz for an expense. Admins always pass.
+ * Submitter MUTATION authz for an expense. Admins always pass, EXCEPT
+ * once a journal entry has been posted from this expense — at that
+ * point the expense record and the GL must stay in lockstep the same
+ * way posted journal entries themselves are immutable, so nobody
+ * (including admins) may edit it directly here. A correction goes
+ * through a reversal + new entry instead, not a silent edit that would
+ * leave the expense showing a different amount than what's in the GL.
  * Approvers do NOT get a blanket edit override here; their workflow
  * actions live on dedicated routes (approve / reject / regenerate /
  * mark-not-applicable) that are already gated by `requireRole`.
  */
 export function canMutateExpense(
   user: AuthUser,
-  expense: ExpenseLike,
+  expense: MutableExpenseLike,
 ): boolean {
+  if (expense.accountingStatus === "posted") return false;
   if (user.role === "admin") return true;
   if (!isOwnExpense(user, expense)) return false;
   return MUTABLE_EXPENSE_STATUSES.has(expense.status as ExpenseStatus);
 }
 
-/** Same as `canMutateExpense`, applied to a bill row. */
-export function canMutateBill(user: AuthUser, bill: BillLike): boolean {
+/**
+ * Same as `canMutateExpense`, applied to a bill row. Bills carry two
+ * independent GL bridges (accrual and payment) — either one being
+ * posted is enough to lock the bill from direct edits.
+ */
+export function canMutateBill(user: AuthUser, bill: MutableBillLike): boolean {
+  if (
+    bill.accountingStatus === "posted" ||
+    bill.accountingPaymentStatus === "posted"
+  )
+    return false;
   if (user.role === "admin") return true;
   if (!isOwnBill(user, bill)) return false;
   return MUTABLE_BILL_STATUSES.has(bill.status as BillStatus);
