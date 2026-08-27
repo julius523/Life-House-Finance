@@ -49,3 +49,9 @@ Thumbs.db
 .local/
 session_cookie.txt
 cookies.txt
+
+# Env files and Neon CLI workspace-link state (org/project/branch IDs)
+.env
+.env.*
+!.env.example
+.neon
