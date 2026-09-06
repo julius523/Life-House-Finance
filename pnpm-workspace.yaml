@@ -37,6 +37,15 @@ minimumReleaseAgeExclude:
   - '@replit/*'
   - stripe-replit-sync
 
+# pnpm 12's newer build-approval gate doesn't honor onlyBuiltDependencies
+# alone -- confirmed live 2026-09-06, a fresh `pnpm install` still hit
+# ERR_PNPM_IGNORED_BUILDS for esbuild despite it being listed below.
+# allowBuilds is the persistent equivalent of an interactive
+# `pnpm approve-builds` (which only affects local pnpm state, not
+# anything a fresh clone/reset would carry).
+allowBuilds:
+  esbuild: true
+
 onlyBuiltDependencies:
   - '@swc/core'
   - esbuild
