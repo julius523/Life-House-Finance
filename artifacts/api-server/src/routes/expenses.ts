@@ -528,7 +528,46 @@ router.delete("/expenses/:id", requireRole("admin"), async (req, res): Promise<v
     res.status(400).json({ error: "Invalid id" });
     return;
   }
+
+  // Same immutability rule as PUT /expenses/:id (canMutateExpense already
+  // returns false for posted records regardless of role) — confirmed live
+  // 2026-09-06 this route had no such check at all: an admin could delete
+  // an expense after its journal entry had already posted to the GL,
+  // leaving a posted entry referencing a source record that no longer
+  // exists. A correction goes through a reversal + new entry instead.
+  const [existing] = await db
+    .select()
+    .from(expensesTable)
+    .where(eq(expensesTable.id, parsed.data.id));
+  if (!existing) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (!canMutateExpense(req.authUser!, existing)) {
+    res.status(403).json({
+      error:
+        "This expense has already posted to the general ledger and cannot be deleted. Reverse the journal entry instead.",
+      code: "EXPENSE_NOT_EDITABLE",
+    });
+    return;
+  }
+
   await db.delete(expensesTable).where(eq(expensesTable.id, parsed.data.id));
+
+  // This route previously logged nothing at all on delete — unlike every
+  // other mutation in this file, a deleted expense left no activity_log
+  // trail of who removed it or when.
+  const deleter = req.authUser!;
+  await db.insert(activityLogTable).values({
+    type: "expense_deleted",
+    description: `Expense #${existing.id} deleted`,
+    actor: `${deleter.firstName} ${deleter.lastName}`.trim() || deleter.email,
+    actorUserId: deleter.id,
+    amount: String(existing.amount),
+    referenceId: existing.id,
+    referenceType: "expense",
+  });
+
   res.status(204).send();
 });
 

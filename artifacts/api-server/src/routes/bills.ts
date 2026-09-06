@@ -835,6 +835,29 @@ router.delete(
       res.status(400).json({ error: "Invalid id" });
       return;
     }
+
+    // Same immutability rule as PUT /bills/:id — confirmed live 2026-09-06
+    // this route had no check at all: a bill could be deleted after either
+    // of its two GL bridges (accrual or payment) had already posted,
+    // leaving a posted entry referencing a source record that no longer
+    // exists. A correction goes through a reversal + new entry instead.
+    const [existingBill] = await db
+      .select()
+      .from(billsTable)
+      .where(eq(billsTable.id, id));
+    if (!existingBill) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    if (!canMutateBill(req.authUser!, existingBill)) {
+      res.status(403).json({
+        error:
+          "This bill has already posted to the general ledger and cannot be deleted. Reverse the journal entry instead.",
+        code: "BILL_NOT_EDITABLE",
+      });
+      return;
+    }
+
     await db
       .update(transactionsTable)
       .set({ matchedBillId: null, status: "unmatched" })
@@ -859,7 +882,7 @@ router.delete(
     }
 
     await db.insert(activityLogTable).values({
-      type: "bill_created",
+      type: "bill_deleted",
       description: `Bill #${id} deleted`,
       actor: req.authUser
         ? `${req.authUser.firstName} ${req.authUser.lastName}`
