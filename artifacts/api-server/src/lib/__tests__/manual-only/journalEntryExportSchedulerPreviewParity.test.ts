@@ -20,6 +20,9 @@
  * Coverage spans daily/weekly/monthly cadences, summary vs.
  * include-lines exports, and source/status filter variations so the
  * comparison touches every conditional branch in `buildScheduleCsv`.
+ *
+ * MOVED to manual-only/ 2026-09-07 for the same reason as
+ * postedEntriesImmutable.test.ts — see refuseProductionDb.ts.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -43,7 +46,12 @@ import {
   buildScheduleCsv,
   runSchedule,
   type ScheduleCsvConfig,
-} from "../journalEntryExportScheduler";
+} from "../../journalEntryExportScheduler";
+import { refuseIfProductionDatabase } from "./refuseProductionDb";
+
+// This suite also disables the posted-entry immutability triggers mid-test
+// (see refuseProductionDb.ts) — same reason it lives in manual-only/ now.
+refuseIfProductionDatabase();
 
 const TAG = `t79-${process.pid}-${Date.now()}`;
 

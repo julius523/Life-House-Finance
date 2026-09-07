@@ -16,6 +16,9 @@
  * Postgres via the existing db pool and assert HTTP status + body
  * shape. Cleanup disables the immutability triggers from Task #67 the
  * same way postedEntriesImmutable.test.ts does.
+ *
+ * MOVED to manual-only/ 2026-09-07 for the same reason as
+ * postedEntriesImmutable.test.ts — see refuseProductionDb.ts.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -34,9 +37,12 @@ import {
   journalEntryLinesTable,
   activityLogTable,
 } from "@workspace/db";
-import { ensureSchemaConstraints } from "../ensureSchema";
-import { encodeSession } from "../auth";
-import remediationRouter from "../../routes/remediation";
+import { ensureSchemaConstraints } from "../../ensureSchema";
+import { encodeSession } from "../../auth";
+import remediationRouter from "../../../routes/remediation";
+import { refuseIfProductionDatabase } from "./refuseProductionDb";
+
+refuseIfProductionDatabase();
 
 const TAG = `t68dlg-${process.pid}-${Date.now()}`;
 const TODAY = new Date().toISOString().slice(0, 10);

@@ -24,6 +24,23 @@
  * Cleanup intentionally bypasses the immutability triggers via
  * `ALTER TABLE ... DISABLE TRIGGER` so the test leaves no residue. The
  * triggers are re-enabled in a finally block even if assertions throw.
+ *
+ * MOVED OUT OF THE AUTO-RUN SUITE 2026-09-07: `npm run test` (api-server)
+ * globs `src/lib/__tests__/*.test.ts`, which does NOT recurse into this
+ * `manual-only/` subdirectory, so this file no longer runs on every deploy.
+ * Confirmed live: this suite had been running on every single deploy
+ * against the real production database — no dedicated test database has
+ * ever existed for this project — meaning production's posted-entry
+ * immutability triggers were disabled and re-enabled as a side effect of
+ * every deploy's test step. That's a real risk window (a crash between the
+ * DISABLE and the re-enabling `finally` would leave the live GL
+ * unprotected), not a hypothetical one. Provisioning a real, separate test
+ * database (e.g. a distinct Neon branch) is the actual fix and needs a
+ * human with Neon account access — until then, this suite should only be
+ * run by hand, deliberately, with DATABASE_URL pointed at that dedicated
+ * database: `DATABASE_URL=<test-db-url> tsx --test src/lib/__tests__/manual-only/postedEntriesImmutable.test.ts`.
+ * The guard just below refuses to run at all if DATABASE_URL still points
+ * at the known production host, as a hard floor under human error.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -39,8 +56,9 @@ import {
   journalEntryLinesTable,
   activityLogTable,
 } from "@workspace/db";
-import { ensureSchemaConstraints } from "../ensureSchema";
-import { reverseJournalEntry, type PostingActor } from "../postingService";
+import { ensureSchemaConstraints } from "../../ensureSchema";
+import { reverseJournalEntry, type PostingActor } from "../../postingService";
+import { refuseIfProductionDatabase } from "./refuseProductionDb";
 
 const TAG = `t67-${process.pid}-${Date.now()}`;
 
@@ -55,6 +73,21 @@ const createdJeIds: number[] = [];
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+// No dedicated test database exists yet for this project (tracked
+// separately — needs a real Neon branch provisioned, which requires
+// account access this environment doesn't have) — every test run,
+// including this one, currently shares DATABASE_URL with production. This
+// suite is uniquely dangerous among the test files here: it disables the
+// posted-entry immutability triggers with `ALTER TABLE ... DISABLE
+// TRIGGER` and only re-enables them in a `finally`. If this file were ever
+// run by hand, or a future change broke that finally block, the real
+// general ledger's core audit guarantee would be left unprotected. Refusing
+// to run at all against the one known-production connection string is a
+// hard floor, not a substitute for the real fix (an actually separate
+// database) — it just makes the worst-case outcome of not having one
+// impossible for this specific host until that's provisioned.
+refuseIfProductionDatabase();
 
 before(async () => {
   // Make sure the lock triggers are installed in this database. Idempotent.

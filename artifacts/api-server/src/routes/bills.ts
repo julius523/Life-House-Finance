@@ -476,6 +476,26 @@ router.post(
       return;
     }
 
+    const [existingForApprove] = await db
+      .select()
+      .from(billsTable)
+      .where(eq(billsTable.id, idParsed.data.id));
+    if (!existingForApprove) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    // No status-transition guard existed here before — approve could be
+    // called on any bill regardless of its current status, silently
+    // re-running accrual draft generation and logging a duplicate
+    // "bill_approved" activity entry each time.
+    if (existingForApprove.status !== "submitted") {
+      res.status(409).json({
+        error: `Only a submitted bill can be approved (current status: ${existingForApprove.status})`,
+        code: "BILL_NOT_SUBMITTED",
+      });
+      return;
+    }
+
     const [bill] = await db
       .update(billsTable)
       .set({ status: "approved", approvedBy: bodyParsed.data.approvedBy })
@@ -706,6 +726,23 @@ router.post(
       ? `${req.authUser.firstName} ${req.authUser.lastName}`
       : "Finance User";
 
+    const [existingForReject] = await db
+      .select()
+      .from(billsTable)
+      .where(eq(billsTable.id, id));
+    if (!existingForReject) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    // Same missing guard as approve above.
+    if (existingForReject.status !== "submitted") {
+      res.status(409).json({
+        error: `Only a submitted bill can be rejected (current status: ${existingForReject.status})`,
+        code: "BILL_NOT_SUBMITTED",
+      });
+      return;
+    }
+
     const [bill] = await db
       .update(billsTable)
       .set({ status: newStatus, rejectionReason: reason })
@@ -717,7 +754,10 @@ router.post(
     }
 
     await db.insert(activityLogTable).values({
-      type: "bill_created",
+      // Was mislabeled "bill_created" — same class of bug already fixed on
+      // the delete route (see task #90's fix); rejecting a bill was being
+      // logged in the activity feed as if a new bill had just been created.
+      type: "bill_rejected",
       description:
         action === "send_back"
           ? `Bill sent back for correction: ${reason}`
@@ -758,7 +798,7 @@ router.post(
   },
 );
 
-router.post("/bills/:id/resubmit", async (req, res): Promise<void> => {
+router.post("/bills/:id/resubmit", requireRole("admin", "approver", "submitter"), async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isInteger(id)) {
     res.status(400).json({ error: "Invalid id" });

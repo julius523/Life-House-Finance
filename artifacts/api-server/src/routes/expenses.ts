@@ -583,6 +583,26 @@ router.post("/expenses/:id/approve", requireRole("admin", "approver"), async (re
     return;
   }
 
+  const [existingForApprove] = await db
+    .select()
+    .from(expensesTable)
+    .where(eq(expensesTable.id, idParsed.data.id));
+  if (!existingForApprove) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  // No status-transition guard existed here before — approve could be
+  // called on a draft, an already-approved, or an already-rejected expense
+  // with no error, silently re-running the accounting draft generation and
+  // logging a duplicate "expense_approved" activity entry each time.
+  if (existingForApprove.status !== "submitted") {
+    res.status(409).json({
+      error: `Only a submitted expense can be approved (current status: ${existingForApprove.status})`,
+      code: "EXPENSE_NOT_SUBMITTED",
+    });
+    return;
+  }
+
   const [expense] = await db
     .update(expensesTable)
     .set({
@@ -712,6 +732,25 @@ router.post("/expenses/:id/reject", requireRole("admin", "approver"), async (req
 
   const action = bodyParsed.data.action ?? "close";
   const newStatus = action === "send_back" ? "needs_correction" : "rejected";
+
+  const [existingForReject] = await db
+    .select()
+    .from(expensesTable)
+    .where(eq(expensesTable.id, idParsed.data.id));
+  if (!existingForReject) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  // Same missing guard as approve above — an already-approved (possibly
+  // already posted to the GL) or already-rejected expense could be
+  // rejected again with no error.
+  if (existingForReject.status !== "submitted") {
+    res.status(409).json({
+      error: `Only a submitted expense can be rejected (current status: ${existingForReject.status})`,
+      code: "EXPENSE_NOT_SUBMITTED",
+    });
+    return;
+  }
 
   const [expense] = await db
     .update(expensesTable)
