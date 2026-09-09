@@ -15,8 +15,10 @@
  *      style 500, and NOT a fall-through to the cookie path).
  *   5. With INTEGRATION_API_KEY temporarily unset, a Bearer attempt is
  *      rejected with 401 — bearer auth fails closed, never opens up.
- *   6. PUT /credits/:id with Bearer is rejected with 403 (writes other
- *      than POST /credits + POST /receipts are admin/approver-only).
+ *   6. PUT /credits/:id with Bearer succeeds (200) on a credit the
+ *      service role created itself (isServiceCreatedRecord), and is
+ *      rejected with 403 on one entered manually by staff — service may
+ *      only update its own automation-created rows, never a human's.
  *   7. DELETE /credits/:id with Bearer is rejected with 403.
  *   8. POST /vendors with Bearer is rejected with 403 (entire vendors
  *      surface is closed to service callers).
@@ -203,17 +205,20 @@ test("Bearer is rejected with 401 when INTEGRATION_API_KEY is unset", async () =
   }
 });
 
-test("PUT /credits/:id with Bearer is rejected (403) — service is read+POST only on credits", async () => {
-  // Need an existing credit row id. Use the one we created above; if
-  // that test was filtered out, fall back to inserting one inline so
-  // the assertion remains meaningful.
+test("PUT /credits/:id with Bearer succeeds (200) on a credit the service role created itself", async () => {
+  // seededCreditIds[0] was created by the "POST /credits with Bearer"
+  // test above — a genuine service-created row (submittedBy carries the
+  // "Automation: <source>" marker), so the service role updating it is
+  // exactly the allowed case.
   let id = seededCreditIds[0];
   if (id === undefined) {
-    const [c] = await db
-      .insert(creditsTable)
-      .values({ source: `${TAG}-inline`, amount: "1", status: "pipeline" })
-      .returning();
-    id = c!.id;
+    const created = await fetch(`${baseUrl}/api/credits`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ source: `${TAG}-inline`, amount: 1, status: "pipeline" }),
+    });
+    const body = (await created.json()) as { credit: { id: number } };
+    id = body.credit.id;
     seededCreditIds.push(id);
   }
   const res = await fetch(`${baseUrl}/api/credits/${id}`, {
@@ -221,7 +226,24 @@ test("PUT /credits/:id with Bearer is rejected (403) — service is read+POST on
     headers: authHeaders(),
     body: JSON.stringify({ amount: 99 }),
   });
-  assert.equal(res.status, 403, `expected 403 on service PUT /credits, got ${res.status}`);
+  assert.equal(res.status, 200, `expected 200 on service PUT of its own credit, got ${res.status}`);
+});
+
+test("PUT /credits/:id with Bearer is rejected (403) on a manually-entered credit", async () => {
+  // Inserted directly (no submittedBy marker) to simulate a credit a
+  // human entered via the UI — the service role must never be able to
+  // touch this one, even though it CAN touch its own (see test above).
+  const [manual] = await db
+    .insert(creditsTable)
+    .values({ source: `${TAG}-manual`, amount: "1", status: "pipeline" })
+    .returning();
+  seededCreditIds.push(manual!.id);
+  const res = await fetch(`${baseUrl}/api/credits/${manual!.id}`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify({ amount: 99 }),
+  });
+  assert.equal(res.status, 403, `expected 403 on service PUT of a manual credit, got ${res.status}`);
 });
 
 test("DELETE /credits/:id with Bearer is rejected (403) — admin-only", async () => {
