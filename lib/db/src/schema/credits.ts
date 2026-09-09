@@ -22,6 +22,12 @@ export const creditsTable = pgTable("credits", {
   status: text("status").notNull().default("pipeline"),
   notes: text("notes"),
   submittedBy: text("submitted_by"),
+  // Idempotency key for automation callers (e.g. "lifehouse-claim:<uuid>")
+  // — lets an external system upsert the same logical credit (created
+  // once, status updated later as it moves through its own pipeline)
+  // instead of creating a duplicate row on every sync. Null for
+  // manually-entered credits.
+  externalRef: text("external_ref").unique(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

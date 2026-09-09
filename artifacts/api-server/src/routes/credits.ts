@@ -17,7 +17,11 @@ const router: IRouter = Router();
 // through the requireRole gate and receive 403.
 router.use("/credits", requireAuth, requireRole("admin", "approver", "service"));
 router.use("/credit-summary", requireAuth, requireRole("admin", "approver", "service"));
-router.put("/credits/:id", requireRole("admin", "approver"));
+// PUT is intentionally NOT role-gated at the router level (unlike DELETE
+// below) — a service caller is allowed to update a credit, but only one
+// it created itself (isServiceCreatedRecord, checked inside the handler
+// against the target row). admin/approver may update any credit, same as
+// before. See the handler for the actual ownership check.
 router.delete("/credits/:id", requireRole("admin"));
 
 const StatusEnum = z.enum(CREDIT_STATUSES);
@@ -31,6 +35,7 @@ const CreateCreditBody = z.object({
   status: StatusEnum.default("pipeline"),
   notes: z.string().optional().nullable(),
   submittedBy: z.string().optional().nullable(),
+  externalRef: z.string().optional().nullable(),
 });
 
 function formatCredit(
@@ -57,6 +62,7 @@ function formatCredit(
     status: c.status,
     notes: c.notes ?? null,
     submittedBy: c.submittedBy ?? null,
+    externalRef: c.externalRef ?? null,
     entrySource,
     createdAt: c.createdAt.toISOString(),
   };
@@ -97,6 +103,40 @@ router.post("/credits", async (req, res): Promise<void> => {
     callerRole === "service"
       ? `${AUTOMATION_DISPLAY_NAME}: ${readApiSource(req)}`
       : (d.submittedBy || null);
+
+  // Upsert-by-externalRef: an automation caller re-syncing the same
+  // logical record (e.g. a claim whose status just changed) updates the
+  // credit it already created instead of piling up a duplicate on every
+  // sync. Only meaningful for service-role callers with a ref — manual UI
+  // submissions never send one.
+  if (d.externalRef) {
+    const [existing] = await db.select().from(creditsTable).where(eq(creditsTable.externalRef, d.externalRef));
+    if (existing) {
+      if (!isServiceCreatedRecord(existing)) {
+        res.status(409).json({ error: "externalRef already used by a manually-entered credit" });
+        return;
+      }
+      const [updated] = await db
+        .update(creditsTable)
+        .set({
+          source: d.source,
+          programId: d.programId ?? null,
+          amount: String(d.amount),
+          expectedDate: d.expectedDate || null,
+          receivedDate: d.receivedDate || null,
+          status: d.status,
+          notes: d.notes || null,
+        })
+        .where(eq(creditsTable.id, existing.id))
+        .returning();
+      const names = await programNameMap();
+      res.json({
+        credit: formatCredit(updated!, updated!.programId ? names.get(updated!.programId) ?? null : null),
+      });
+      return;
+    }
+  }
+
   const [created] = await db
     .insert(creditsTable)
     .values({
@@ -108,6 +148,7 @@ router.post("/credits", async (req, res): Promise<void> => {
       status: d.status,
       notes: d.notes || null,
       submittedBy,
+      externalRef: d.externalRef || null,
     })
     .returning();
   if (!created) {
@@ -132,6 +173,22 @@ router.put("/credits/:id", async (req, res): Promise<void> => {
     return;
   }
   const d = parsed.data;
+
+  // A service caller may only update a credit it created itself — never
+  // one entered manually by staff. admin/approver may update any credit,
+  // unchanged from before this check existed.
+  if (req.authUser?.role === "service") {
+    const [existing] = await db.select().from(creditsTable).where(eq(creditsTable.id, id));
+    if (!existing) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    if (!isServiceCreatedRecord(existing)) {
+      res.status(403).json({ error: "Service role may only update credits it created" });
+      return;
+    }
+  }
+
   const updates: Record<string, unknown> = {};
   if (d.source !== undefined) updates["source"] = d.source;
   if (d.programId !== undefined) updates["programId"] = d.programId;
